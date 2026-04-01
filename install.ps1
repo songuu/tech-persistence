@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Claude Code 技术沉淀系统 v2 - Windows PowerShell 安装脚本
 .EXAMPLE
@@ -51,7 +51,7 @@ function Build-SettingsJson {
     $hooksPath = (Join-Path $ClaudeHome "skills/continuous-learning/hooks") -replace '\\', '/'
 
     $obj = [ordered]@{
-        '$schema' = 'https://code.claude.com/schemas/settings.json'
+        '$schema' = 'https://json.schemastore.org/claude-code-settings.json'
         autoMemoryEnabled = $true
         hooks = [ordered]@{
             SessionStart = @(
