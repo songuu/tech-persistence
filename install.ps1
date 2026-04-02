@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Claude Code 技术沉淀系统 v2 - Windows PowerShell 安装脚本
 .EXAMPLE
