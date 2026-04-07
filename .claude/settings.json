@@ -7,55 +7,5 @@
       "Write(.claude/**)",
       "Write(docs/tech-learnings/**)"
     ]
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"%USERPROFILE%/.claude/skills/continuous-learning/hooks/inject-context.js\" 2>nul || exit /b 0",
-            "timeout": 5000
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"%USERPROFILE%/.claude/skills/continuous-learning/hooks/observe.js\" pre 2>nul || exit /b 0",
-            "timeout": 2000
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"%USERPROFILE%/.claude/skills/continuous-learning/hooks/observe.js\" post 2>nul || exit /b 0",
-            "timeout": 2000
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"%USERPROFILE%/.claude/skills/continuous-learning/hooks/evaluate-session.js\" 2>nul || exit /b 0",
-            "timeout": 10000
-          }
-        ]
-      }
-    ]
   }
 }

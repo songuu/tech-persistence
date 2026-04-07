@@ -179,6 +179,13 @@ function detectPatterns(observations) {
   return patterns;
 }
 
+// ─── YAML 安全转义 ───
+function yamlEscape(str) {
+  if (typeof str !== 'string') return '""';
+  // 移除换行符，转义双引号，截断后包裹在双引号内
+  return '"' + str.replace(/[\r\n]+/g, ' ').replace(/"/g, '\\"') + '"';
+}
+
 // ─── 本能 (Instinct) 管理 ───
 function loadInstincts(instinctDir) {
   if (!fs.existsSync(instinctDir)) return [];
@@ -223,8 +230,14 @@ function createOrUpdateInstinct(instinctDir, pattern) {
       /last_seen:\s*.*/,
       `last_seen: "${new Date().toISOString().split('T')[0]}"`
     );
-    // 追加证据
-    content += `\n- ${new Date().toISOString().split('T')[0]}: ${pattern.evidence.slice(0, 200)}`;
+    // 在 ## Related 之前插入证据（如果有），否则追加到末尾
+    const evidenceLine = `\n- ${new Date().toISOString().split('T')[0]}: ${pattern.evidence.replace(/[\r\n]+/g, ' ').slice(0, 200)}`;
+    const relatedIdx = content.indexOf('## Related');
+    if (relatedIdx !== -1) {
+      content = content.slice(0, relatedIdx) + evidenceLine + '\n\n' + content.slice(relatedIdx);
+    } else {
+      content += evidenceLine;
+    }
     fs.writeFileSync(filePath, content);
     return { action: 'updated', id: similar.id, newConfidence: newConf };
   }
@@ -232,25 +245,33 @@ function createOrUpdateInstinct(instinctDir, pattern) {
   // 创建新本能
   const id = pattern.type.replace(/_/g, '-') + '-' + Date.now().toString(36);
   const filename = `${id}.md`;
+  const dateStr = new Date().toISOString().split('T')[0];
+  const safeDescription = pattern.description.replace(/[\r\n:]+/g, ' ').trim().slice(0, 80);
+  const safeEvidence = pattern.evidence.replace(/[\r\n]+/g, ' ').trim().slice(0, 500);
+  const safeDomain = pattern.domain.replace(/[\r\n:]+/g, '-');
   const content = `---
-id: "${id}"
-trigger: "${pattern.description.slice(0, 80)}"
+id: ${yamlEscape(id)}
+trigger: ${yamlEscape(safeDescription)}
 confidence: ${pattern.confidence.toFixed(2)}
-domain: "${pattern.domain}"
-type: "${pattern.type}"
+domain: ${yamlEscape(safeDomain)}
+type: ${yamlEscape(pattern.type)}
 source: "session-observation"
-created: "${new Date().toISOString().split('T')[0]}"
-last_seen: "${new Date().toISOString().split('T')[0]}"
+created: "${dateStr}"
+last_seen: "${dateStr}"
 scope: "project"
+tags: [instinct, ${yamlEscape(safeDomain)}]
+aliases: [${yamlEscape(safeDescription.slice(0, 50))}]
 ---
 
-# ${pattern.description.slice(0, 60)}
+# ${safeDescription.slice(0, 60)}
 
 ## Action
-${pattern.description}
+${safeDescription}
 
 ## Evidence
-- ${new Date().toISOString().split('T')[0]}: ${pattern.evidence.slice(0, 500)}
+- ${dateStr}: ${safeEvidence}
+
+## Related
 `;
 
   fs.writeFileSync(path.join(instinctDir, filename), content);
@@ -281,12 +302,10 @@ function decayInstincts(instinctDir) {
           `confidence: ${newConf.toFixed(2)}`
         );
         fs.writeFileSync(filePath, content);
-        decayed.push({ id: inst.id, from: oldConf, to: newConf });
-      }
-
-      // 置信度降到 0.15 以下，标记为候选删除
-      if (newConf < 0.15) {
-        decayed.push({ id: inst.id, to: newConf, suggestDelete: true });
+        decayed.push({
+          id: inst.id, from: oldConf, to: newConf,
+          suggestDelete: newConf < 0.15
+        });
       }
     }
   });
@@ -295,10 +314,11 @@ function decayInstincts(instinctDir) {
 }
 
 // ─── 生成会话摘要 ───
-function generateSessionSummary(observations, patterns, instinctResults) {
+function generateSessionSummary(observations, patterns, instinctResults, project) {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const timeStr = now.toTimeString().split(' ')[0].slice(0, 5);
+  const projectName = (project && project.name) || 'unknown';
 
   const toolStats = {};
   observations.filter(o => o.phase === 'post').forEach(o => {
@@ -311,11 +331,32 @@ function generateSessionSummary(observations, patterns, instinctResults) {
     .map(([tool, count]) => `${tool}(${count})`)
     .join(', ');
 
-  return `## 会话 ${dateStr} ${timeStr}
-- 观察数: ${observations.length}
-- 主要工具: ${topTools || '无'}
-- 检测模式: ${patterns.length} 个
-- 本能更新: ${instinctResults.filter(r => r.action === 'updated').length} 条更新, ${instinctResults.filter(r => r.action === 'created').length} 条新增
+  // 收集本次涉及的本能 ID 用于 wikilinks
+  const instinctLinks = instinctResults
+    .filter(r => r.id)
+    .map(r => `[[${r.id}]]`)
+    .join(', ');
+
+  return `---
+date: "${dateStr}"
+time: "${timeStr}"
+project: "${projectName}"
+type: session-summary
+observations: ${observations.length}
+patterns: ${patterns.length}
+tags: [session, ${yamlEscape(projectName)}]
+---
+
+# Session ${dateStr} ${timeStr}
+
+## Stats
+- Observations: ${observations.length}
+- Top tools: ${topTools || 'none'}
+- Patterns detected: ${patterns.length}
+- Instincts: +${instinctResults.filter(r => r.action === 'created').length} new, ${instinctResults.filter(r => r.action === 'updated').length} updated
+
+## Instinct Links
+${instinctLinks || '_No instinct changes this session_'}
 `;
 }
 
@@ -415,7 +456,7 @@ function main() {
   const globalDecayed = decayInstincts(paths.globalInstincts);
 
   // 5. 生成会话摘要
-  const summary = generateSessionSummary(observations, patterns, instinctResults);
+  const summary = generateSessionSummary(observations, patterns, instinctResults, project);
   const summaryFile = path.join(
     paths.projectSessions,
     `${new Date().toISOString().split('T')[0]}-${Date.now().toString(36)}.md`

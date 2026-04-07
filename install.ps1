@@ -10,6 +10,8 @@ param(
     [switch]$Project,
     [switch]$All,
     [switch]$HooksOnly,
+    [switch]$Obsidian,
+    [string]$VaultPath,
     [switch]$Help
 )
 
@@ -60,7 +62,7 @@ function Build-SettingsJson {
                     hooks = @(
                         [ordered]@{
                             type = 'command'
-                            command = "node `"$hooksPath/inject-context.js`" 2>nul || exit /b 0"
+                            command = "node `"$hooksPath/inject-context.js`" 2>/dev/null || exit 0"
                             timeout = 5000
                         }
                     )
@@ -72,7 +74,7 @@ function Build-SettingsJson {
                     hooks = @(
                         [ordered]@{
                             type = 'command'
-                            command = "node `"$hooksPath/observe.js`" pre 2>nul || exit /b 0"
+                            command = "node `"$hooksPath/observe.js`" pre 2>/dev/null || exit 0"
                             timeout = 2000
                         }
                     )
@@ -84,7 +86,7 @@ function Build-SettingsJson {
                     hooks = @(
                         [ordered]@{
                             type = 'command'
-                            command = "node `"$hooksPath/observe.js`" post 2>nul || exit /b 0"
+                            command = "node `"$hooksPath/observe.js`" post 2>/dev/null || exit 0"
                             timeout = 2000
                         }
                     )
@@ -96,7 +98,7 @@ function Build-SettingsJson {
                     hooks = @(
                         [ordered]@{
                             type = 'command'
-                            command = "node `"$hooksPath/evaluate-session.js`" 2>nul || exit /b 0"
+                            command = "node `"$hooksPath/evaluate-session.js`" 2>/dev/null || exit 0"
                             timeout = 10000
                         }
                     )
@@ -300,6 +302,32 @@ function Show-Help {
 }
 
 # ══════════════════════════════════════════════
+function Install-Obsidian {
+    Write-Section "Obsidian Vault 集成"
+
+    $vault = if ($VaultPath) { $VaultPath } else { $HomunculusDir }
+
+    & node (Join-Path $ScriptDir "scripts\init-obsidian-vault.js") --vault-path "$vault"
+
+    $snippet = Join-Path $vault "_mcp-config-snippet.json"
+    if (Test-Path $snippet) {
+        Write-Host ""
+        Write-Info "将以下 MCP 配置合并到 ~/.claude/settings.json:"
+        Write-Host ""
+        Get-Content $snippet
+        Write-Host ""
+    }
+
+    Write-OK "Obsidian 集成完成"
+    Write-Host ""
+    Write-Host "  下一步:" -ForegroundColor White
+    Write-Host "    1. 用 Obsidian 打开 vault: $vault"
+    Write-Host "    2. 安装推荐插件: Dataview, Templater, Graph Analysis"
+    Write-Host "    3. 将 _mcp-config-snippet.json 合并到 Claude Code 配置"
+    Write-Host ""
+}
+
+# ══════════════════════════════════════════════
 # 主入口
 # ══════════════════════════════════════════════
 try {
@@ -320,4 +348,5 @@ elseif ($All) { Install-User; Install-Project }
 elseif ($User) { Install-User }
 elseif ($Project) { Install-Project }
 elseif ($HooksOnly) { Install-Hooks; Install-Homunculus; Write-OK "Hook 脚本已更新" }
+elseif ($Obsidian) { Install-Obsidian }
 else { Show-Help }

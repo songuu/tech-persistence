@@ -259,6 +259,7 @@ show_help() {
   echo "  bash install.sh --project     安装项目级别 (→ .claude/)"
   echo "  bash install.sh --all         同时安装两者"
   echo "  bash install.sh --hooks-only  只安装/更新 Hook 脚本"
+  echo "  bash install.sh --obsidian    初始化 Obsidian Vault 集成"
   echo "  bash install.sh --help        显示帮助"
   echo ""
   echo "v2 新增能力:"
@@ -267,6 +268,40 @@ show_help() {
   echo "  • 本能进化 (/evolve → skill/command/agent)"
   echo "  • 项目自动隔离 (git remote hash)"
   echo "  • 会话上下文自动注入"
+}
+
+# ──────────────────────────────────────────────
+# Obsidian Vault 集成（可选）
+# ──────────────────────────────────────────────
+install_obsidian() {
+  log_section "Obsidian Vault 集成"
+
+  local vault_path="${HOMUNCULUS_DIR}"
+
+  if [[ -n "${1:-}" ]]; then
+    vault_path="$1"
+  fi
+
+  # 运行 vault 初始化脚本
+  node "${SCRIPT_DIR}/scripts/init-obsidian-vault.js" --vault-path "$vault_path"
+
+  # 输出 MCP 配置指引
+  local mcp_snippet="${vault_path}/_mcp-config-snippet.json"
+  if [[ -f "$mcp_snippet" ]]; then
+    echo ""
+    log_info "将以下 MCP 配置合并到 ~/.claude/settings.json:"
+    echo ""
+    cat "$mcp_snippet"
+    echo ""
+  fi
+
+  log_ok "Obsidian 集成完成"
+  echo ""
+  echo "  下一步:"
+  echo "    1. 用 Obsidian 打开 vault: $vault_path"
+  echo "    2. 安装推荐插件: Dataview, Templater, Graph Analysis"
+  echo "    3. 将 _mcp-config-snippet.json 合并到 ~/.claude/settings.json"
+  echo ""
 }
 
 case "${1:-}" in
@@ -285,6 +320,9 @@ case "${1:-}" in
     install_hooks
     install_homunculus
     log_ok "Hook 脚本已更新"
+    ;;
+  --obsidian)
+    install_obsidian "${2:-}"
     ;;
   --help|-h)
     show_help
