@@ -480,6 +480,72 @@ your-project/
 
 ---
 
+## Obsidian 知识图谱集成
+
+系统产出的所有知识（本能、会话摘要、解决方案）可以通过 Obsidian 浏览和管理，利用 Graph View 可视化知识演化关系。
+
+```mermaid
+flowchart LR
+    subgraph CC["Claude Code"]
+        HOOKS["4 Hooks\n自动观察"]
+        COMPOUND["/compound\n知识提取"]
+    end
+
+    subgraph VAULT["Obsidian Vault (~/.claude/homunculus/)"]
+        INST["instincts/*.md\n#instinct 紫色"]
+        SESS["sessions/*.md\n#session 绿色"]
+        SOL["solutions/*.md\n#solution 深绿"]
+        DASH["Dashboard.md\nDataview 查询"]
+        GRAPH["Graph View\n知识图谱"]
+    end
+
+    subgraph MCP["MCPVault MCP Server"]
+        SEARCH["BM25 搜索"]
+        RW["读写笔记"]
+    end
+
+    HOOKS --> SESS
+    COMPOUND --> INST
+    COMPOUND --> SOL
+    INST --> GRAPH
+    SESS --> GRAPH
+    SOL --> GRAPH
+    DASH --> INST
+    DASH --> SESS
+    MCP --> VAULT
+
+    style VAULT fill:#EEEDFE,stroke:#534AB7,color:#26215C
+    style CC fill:#E1F5EE,stroke:#0F6E56,color:#04342C
+    style MCP fill:#FAEEDA,stroke:#854F0B,color:#412402
+```
+
+### 快速启用
+
+```bash
+# 初始化 Obsidian Vault
+bash install.sh --obsidian          # macOS/Linux
+.\install.ps1 -Obsidian             # Windows PowerShell
+
+# 然后用 Obsidian 打开 ~/.claude/homunculus/
+```
+
+### 关键特性
+
+| 特性 | 说明 |
+|------|------|
+| **自动流入** | Hook 产出的会话摘要、本能文件自动出现在 Vault 中 |
+| **Graph View** | 按 tag 颜色区分知识类型（紫=本能，绿=会话，橙=规则） |
+| **Dataview 查询** | Dashboard 提供高置信本能列表、近期会话等动态表格 |
+| **Wikilinks** | 本能↔会话↔解决方案通过 `[[wikilinks]]` 互相关联 |
+| **MCP Server** | 可选集成 MCPVault，让 Claude Code 直接读写 Vault |
+| **零迁移** | 直接指向现有 `~/.claude/homunculus/` 目录，无需移动文件 |
+
+详细文档：
+- [安装指南](docs/obsidian-setup.md) — 环境要求、安装步骤、插件配置、故障排查
+- [使用指南](docs/obsidian-usage.md) — 日常工作流、frontmatter 规范、Dataview 查询、知识维护
+
+---
+
 ## 版本演进
 
 ```mermaid
@@ -491,6 +557,8 @@ timeline
       4 Hook 自动观察 : 本能系统 (置信度/衰减) : 本能进化 /evolve : 项目隔离 (git hash)
     section v3 — 工作流融合
       角色分工 (/think /plan /work /review) : 复利循环 /compound : 解决方案文档 docs/solutions/ : /sprint 全流程编排
+    section v3.1 — Obsidian 集成
+      Vault 初始化 : Obsidian-friendly frontmatter : Graph View 可视化 : MCPVault MCP Server
 ```
 
 | 版本 | 核心能力 | 来源 |
@@ -498,3 +566,4 @@ timeline
 | v1 | 手动 /learn + rules 分类存储 + compact 管理 | 原创 |
 | v2 | 4 Hook 自动观察 + 本能系统(置信度/衰减/进化) + 项目隔离 | ECC + Claude-Mem |
 | v3 | 角色分工 + Plan→Work→Review→Compound 复利循环 + /sprint 全流程 | gstack + Compound |
+| v3.1 | Obsidian Vault 集成 + MCPVault + frontmatter tags/aliases/wikilinks | Obsidian + MCPVault |

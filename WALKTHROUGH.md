@@ -257,6 +257,54 @@ Claude 现在自动知道你的项目经验！
 执行哪些? (输入 'all-high')
 ```
 
+## 第 31 天：启用 Obsidian 知识图谱
+
+```bash
+$ bash install.sh --obsidian
+
+━━━ Obsidian Vault 集成 ━━━
+
+🗄️  Obsidian Vault 初始化
+   Vault 路径: /Users/you/.claude/homunculus
+
+   ✅ .obsidian/ 配置生成
+   ✅ .obsidianignore 排除规则
+   ✅ _templates/ 模板文件 (3 个)
+   ✅ Dashboard.md 知识仪表板
+
+   📋 MCP Server 配置已写入: _mcp-config-snippet.json
+
+✅ Obsidian 集成完成
+
+  下一步:
+    1. 用 Obsidian 打开 vault: /Users/you/.claude/homunculus
+    2. 安装推荐插件: Dataview, Templater, Graph Analysis
+    3. 将 _mcp-config-snippet.json 合并到 Claude Code 配置
+```
+
+用 Obsidian 打开 `~/.claude/homunculus/`：
+
+- **Graph View** 中立即看到过去 30 天积累的 11 个本能（紫色节点）
+- 8 个会话摘要（绿色节点）以时间线排列
+- 进化产物（橙色节点）连接着源本能
+- `Dashboard.md` 中 Dataview 表格显示高置信本能列表
+
+```
+Graph View 示意:
+
+    [session-06-18] ─── [fix-prisma-raw] ─── [Prisma调试经验]
+         │                    │                    │
+    [session-06-16]     [prefer-select]      [debugging-gotchas.md]
+         │                    │
+    [session-06-14]     [check-query-count]
+         │
+    [session-06-12] ─── [const优先于let]
+                              │
+                        [全局本能]
+```
+
+之后每次 `/compound` 的产出自动出现在 Obsidian 中，无需额外操作。
+
 ## 持续效果
 
 经过 30 天使用后：
@@ -265,3 +313,4 @@ Claude 现在自动知道你的项目经验！
 - **编码习惯**：本能系统记住了你的偏好，自动遵守
 - **团队共享**：`.claude/rules/` 提交到 Git，新成员立即受益
 - **知识进化**：零散的本能自动聚合为系统化的技能
+- **知识图谱**：Obsidian Graph View 可视化所有知识的关联和演化

@@ -132,4 +132,34 @@ bash install.sh --all
 cat ~/.claude/homunculus/projects.json            # 项目列表
 ls ~/.claude/homunculus/projects/*/instincts/     # 项目本能
 tail -20 ~/.claude/homunculus/projects/*/observations.jsonl  # 最近观察
+
+# Obsidian 集成
+bash install.sh --obsidian          # 初始化 Vault (macOS/Linux)
+.\install.ps1 -Obsidian             # 初始化 Vault (Windows)
+# 然后用 Obsidian 打开 ~/.claude/homunculus/
+```
+
+## Obsidian 集成速查
+
+```
+Vault 位置:  ~/.claude/homunculus/
+MCP Server:  npx @bitbonsai/mcpvault@latest <vault-path>
+
+Tag 颜色:
+  #instinct     紫色  本能节点
+  #session      绿色  会话摘要
+  #solution     深绿  解决方案
+  #rule         橙色  规则文件
+  #architecture 红色  架构决策
+
+Frontmatter 规则:
+  tags/aliases  → 内联数组 [a, b]（不用 block 序列）
+  文件末尾      → ## Related 区域放 [[wikilinks]]
+
+推荐插件:
+  Dataview      → Dashboard 动态表格
+  Templater     → 使用 _templates/ 模板
+  Graph Analysis → 增强图谱分析
+
+详细文档: docs/obsidian-setup.md + docs/obsidian-usage.md
 ```
