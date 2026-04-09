@@ -111,16 +111,25 @@ flowchart TD
 
 ### 产出文件流
 
+每个功能对应 **一个项目文档** `docs/plans/YYYY-MM-DD-<slug>.md`，各阶段往同一文档的不同章节追加内容，文档状态随阶段流转：
+
 ```mermaid
 flowchart LR
-    T["/think"] -->|".claude/plans/think-*.md"| P["/plan"]
-    P -->|".claude/plans/plan-*.md"| W["/work"]
-    W -->|"git diff"| R["/review"]
-    R -->|"P0/P1/P2 报告"| C["/compound"]
-    C -->|"rules/*.md\nsolutions/*.md\ninstincts/*.md\nCLAUDE.md 索引"| P
+    T["/think\nstatus: draft"] -->|填写「需求分析」| DOC["docs/plans/\nYYYY-MM-DD-&lt;slug&gt;.md"]
+    P["/plan\nstatus: planning"] -->|填写「技术方案」+ 任务拆解| DOC
+    W["/work\nstatus: in-progress"] -->|勾选 checkbox + 变更日志| DOC
+    R["/review\nstatus: reviewing"] -->|填写「审查结果」P0/P1/P2| DOC
+    C["/compound\nstatus: completed"] -->|填写「复利记录」| DOC
 
+    DOC -.->|"下次 /plan 自动读取历史文档"| P
+
+    style DOC fill:#EAF3DE,stroke:#3B6D11,color:#173404
     style C fill:#EAF3DE,stroke:#3B6D11,color:#173404
 ```
+
+**文档生命周期**：`draft → planning → in-progress → reviewing → completed`
+**命名规范**：参考 superpowers 的做法，`YYYY-MM-DD-<feature-slug>.md`，文件名本身就是时间线索引
+**模板**：见 `docs/plans/TEMPLATE.md`
 
 ---
 
@@ -296,14 +305,14 @@ bash upgrade-v3.sh
 
 ### 工作流命令（日常开发用）
 
-| 命令 | 角色 | 作用 | 产出 |
+| 命令 | 角色 | 作用 | 产出（写入同一个 `docs/plans/YYYY-MM-DD-<slug>.md`） |
 |------|------|------|------|
-| `/think` | CEO | 审视需求、锁定范围、定义验收条件 | `.claude/plans/think-*.md` |
-| `/plan` | 架构师 | 技术方案、任务拆解、风险评估 | `.claude/plans/plan-*.md` |
-| `/work` | 工程师 | 按计划逐步实现，每步测试验证 | git diff |
-| `/review` | 审查团队 | 5 视角审查：安全/性能/架构/质量/测试 | P0/P1/P2 报告 |
-| `/compound` | 知识管理 | 提取经验+本能+解决方案文档 | rules + solutions + instincts |
-| `/sprint` | 指挥官 | 串联 think→plan→work→review→compound | 全部 |
+| `/think` | CEO | 审视需求、锁定范围、定义验收条件 | 创建文档 + 「需求分析」章节，status=draft |
+| `/plan` | 架构师 | 技术方案、任务拆解、风险评估 | 「技术方案」+「任务拆解」章节，status=planning |
+| `/work` | 工程师 | 按计划逐步实现，每步测试验证 | 勾选任务 checkbox + 追加变更日志，status=in-progress |
+| `/review` | 审查团队 | 5 视角审查：安全/性能/架构/质量/测试 | 「审查结果」章节 P0/P1/P2，status=reviewing |
+| `/compound` | 知识管理 | 提取经验+本能+解决方案文档 | 「复利记录」章节 + rules + solutions + instincts，status=completed |
+| `/sprint` | 指挥官 | 串联 think→plan→work→review→compound | 全部，贯穿同一个项目文档的完整生命周期 |
 
 ### 知识管理命令
 
@@ -411,14 +420,17 @@ your-project/
 │   │   ├── learn.md                    # /learn (项目级)
 │   │   ├── retrospective.md            # /retrospective
 │   │   └── debug-journal.md            # /debug-journal
-│   ├── rules/                          # 项目经验 (5 领域)
-│   │   ├── architecture.md             # 架构决策记录
-│   │   ├── debugging-gotchas.md        # 踩坑记录
-│   │   ├── performance.md              # 性能优化经验
-│   │   ├── testing-patterns.md         # 测试模式
-│   │   └── api-conventions.md          # API 设计规范
-│   └── plans/                          # /think 和 /plan 的产出
+│   └── rules/                          # 项目经验 (5 领域)
+│       ├── architecture.md             # 架构决策记录
+│       ├── debugging-gotchas.md        # 踩坑记录
+│       ├── performance.md              # 性能优化经验
+│       ├── testing-patterns.md         # 测试模式
+│       └── api-conventions.md          # API 设计规范
 └── docs/
+    ├── plans/                          # 工作流产出：一个功能一个文档
+    │   ├── TEMPLATE.md                 # 文档模板
+    │   ├── 2026-04-09-docs-plan-persistence.md
+    │   └── 2026-04-10-<feature-slug>.md
     └── solutions/                      # /compound 生成的解决方案文档
 ```
 
@@ -559,6 +571,8 @@ timeline
       角色分工 (/think /plan /work /review) : 复利循环 /compound : 解决方案文档 docs/solutions/ : /sprint 全流程编排
     section v3.1 — Obsidian 集成
       Vault 初始化 : Obsidian-friendly frontmatter : Graph View 可视化 : MCPVault MCP Server
+    section v3.2 — 文档持久化
+      docs/plans/ 项目文档 : 一功能一文档 (superpowers 风格) : 5 阶段状态流转 : 功能变更自动同步文档
 ```
 
 | 版本 | 核心能力 | 来源 |
@@ -567,3 +581,4 @@ timeline
 | v2 | 4 Hook 自动观察 + 本能系统(置信度/衰减/进化) + 项目隔离 | ECC + Claude-Mem |
 | v3 | 角色分工 + Plan→Work→Review→Compound 复利循环 + /sprint 全流程 | gstack + Compound |
 | v3.1 | Obsidian Vault 集成 + MCPVault + frontmatter tags/aliases/wikilinks | Obsidian + MCPVault |
+| v3.2 | `docs/plans/` 项目文档持久化 + 5 阶段状态流转 + 功能变更同步 README | superpowers |
