@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /c/project/my/tech-persistence log --oneline)",
+      "Read(//c/Users/songyu/.claude/**)",
+      "Bash(xargs grep:*)"
+    ]
+  }
+}

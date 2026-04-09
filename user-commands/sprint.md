@@ -8,68 +8,97 @@ description: "全流程冲刺：自动串联 think→plan→work→review→comp
 在关键决策点暂停等待用户确认。
 
 ## 用法
+
 `/sprint <需求描述>`
+
+## 项目文档贯穿全流程（CRITICAL）
+
+整个 sprint 过程中，**所有阶段共用一个项目文档**。文档在 Phase 1 创建，后续阶段逐步填充。
+
+文档路径：`docs/plans/YYYY-MM-DD-<需求简写>.md`
+
+```text
+Phase 1 → 创建文档，填写「需求分析」     → status: draft
+Phase 2 → 填写「技术方案」「任务拆解」    → status: planning
+Phase 3 → 逐步勾选任务，追加变更日志      → status: in-progress
+Phase 4 → 填写「审查结果」               → status: reviewing
+Phase 5 → 填写「复利记录」               → status: completed
+```
+
+每个 Phase 转换时更新文档的 Status 和 Updated 日期。
 
 ## 执行流程
 
 ### Phase 1: Think (暂停确认)
-```
-🎯 Phase 1/5: Think
+
+```text
+Phase 1/5: Think
 
 [执行 /think 逻辑，输出范围定义]
+[创建项目文档 docs/plans/YYYY-MM-DD-<需求简写>.md]
+[填写「需求分析」章节]
 
 → 确认范围后输入 'go' 进入 Plan 阶段
-→ 输入修改意见进行调整
+→ 输入修改意见进行调整（同步更新文档）
 → 输入 'skip' 跳过 Think 直接 Plan
 ```
 
 ### Phase 2: Plan (暂停确认)
-```
-📋 Phase 2/5: Plan
+
+```text
+Phase 2/5: Plan
 
 [执行 /plan 逻辑，输出实现计划]
+[填写文档的「技术方案」「任务拆解」章节]
 
 → 确认计划后输入 'go' 进入 Work 阶段
-→ 输入修改意见进行调整
+→ 输入修改意见进行调整（同步更新文档）
 ```
 
 ### Phase 3: Work (自动执行)
-```
-🔨 Phase 3/5: Work
+
+```text
+Phase 3/5: Work
 
 [执行 /work 逻辑，按计划逐步实现]
-[每个 Task 完成后输出进度]
+[每个 Task 完成后：勾选文档中的 checkbox + 追加变更日志]
 [遇到 blocker 暂停]
 ```
 
 ### Phase 4: Review (暂停确认)
-```
-🔍 Phase 4/5: Review
+
+```text
+Phase 4/5: Review
 
 [执行 /review 逻辑，多视角审查]
-[输出 P0/P1/P2 问题列表]
+[将审查报告写入文档「审查结果」章节]
 
-→ P0 自动修复
+→ P0 自动修复（修复后在文档中标记「已修复」）
 → P1 确认后修复
 → 修复完成后输入 'go' 进入 Compound 阶段
 ```
 
 ### Phase 5: Compound (自动执行)
-```
-🔄 Phase 5/5: Compound
+
+```text
+Phase 5/5: Compound
 
 [执行 /compound 逻辑，提取所有经验]
+[填写文档「复利记录」章节，标记 status: completed]
 [输出复利报告]
 
-🏁 Sprint 完成！
+Sprint 完成！
+文档: docs/plans/YYYY-MM-DD-xxx.md (completed)
 ```
 
 ## 适用场景
+
 - 中到大型功能开发
 - 需要完整规划-实现-审查-学习流程
 - 希望确保每次开发都有知识积累
 
 ## 不适用场景
+
 - 快速修一个小 bug → 直接修，然后 /compound
 - 探索性调研 → 自由对话，然后 /learn
 - 紧急热修复 → 直接修，然后 /debug-journal
