@@ -326,13 +326,25 @@ bash update.sh help
 
 升级是**增量的**：每个版本函数只负责该版本相对于前一版本的增量变更，已存在的文件会自动备份为 `.bak.YYYYMMDDHHMM`。
 
-**v3.2 升级内容**（当前最新）：
+**v4 升级内容**（当前最新 — Skill 自迭代闭环）：
+
+1. 新增 4 个 skill 生命周期命令：`/skill-diagnose` `/skill-improve` `/skill-eval` `/skill-publish`
+2. 新增 `/prototype` 工作流命令 + `prototype-workflow` skill（原型多轮收敛方法论）
+3. 升级 `/compound`：增加第七步「采集 skill 使用信号」和第八步「本能-skill 差异标记」
+4. 升级 `/learn` 为 `/compound` 的轻量子集版本
+5. 创建 `~/.claude/homunculus/skill-signals/ skill-evals/ skill-changelog/` 三个目录
+
+升级后，每次 `/compound` 都会自动在 `skill-signals/{name}.jsonl` 追加一条使用记录（步骤完成率、用户纠正、放弃率等），积累 1-2 个月后运行 `/skill-diagnose` 可得到基于真实数据的诊断报告，再通过 `/skill-improve → /skill-eval → /skill-publish` 让 skill 自我进化。
+
+**历史版本**：`bash update.sh v3.2` 可回到 v3.2 行为（不含 skill 自迭代）。
+
+**v3.2 内容**（仍可用）：
 
 1. 同步最新的 6 个工作流命令（含文档持久化指令）到 `~/.claude/commands/`
 2. 在当前项目创建 `docs/plans/` 目录
 3. 复制 `TEMPLATE.md` 到项目，作为功能文档的起点
 
-升级后，任何 `/think` `/plan` `/work` `/review` `/compound` `/sprint` 都会自动在 `docs/plans/YYYY-MM-DD-<slug>.md` 生成并更新项目文档。
+升级后，任何 `/think` `/plan` `/work` `/review` `/compound` `/sprint` `/prototype` 都会自动在 `docs/plans/YYYY-MM-DD-<slug>.md` 生成并更新项目文档。
 
 ### 安装后
 1. 编辑 `~/.claude/CLAUDE.md` 填写个人偏好
@@ -341,7 +353,7 @@ bash update.sh help
 
 ---
 
-## 命令速查（15 个）
+## 命令速查（20 个）
 
 ### 工作流命令（日常开发用）
 
@@ -351,8 +363,25 @@ bash update.sh help
 | `/plan` | 架构师 | 技术方案、任务拆解、风险评估 | 「技术方案」+「任务拆解」章节，status=planning |
 | `/work` | 工程师 | 按计划逐步实现，每步测试验证 | 勾选任务 checkbox + 追加变更日志，status=in-progress |
 | `/review` | 审查团队 | 5 视角审查：安全/性能/架构/质量/测试 | 「审查结果」章节 P0/P1/P2，status=reviewing |
-| `/compound` | 知识管理 | 提取经验+本能+解决方案文档 | 「复利记录」章节 + rules + solutions + instincts，status=completed |
+| `/compound` | 知识管理 | 提取经验+本能+解决方案文档 + 采集 skill 信号 | 「复利记录」章节 + rules + solutions + instincts + skill-signals，status=completed |
 | `/sprint` | 指挥官 | 串联 think→plan→work→review→compound | 全部，贯穿同一个项目文档的完整生命周期 |
+| `/prototype` | 产品分析 | 从原型截图多轮收敛到可执行需求 | `.claude/plans/prototype-*-status.md` + `-spec.md`（v4 新增） |
+
+### Skill 自迭代闭环（v4 新增）
+
+让写好的 skill 不再是死的——基于使用信号自我进化。五层架构：
+
+| 命令 | 层级 | 作用 |
+|------|------|------|
+| `/compound` | L1 信号采集 | 每次复利时采集 skill 使用信号到 `~/.claude/homunculus/skill-signals/` |
+| `/skill-diagnose [name]` | L2 诊断 | 读取信号，输出步骤热力图 + 纠正模式 + 本能差异 + 健康结论 |
+| `/skill-improve [name]` | L3 改进提案 | 基于诊断结果生成结构化修改提案（合并/降级/吸收/精简/拆分） |
+| `/skill-eval [name] --diff` | L4 验证 | 用测试集 A/B 对比当前版本 vs 提案版本的通过率 |
+| `/skill-publish [name]` | L5 发布 | 发布已验证提案，自动备份 + changelog；`/skill-rollback` 随时回滚 |
+
+核心闭环：`使用 → 信号 → 诊断 → 提案 → 验证 → 发布 → 使用`。**安全规则**：eval 测试集不可被 skill 自己修改（防止改考卷通过考试）。
+
+P0 起步策略：先用 `/compound` 自动采集 1-2 个月的真实信号，再运行 `/skill-diagnose` 看第一份诊断——没有数据的优化是盲猜。
 
 ### 知识管理命令
 
@@ -407,13 +436,18 @@ bash update.sh help
 ~/.claude/
 ├── CLAUDE.md                           # 个人偏好 + 工程方法论 + 自学习规则
 ├── settings.json                       # 4 Hook 配置
-├── commands/                           # 15 个全局命令
+├── commands/                           # 20 个全局命令
 │   ├── think.md                        # /think (CEO)
 │   ├── plan.md                         # /plan (Architect)
 │   ├── work.md                         # /work (Engineer)
 │   ├── review.md                       # /review (5-perspective)
-│   ├── compound.md                     # /compound (money step)
+│   ├── compound.md                     # /compound (money step + skill signal)
 │   ├── sprint.md                       # /sprint (full chain)
+│   ├── prototype.md                    # /prototype (原型多轮收敛, v4)
+│   ├── skill-diagnose.md               # /skill-diagnose (v4, L2 诊断)
+│   ├── skill-improve.md                # /skill-improve  (v4, L3 改进提案)
+│   ├── skill-eval.md                   # /skill-eval     (v4, L4 验证)
+│   ├── skill-publish.md                # /skill-publish  (v4, L5 发布)
 │   ├── learn.md                        # /learn (lightweight)
 │   ├── review-learnings.md             # /review-learnings
 │   ├── session-summary.md              # /session-summary
@@ -425,6 +459,7 @@ bash update.sh help
 │   └── general-standards.md            # 通用编码标准
 ├── skills/
 │   ├── memory/SKILL.md                 # 增强记忆管理
+│   ├── prototype-workflow/SKILL.md     # 原型需求收敛方法论 (v4)
 │   └── continuous-learning/
 │       ├── SKILL.md                    # 自学习系统定义
 │       └── hooks/                      # Hook 脚本
@@ -441,6 +476,9 @@ bash update.sh help
     │   ├── skills/                     # 进化出的技能
     │   ├── commands/                   # 进化出的命令
     │   └── agents/                     # 进化出的代理
+    ├── skill-signals/                  # v4: skill 使用信号 (jsonl)
+    ├── skill-evals/                    # v4: skill 测试集 + 历史结果
+    ├── skill-changelog/                # v4: skill 版本演进记录
     └── projects/
         └── {git-remote-hash}/          # 按项目隔离
             ├── observations.jsonl      # 原始观察
@@ -613,6 +651,8 @@ timeline
       Vault 初始化 : Obsidian-friendly frontmatter : Graph View 可视化 : MCPVault MCP Server
     section v3.2 — 文档持久化
       docs/plans/ 项目文档 : 一功能一文档 (superpowers 风格) : 5 阶段状态流转 : 功能变更自动同步文档
+    section v4 — Skill 自迭代
+      Skill 反馈回路 : /compound 采集使用信号 : /skill-diagnose 诊断 : /skill-improve 提案 : /skill-eval A/B 验证 : /skill-publish 发布+回滚 : /prototype 原型收敛
 ```
 
 | 版本 | 核心能力 | 来源 |
@@ -622,3 +662,4 @@ timeline
 | v3 | 角色分工 + Plan→Work→Review→Compound 复利循环 + /sprint 全流程 | gstack + Compound |
 | v3.1 | Obsidian Vault 集成 + MCPVault + frontmatter tags/aliases/wikilinks | Obsidian + MCPVault |
 | v3.2 | `docs/plans/` 项目文档持久化 + 5 阶段状态流转 + 功能变更同步 README | superpowers |
+| v4 | Skill 自迭代闭环（信号→诊断→提案→eval→发布）+ /prototype 原型收敛 | 原创（反馈回路架构） |

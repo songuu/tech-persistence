@@ -38,12 +38,13 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ClaudeHome = Join-Path $env:USERPROFILE ".claude"
 
 # ─── 版本定义 ───
-$LATEST_VERSION = "v3.2"
+$LATEST_VERSION = "v4"
 
 $VERSIONS = @(
     @{ Name = "v3";   Desc = "工作流层 + 复利循环 (think/plan/work/review/compound/sprint)" },
     @{ Name = "v3.1"; Desc = "Obsidian 集成 (frontmatter/wikilinks)" },
-    @{ Name = "v3.2"; Desc = "文档持久化工作流 (docs/plans/YYYY-MM-DD-<slug>.md)" }
+    @{ Name = "v3.2"; Desc = "文档持久化工作流 (docs/plans/YYYY-MM-DD-<slug>.md)" },
+    @{ Name = "v4";   Desc = "Skill 自迭代闭环 (diagnose/improve/eval/publish + /prototype)" }
 )
 
 # ─── 辅助函数 ───
@@ -202,6 +203,74 @@ function Upgrade-To-V3_2 {
     Write-OK "v3.2 升级完成"
 }
 
+# v4: Skill 自迭代闭环
+function Upgrade-To-V4 {
+    Write-Section "升级到 v4：Skill 自迭代闭环"
+
+    # 1. 同步新的 skill 生命周期命令
+    Write-Host "  1/5 同步 Skill 自迭代命令到 ~/.claude/commands/" -ForegroundColor White
+    $skillCmds = @("skill-diagnose.md", "skill-improve.md", "skill-eval.md", "skill-publish.md")
+    foreach ($cmd in $skillCmds) {
+        $src = Join-Path $ScriptDir "user-level\commands\$cmd"
+        if (Test-Path $src) {
+            Safe-Copy $src (Join-Path $ClaudeHome "commands\$cmd")
+            Write-OK ("/" + ($cmd -replace '\.md$', ''))
+        } else {
+            Write-Warn "未找到 $src，跳过"
+        }
+    }
+
+    # 2. 同步 /prototype 工作流命令
+    Write-Host ""
+    Write-Host "  2/5 同步 /prototype 命令到 ~/.claude/commands/" -ForegroundColor White
+    $protoSrc = Join-Path $ScriptDir "user-commands\prototype.md"
+    if (Test-Path $protoSrc) {
+        Safe-Copy $protoSrc (Join-Path $ClaudeHome "commands\prototype.md")
+        Write-OK "/prototype"
+    }
+
+    # 3. 同步更新后的 /compound 和 /learn
+    Write-Host ""
+    Write-Host "  3/5 升级 /compound 和 /learn" -ForegroundColor White
+    $compoundSrc = Join-Path $ScriptDir "user-commands\compound.md"
+    if (Test-Path $compoundSrc) {
+        Safe-Copy $compoundSrc (Join-Path $ClaudeHome "commands\compound.md")
+        Write-OK "/compound (含 skill 使用信号采集)"
+    }
+    $learnSrc = Join-Path $ScriptDir "user-level\commands\learn.md"
+    if (Test-Path $learnSrc) {
+        Safe-Copy $learnSrc (Join-Path $ClaudeHome "commands\learn.md")
+        Write-OK "/learn (轻量版)"
+    }
+
+    # 4. 安装 prototype-workflow skill
+    Write-Host ""
+    Write-Host "  4/5 安装 prototype-workflow skill" -ForegroundColor White
+    $protoSkillDir = Join-Path $ClaudeHome "skills\prototype-workflow"
+    if (-not (Test-Path $protoSkillDir)) {
+        New-Item -ItemType Directory -Path $protoSkillDir -Force | Out-Null
+    }
+    $protoSkillSrc = Join-Path $ScriptDir "user-level\skills\prototype-workflow\SKILL.md"
+    if (Test-Path $protoSkillSrc) {
+        Copy-Item $protoSkillSrc (Join-Path $protoSkillDir "SKILL.md") -Force
+        Write-OK "prototype-workflow skill"
+    }
+
+    # 5. 创建 skill 自迭代相关的 homunculus 子目录
+    Write-Host ""
+    Write-Host "  5/5 初始化 skill-signals / skill-evals / skill-changelog 目录" -ForegroundColor White
+    $homunculusDir = Join-Path $ClaudeHome "homunculus"
+    foreach ($sub in @("skill-signals", "skill-evals", "skill-changelog")) {
+        $dir = Join-Path $homunculusDir $sub
+        if (-not (Test-Path $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+        Write-OK "~/.claude/homunculus/$sub/"
+    }
+
+    Write-OK "v4 升级完成"
+}
+
 # ─── 主分发器 ───
 function Invoke-Update {
     param([string]$Target)
@@ -247,6 +316,7 @@ function Invoke-Update {
         "v3"   { Upgrade-To-V3 }
         "v3.1" { Upgrade-To-V3_1 }
         "v3.2" { Upgrade-To-V3_2 }
+        "v4"   { Upgrade-To-V4 }
     }
 
     # 完成提示
@@ -261,6 +331,23 @@ function Invoke-Update {
         Write-Host "  /think '小型需求' (单阶段使用也会生成文档)"
         Write-Host ""
         Write-Host "新文档位置: docs/plans/" -ForegroundColor White
+        Write-Host ""
+    } elseif ($Target -eq "v4") {
+        Write-Host "Skill 自迭代闭环（五层架构）:" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  L1 信号采集: /compound 自动记录 skill 使用信号"
+        Write-Host "  L2 诊断:     /skill-diagnose [name]  — 步骤热力图 + 改进建议"
+        Write-Host "  L3 改进提案: /skill-improve [name]   — 基于数据生成修改提案"
+        Write-Host "  L4 验证:     /skill-eval [name] --diff — A/B 对比通过率"
+        Write-Host "  L5 发布:     /skill-publish [name]   — 备份 + changelog + 回滚"
+        Write-Host ""
+        Write-Host "配套新增: /prototype 原型多轮收敛 + prototype-workflow skill"
+        Write-Host "信号存储: ~/.claude/homunculus/skill-signals/"
+        Write-Host "测试集:   ~/.claude/homunculus/skill-evals/"
+        Write-Host ""
+        Write-Host "P0 起步（先让数据跑 1-2 个月）:" -ForegroundColor White
+        Write-Host "  正常使用 /compound，它会自动采集 skill 使用信号"
+        Write-Host "  一段时间后运行 /skill-diagnose 查看第一份诊断报告"
         Write-Host ""
     }
 }

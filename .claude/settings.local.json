@@ -3,7 +3,11 @@
     "allow": [
       "Bash(git -C /c/project/my/tech-persistence log --oneline)",
       "Read(//c/Users/songyu/.claude/**)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(ls c:/project/my/tech-persistence/user-level/commands/skill-*.md)",
+      "Bash(bash -n c:/project/my/tech-persistence/install.sh)",
+      "Bash(bash -n c:/project/my/tech-persistence/update.sh)",
+      "Bash(bash c:/project/my/tech-persistence/update.sh list)"
     ]
   }
 }

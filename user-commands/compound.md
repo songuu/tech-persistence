@@ -128,7 +128,58 @@ aliases:
 
 3. 如果本次工作没有对应的项目文档（如小修复），跳过此步
 
-### 第七步：输出复利报告
+### 第七步：采集 Skill 使用信号（v4 新增 — Skill 自迭代反馈回路）
+
+检查本次会话中执行过哪些 skill 或工作流命令（如 `/prototype`、`/review`、`/plan`、`/think`、`/work`、`/sprint`、自定义 skill）。对每个执行过的 skill，记录一条结构化的使用信号：
+
+```json
+{
+  "skill": "prototype",
+  "timestamp": "2026-04-13T10:20:30.000Z",
+  "session_id": "s-xxx",
+  "signals": {
+    "invocation": "explicit",
+    "steps_completed": [1, 2, 3],
+    "steps_skipped": [4],
+    "user_corrections": ["问题太多了，一次最多 3 个"],
+    "outcome": "completed",
+    "duration_minutes": 18,
+    "related_instincts_created": ["prefer-short-question-rounds"]
+  }
+}
+```
+
+字段说明：
+
+- `invocation`: `explicit`（用户显式触发） | `auto`（自动建议触发） | `skipped`（用户拒绝触发）
+- `steps_completed` / `steps_skipped`: skill 定义的步骤编号
+- `user_corrections`: 本次会话中针对该 skill 执行方式的纠正
+- `outcome`: `completed` | `abandoned`（用户中途放弃）
+- `related_instincts_created`: 本次 compound 新建的、与此 skill 相关的本能 id
+
+**写入位置**：追加到 `~/.claude/homunculus/skill-signals/{skill-name}.jsonl`，一个 skill 一个文件，追加写入（jsonl 格式）。
+
+**异常提示**：如果某个 skill 在最近 10 次调用中 `outcome: abandoned` 占比 > 30%，或 `user_corrections` 累计 3+ 次，在报告中附加提示：
+
+```text
+💡 /prototype 近期使用信号异常（放弃率 40%），建议 /skill-diagnose prototype
+```
+
+### 第八步：本能与 skill 差异标记（v4 新增）
+
+遍历第四步新创建的本能，判断是否与某个现有 skill（在 `~/.claude/skills/` 或 `~/.claude/commands/`）相关：
+
+- **判断依据**：本能的 `domain` 或 `trigger` 语义命中某个 skill 的职责范围
+- **命中时**：在本能 frontmatter 追加 `pending_absorption: "{skill-name}"`
+- **累积提示**：当某个 skill 累计 5+ 个待吸收本能时，在报告中附加：
+
+```text
+💡 5 个新本能与 /review 相关但未被吸收，建议 /skill-improve review --absorb
+```
+
+这是 skill 自迭代闭环的第一层（信号采集 + 差异标记）。后续层由 `/skill-diagnose`、`/skill-improve`、`/skill-eval`、`/skill-publish` 承担。
+
+### 第九步：输出复利报告
 
 ```text
 复利报告
@@ -148,11 +199,22 @@ aliases:
 
 项目文档: docs/plans/YYYY-MM-DD-xxx.md → completed
 
+Skill 使用信号:
+   /prototype: 1 次 (completed, 18min)
+   /review:    1 次 (completed, 0 纠正)
+   采集到 ~/.claude/homunculus/skill-signals/
+
+待吸收本能: 2 个本能已标记 pending_absorption: "review"
+
+⚠️ Skill 异常 (如有):
+   💡 /prototype 放弃率 40% → 建议 /skill-diagnose prototype
+
 复利统计:
    本项目累计: N 个解决方案, M 个本能, K 条 rules
    本月新增: +X 个解决方案
 
 下次遇到类似问题，/plan 会自动读取这些解决方案
+下次类似 skill 调用，/skill-diagnose 会基于信号数据给出改进建议
 ```
 
 ## 与其他命令的关系

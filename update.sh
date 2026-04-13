@@ -18,13 +18,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_HOME="${HOME}/.claude"
 
 # ─── 版本定义 ───
-LATEST_VERSION="v3.2"
+LATEST_VERSION="v4"
 
 # 可用版本列表（数组：name|desc）
 VERSIONS=(
     "v3|工作流层 + 复利循环 (think/plan/work/review/compound/sprint)"
     "v3.1|Obsidian 集成 (frontmatter/wikilinks)"
     "v3.2|文档持久化工作流 (docs/plans/YYYY-MM-DD-<slug>.md)"
+    "v4|Skill 自迭代闭环 (diagnose/improve/eval/publish + /prototype)"
 )
 
 # ─── 颜色输出 ───
@@ -162,6 +163,70 @@ upgrade_to_v3_1() {
     log_ok "v3.1 升级完成"
 }
 
+# v4: Skill 自迭代闭环
+upgrade_to_v4() {
+    log_section "升级到 v4：Skill 自迭代闭环"
+
+    # 1. 同步新的 skill 生命周期命令
+    echo "  1/5 同步 Skill 自迭代命令到 ~/.claude/commands/"
+    local skill_cmds=(skill-diagnose.md skill-improve.md skill-eval.md skill-publish.md)
+    for cmd in "${skill_cmds[@]}"; do
+        local src="${SCRIPT_DIR}/user-level/commands/${cmd}"
+        local dst="${CLAUDE_HOME}/commands/${cmd}"
+
+        if [[ -f "$src" ]]; then
+            safe_copy "$src" "$dst"
+            log_ok "/${cmd%.md}"
+        else
+            log_warn "未找到 $src，跳过"
+        fi
+    done
+
+    # 2. 同步 /prototype 工作流命令
+    echo ""
+    echo "  2/5 同步 /prototype 命令到 ~/.claude/commands/"
+    local proto_src="${SCRIPT_DIR}/user-commands/prototype.md"
+    if [[ -f "$proto_src" ]]; then
+        safe_copy "$proto_src" "${CLAUDE_HOME}/commands/prototype.md"
+        log_ok "/prototype"
+    fi
+
+    # 3. 同步更新后的 /compound（含 skill 信号采集）和 /learn（轻量版）
+    echo ""
+    echo "  3/5 升级 /compound 和 /learn"
+    if [[ -f "${SCRIPT_DIR}/user-commands/compound.md" ]]; then
+        safe_copy "${SCRIPT_DIR}/user-commands/compound.md" "${CLAUDE_HOME}/commands/compound.md"
+        log_ok "/compound (含 skill 使用信号采集)"
+    fi
+    if [[ -f "${SCRIPT_DIR}/user-level/commands/learn.md" ]]; then
+        safe_copy "${SCRIPT_DIR}/user-level/commands/learn.md" "${CLAUDE_HOME}/commands/learn.md"
+        log_ok "/learn (轻量版)"
+    fi
+
+    # 4. 安装 prototype-workflow skill
+    echo ""
+    echo "  4/5 安装 prototype-workflow skill"
+    local proto_skill_dir="${CLAUDE_HOME}/skills/prototype-workflow"
+    mkdir -p "$proto_skill_dir"
+    local proto_skill_src="${SCRIPT_DIR}/user-level/skills/prototype-workflow/SKILL.md"
+    if [[ -f "$proto_skill_src" ]]; then
+        cp "$proto_skill_src" "${proto_skill_dir}/SKILL.md"
+        log_ok "prototype-workflow skill"
+    fi
+
+    # 5. 创建 skill 自迭代相关的 homunculus 子目录
+    echo ""
+    echo "  5/5 初始化 skill-signals / skill-evals / skill-changelog 目录"
+    mkdir -p "${HOME}/.claude/homunculus/skill-signals"
+    mkdir -p "${HOME}/.claude/homunculus/skill-evals"
+    mkdir -p "${HOME}/.claude/homunculus/skill-changelog"
+    log_ok "~/.claude/homunculus/skill-signals/"
+    log_ok "~/.claude/homunculus/skill-evals/"
+    log_ok "~/.claude/homunculus/skill-changelog/"
+
+    log_ok "v4 升级完成"
+}
+
 # v3.2: 文档持久化工作流
 upgrade_to_v3_2() {
     log_section "升级到 v3.2：文档持久化工作流"
@@ -270,6 +335,7 @@ invoke_update() {
         "v3")   upgrade_to_v3 ;;
         "v3.1") upgrade_to_v3_1 ;;
         "v3.2") upgrade_to_v3_2 ;;
+        "v4")   upgrade_to_v4 ;;
     esac
 
     # 完成提示
@@ -284,6 +350,23 @@ invoke_update() {
         echo "  /think '小型需求' (单阶段使用也会生成文档)"
         echo ""
         echo "新文档位置: docs/plans/"
+        echo ""
+    elif [[ "$target" == "v4" ]]; then
+        echo "Skill 自迭代闭环（五层架构）："
+        echo ""
+        echo "  L1 信号采集: /compound 自动记录 skill 使用信号"
+        echo "  L2 诊断:     /skill-diagnose [name]  — 步骤热力图 + 改进建议"
+        echo "  L3 改进提案: /skill-improve [name]   — 基于数据生成修改提案"
+        echo "  L4 验证:     /skill-eval [name] --diff — A/B 对比通过率"
+        echo "  L5 发布:     /skill-publish [name]   — 备份 + changelog + 回滚"
+        echo ""
+        echo "配套新增: /prototype 原型多轮收敛 + prototype-workflow skill"
+        echo "信号存储: ~/.claude/homunculus/skill-signals/"
+        echo "测试集:   ~/.claude/homunculus/skill-evals/"
+        echo ""
+        echo "P0 起步（先让数据跑 1-2 个月）："
+        echo "  正常使用 /compound，它会自动采集 skill 使用信号"
+        echo "  一段时间后运行 /skill-diagnose 查看第一份诊断报告"
         echo ""
     fi
 }

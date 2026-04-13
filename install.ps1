@@ -134,7 +134,9 @@ function Install-Homunculus {
     @(
         "instincts\personal", "instincts\inherited",
         "evolved\skills", "evolved\commands", "evolved\agents",
-        "projects"
+        "projects",
+        # v4: Skill 自迭代相关
+        "skill-signals", "skill-evals", "skill-changelog"
     ) | ForEach-Object { Ensure-Dir (Join-Path $HomunculusDir $_) }
 
     $configDst = Join-Path $HomunculusDir "config.json"
@@ -162,18 +164,34 @@ function Install-User {
     Ensure-Dir (Join-Path $ClaudeHome "rules")
     Ensure-Dir (Join-Path $ClaudeHome "skills\memory")
     Ensure-Dir (Join-Path $ClaudeHome "skills\continuous-learning")
+    Ensure-Dir (Join-Path $ClaudeHome "skills\prototype-workflow")
 
     # CLAUDE.md
     Safe-CopyNoOverwrite (Join-Path $ScriptDir "user-level\CLAUDE.md") (Join-Path $ClaudeHome "CLAUDE.md")
     if (Test-Path (Join-Path $ClaudeHome "CLAUDE.md")) { Write-OK "CLAUDE.md" }
 
-    # Commands
-    $cmds = @("learn.md", "review-learnings.md", "session-summary.md", "instinct-status.md", "evolve.md", "instinct-export.md", "instinct-import.md")
+    # 学习层命令（user-level/commands/）
+    $cmds = @(
+        "learn.md", "review-learnings.md", "session-summary.md",
+        "instinct-status.md", "evolve.md", "instinct-export.md", "instinct-import.md",
+        # v4: Skill 自迭代闭环
+        "skill-diagnose.md", "skill-improve.md", "skill-eval.md", "skill-publish.md"
+    )
     foreach ($cmd in $cmds) {
         $src = Join-Path $ScriptDir "user-level\commands\$cmd"
         if (Test-Path $src) {
             Safe-Copy $src (Join-Path $ClaudeHome "commands\$cmd")
             Write-OK ("命令 /" + ($cmd -replace '\.md$', ''))
+        }
+    }
+
+    # 工作流层命令（user-commands/）
+    $workflowCmds = @("think.md", "plan.md", "work.md", "review.md", "compound.md", "sprint.md", "prototype.md")
+    foreach ($cmd in $workflowCmds) {
+        $src = Join-Path $ScriptDir "user-commands\$cmd"
+        if (Test-Path $src) {
+            Safe-Copy $src (Join-Path $ClaudeHome "commands\$cmd")
+            Write-OK ("工作流 /" + ($cmd -replace '\.md$', ''))
         }
     }
 
@@ -183,7 +201,11 @@ function Install-User {
     # Skills
     Copy-Item (Join-Path $ScriptDir "user-level\skills\memory\SKILL.md") (Join-Path $ClaudeHome "skills\memory\SKILL.md") -Force
     Copy-Item (Join-Path $ScriptDir "user-level\skills\continuous-learning\SKILL.md") (Join-Path $ClaudeHome "skills\continuous-learning\SKILL.md") -Force
-    Write-OK "技能 memory + continuous-learning"
+    $protoSkill = Join-Path $ScriptDir "user-level\skills\prototype-workflow\SKILL.md"
+    if (Test-Path $protoSkill) {
+        Copy-Item $protoSkill (Join-Path $ClaudeHome "skills\prototype-workflow\SKILL.md") -Force
+    }
+    Write-OK "技能 memory + continuous-learning + prototype-workflow"
 
     Install-Hooks
     Install-Homunculus
@@ -207,11 +229,13 @@ function Install-User {
     Write-OK "用户级别安装完成！"
     Write-Host ""
     Write-Host "  已安装:" -ForegroundColor White
-    Write-Host "    命令: /learn /review-learnings /session-summary"
-    Write-Host "          /instinct-status /evolve /instinct-export /instinct-import"
-    Write-Host "    技能: memory, continuous-learning"
-    Write-Host "    Hook: SessionStart, PreToolUse, PostToolUse, Stop"
-    Write-Host "    存储: $HomunculusDir"
+    Write-Host "    学习层:   /learn /review-learnings /session-summary"
+    Write-Host "              /instinct-status /evolve /instinct-export /instinct-import"
+    Write-Host "    工作流:   /think /plan /work /review /compound /sprint /prototype"
+    Write-Host "    Skill 自迭代: /skill-diagnose /skill-improve /skill-eval /skill-publish"
+    Write-Host "    技能:     memory, continuous-learning, prototype-workflow"
+    Write-Host "    Hook:     SessionStart, PreToolUse, PostToolUse, Stop"
+    Write-Host "    存储:     $HomunculusDir (含 skill-signals/evals/changelog)"
     Write-Host ""
     Write-Host "  下一步:" -ForegroundColor White
     Write-Host "    1. 编辑 $ClaudeHome\CLAUDE.md 填写个人信息"

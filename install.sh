@@ -76,6 +76,10 @@ install_homunculus() {
   mkdir -p "${HOMUNCULUS_DIR}/evolved/commands"
   mkdir -p "${HOMUNCULUS_DIR}/evolved/agents"
   mkdir -p "${HOMUNCULUS_DIR}/projects"
+  # v4: Skill 自迭代相关目录
+  mkdir -p "${HOMUNCULUS_DIR}/skill-signals"
+  mkdir -p "${HOMUNCULUS_DIR}/skill-evals"
+  mkdir -p "${HOMUNCULUS_DIR}/skill-changelog"
 
   # 默认配置
   if [[ ! -f "${HOMUNCULUS_DIR}/config.json" ]]; then
@@ -104,17 +108,33 @@ install_user() {
   mkdir -p "${CLAUDE_HOME}/rules"
   mkdir -p "${CLAUDE_HOME}/skills/memory"
   mkdir -p "${CLAUDE_HOME}/skills/continuous-learning"
+  mkdir -p "${CLAUDE_HOME}/skills/prototype-workflow"
 
   # CLAUDE.md
   safe_copy_no_overwrite "${SCRIPT_DIR}/user-level/CLAUDE.md" "${CLAUDE_HOME}/CLAUDE.md"
   [[ -f "${CLAUDE_HOME}/CLAUDE.md" ]] && log_ok "~/.claude/CLAUDE.md"
 
   # Commands (覆盖安装)
-  local cmds=(learn.md review-learnings.md session-summary.md instinct-status.md evolve.md instinct-export.md instinct-import.md)
+  # 学习层命令（user-level/commands/）
+  local cmds=(
+    learn.md review-learnings.md session-summary.md
+    instinct-status.md evolve.md instinct-export.md instinct-import.md
+    # v4: Skill 自迭代闭环
+    skill-diagnose.md skill-improve.md skill-eval.md skill-publish.md
+  )
   for cmd in "${cmds[@]}"; do
     if [[ -f "${SCRIPT_DIR}/user-level/commands/${cmd}" ]]; then
       safe_copy "${SCRIPT_DIR}/user-level/commands/${cmd}" "${CLAUDE_HOME}/commands/${cmd}"
       log_ok "命令 /${cmd%.md}"
+    fi
+  done
+
+  # 工作流层命令（user-commands/）
+  local workflow_cmds=(think.md plan.md work.md review.md compound.md sprint.md prototype.md)
+  for cmd in "${workflow_cmds[@]}"; do
+    if [[ -f "${SCRIPT_DIR}/user-commands/${cmd}" ]]; then
+      safe_copy "${SCRIPT_DIR}/user-commands/${cmd}" "${CLAUDE_HOME}/commands/${cmd}"
+      log_ok "工作流 /${cmd%.md}"
     fi
   done
 
@@ -124,7 +144,10 @@ install_user() {
   # Skills
   cp "${SCRIPT_DIR}/user-level/skills/memory/SKILL.md" "${CLAUDE_HOME}/skills/memory/SKILL.md"
   cp "${SCRIPT_DIR}/user-level/skills/continuous-learning/SKILL.md" "${CLAUDE_HOME}/skills/continuous-learning/SKILL.md"
-  log_ok "技能 memory + continuous-learning"
+  if [[ -f "${SCRIPT_DIR}/user-level/skills/prototype-workflow/SKILL.md" ]]; then
+    cp "${SCRIPT_DIR}/user-level/skills/prototype-workflow/SKILL.md" "${CLAUDE_HOME}/skills/prototype-workflow/SKILL.md"
+  fi
+  log_ok "技能 memory + continuous-learning + prototype-workflow"
 
   # Hooks
   install_hooks
@@ -154,11 +177,13 @@ install_user() {
   log_ok "用户级别安装完成！"
   echo ""
   echo "  已安装:"
-  echo "    命令:  /learn /review-learnings /session-summary"
-  echo "           /instinct-status /evolve /instinct-export /instinct-import"
-  echo "    技能:  memory, continuous-learning"
-  echo "    Hook:  SessionStart, PreToolUse, PostToolUse, Stop"
-  echo "    存储:  ~/.claude/homunculus/"
+  echo "    学习层:  /learn /review-learnings /session-summary"
+  echo "             /instinct-status /evolve /instinct-export /instinct-import"
+  echo "    工作流:  /think /plan /work /review /compound /sprint /prototype"
+  echo "    Skill自迭代: /skill-diagnose /skill-improve /skill-eval /skill-publish"
+  echo "    技能:    memory, continuous-learning, prototype-workflow"
+  echo "    Hook:    SessionStart, PreToolUse, PostToolUse, Stop"
+  echo "    存储:    ~/.claude/homunculus/ (含 skill-signals/evals/changelog)"
   echo ""
   echo "  下一步:"
   echo "    1. 编辑 ~/.claude/CLAUDE.md 填写个人信息"
