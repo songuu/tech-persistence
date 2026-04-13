@@ -268,31 +268,71 @@ flowchart TD
 - Git
 - Claude Code CLI
 
-### Windows（PowerShell）
+### 首次安装
+
+#### Windows（PowerShell）
 
 ```powershell
 # 环境检查
 node scripts\preflight.js
 
-# 安装 v2 基础（本能系统 + Hook + 知识管理命令）
+# 安装基础（本能系统 + Hook + 知识管理命令）
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -All
 
-# 安装 v3 升级（工作流层 + 复利循环）
-powershell -ExecutionPolicy Bypass -File .\upgrade-v3.ps1
+# 一键升级到最新版本
+powershell -ExecutionPolicy Bypass -File .\update.ps1
 ```
 
-### macOS / Linux
+#### macOS / Linux
 
 ```bash
 # 环境检查
 node scripts/preflight.js
 
-# 安装 v2 基础
+# 安装基础
 bash install.sh --all
 
-# 安装 v3 升级
-bash upgrade-v3.sh
+# 一键升级到最新版本
+bash update.sh
 ```
+
+### 升级：通用 `update` 脚本
+
+`update.sh` / `update.ps1` 是**通用升级脚本**，不带参数默认升级到最新版，也可以指定任意版本：
+
+```bash
+# 升级到最新版本（默认）
+bash update.sh
+
+# 升级到指定版本
+bash update.sh v3.2
+bash update.sh v3.1
+bash update.sh v3
+
+# 查看所有可用版本
+bash update.sh list
+
+# 显示帮助
+bash update.sh help
+```
+
+```powershell
+# Windows 等价命令
+.\update.ps1
+.\update.ps1 v3.2
+.\update.ps1 list
+.\update.ps1 help
+```
+
+升级是**增量的**：每个版本函数只负责该版本相对于前一版本的增量变更，已存在的文件会自动备份为 `.bak.YYYYMMDDHHMM`。
+
+**v3.2 升级内容**（当前最新）：
+
+1. 同步最新的 6 个工作流命令（含文档持久化指令）到 `~/.claude/commands/`
+2. 在当前项目创建 `docs/plans/` 目录
+3. 复制 `TEMPLATE.md` 到项目，作为功能文档的起点
+
+升级后，任何 `/think` `/plan` `/work` `/review` `/compound` `/sprint` 都会自动在 `docs/plans/YYYY-MM-DD-<slug>.md` 生成并更新项目文档。
 
 ### 安装后
 1. 编辑 `~/.claude/CLAUDE.md` 填写个人偏好

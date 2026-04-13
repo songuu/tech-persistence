@@ -73,6 +73,10 @@
 - [x] **Task 7**: 修改 `/sprint` 命令 — 文件: `user-commands/sprint.md`，增加「项目文档贯穿全流程」节
 - [x] **Task 8**: 更新 README.md 反映新工作流
 - [x] **Task 9**: 在 CLAUDE.md 增加「功能变更必须同步更新文档」规则
+- [x] **Task 10**: ~~新增 `upgrade-v3.2.ps1` / `upgrade-v3.2.sh` 升级脚本~~（已被 Task 12 通用化替代）
+- [x] **Task 11**: 更新 README.md 安装章节，增加 v3.2 升级步骤说明
+- [x] **Task 12**: 重构为通用 `update.sh` / `update.ps1` 脚本 — 默认升最新，支持 `v3.2`/`v3.1`/`v3`/`list`/`help` 参数，删除旧的 `upgrade-v3.ps1` 和 `upgrade-v3.2.*` 脚本
+- [x] **Task 13**: 更新 README.md 安装章节，用 `update.sh` 替换所有 `upgrade-*` 脚本
 
 ### 测试策略
 
@@ -91,8 +95,10 @@
 ### 涉及文件
 
 - 新建：`docs/plans/TEMPLATE.md`, `docs/plans/2026-04-09-docs-plan-persistence.md`
+- 新建：`update.ps1`, `update.sh`（通用升级脚本：默认最新，支持版本参数）
+- 删除：`upgrade-v3.ps1`（被 `update.ps1` 的 v3 分支取代）
 - 修改：6 个 user-commands（think/plan/work/review/compound/sprint）
-- 修改：`README.md`（反映新工作流和产出文件路径）
+- 修改：`README.md`（反映新工作流和产出文件路径、新增 update 升级说明）
 - 修改：`CLAUDE.md`（新增文档同步规则）
 
 ---
@@ -112,6 +118,10 @@
 | 2026-04-09 | Task 7 | `user-commands/sprint.md` 顶部增加「项目文档贯穿全流程」节 |
 | 2026-04-09 | Task 8 | 更新 `README.md`：修正产出文件流图、目录结构、命令速查表 |
 | 2026-04-09 | Task 9 | 更新 `CLAUDE.md`：新增「功能变更必须同步更新文档」规则 |
+| 2026-04-09 | Task 10 | 新增 `upgrade-v3.2.ps1` 和 `upgrade-v3.2.sh`：一键同步最新命令到 ~/.claude/commands/，初始化 docs/plans/ + 复制 TEMPLATE.md |
+| 2026-04-09 | Task 11 | 更新 `README.md` 安装章节：增加 v3.2 升级命令和增量升级说明 |
+| 2026-04-09 | Task 12 | 重构为通用 `update.sh` / `update.ps1`：默认升级到最新版，支持 `v3.2`/`v3.1`/`v3`/`list`/`help` 参数；每个版本对应独立升级函数，分发器负责路由；删除 `upgrade-v3.ps1`、`upgrade-v3.2.ps1`、`upgrade-v3.2.sh` |
+| 2026-04-09 | Task 13 | 更新 `README.md` 安装章节：用 `update.sh` 替换所有 `upgrade-*` 脚本，增加 list/help/版本参数的用法示例 |
 
 ---
 
@@ -149,11 +159,14 @@
 - **一文档一功能**：参考 superpowers 的做法，`YYYY-MM-DD-<slug>.md` 单文件多章节优于每阶段一文件，避免文件碎片化
 - **文件名即索引**：按日期前缀排序后，文件列表本身就是清晰的时间线，无需维护单独的 INDEX.md
 - **吃自己的狗粮**：本次改造的第一个使用者就是改造本身 — `docs/plans/2026-04-09-docs-plan-persistence.md` 就是新系统生成的第一个文档
+- **通用升级脚本胜过版本化脚本**：用户期望 `update.sh` 的语义是"一个命令升到最新，带参数升到指定版本"，而非为每个版本新建一个 `upgrade-vX.Y.sh`。版本化脚本会让安装说明随版本爆炸，通用脚本只需维护 `LATEST_VERSION` 常量和一个分发器
+- **升级函数分发器模式**：每个版本对应一个独立的升级函数（`upgrade_to_v3_2`），函数只负责该版本相对于前一版本的增量变更；主分发器通过 switch/case 路由参数；新增版本只需加一个函数 + 一行 case，不改动其他代码
 
 ### 创建/更新的本能
 
 - 新增本能：`prompt-workflow-doc-persistence` — 在 prompt 驱动的工作流命令中，持久化指令必须独立、明确、带 CRITICAL 标记
 - 新增本能：`feature-change-triggers-docs-update` — 任何功能层面的变更都必须同步更新 README 和相关文档
+- 新增本能：`prefer-generic-cli-over-versioned-scripts` — 面向用户的升级/构建工具应该是一个通用命令 + 参数，而非为每个版本新建脚本。默认值对应最新版，`list` 查看所有版本
 
 ### 解决方案文档
 
