@@ -7,7 +7,12 @@
       "Bash(ls c:/project/my/tech-persistence/user-level/commands/skill-*.md)",
       "Bash(bash -n c:/project/my/tech-persistence/install.sh)",
       "Bash(bash -n c:/project/my/tech-persistence/update.sh)",
-      "Bash(bash c:/project/my/tech-persistence/update.sh list)"
+      "Bash(bash c:/project/my/tech-persistence/update.sh list)",
+      "Bash(git -C c:/project/my/tech-persistence show HEAD:update.ps1)",
+      "Bash(xxd)",
+      "Bash(printf '\\\\xef\\\\xbb\\\\xbf')",
+      "Bash(cat update.ps1)",
+      "Bash(mv update.ps1.new update.ps1)"
     ]
   }
 }
