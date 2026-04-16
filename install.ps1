@@ -8,6 +8,7 @@ param(
     [switch]$User,
     [switch]$Project,
     [switch]$All,
+    [switch]$Obsidian,
     [switch]$HooksOnly,
     [switch]$Help
 )
@@ -45,7 +46,7 @@ function Install-User {
     Write-Section "Installing user-level -> $ClaudeHome"
 
     # Directories
-    @("commands","rules","skills/memory","skills/continuous-learning/hooks","skills/prototype-workflow") | ForEach-Object { Ensure-Dir (Join-Path $ClaudeHome $_) }
+    @("commands","rules","skills/memory","skills/continuous-learning/hooks","skills/prototype-workflow","skills/test-strategy","skills/context-handoff") | ForEach-Object { Ensure-Dir (Join-Path $ClaudeHome $_) }
     @("instincts/personal","instincts/inherited","evolved/skills","evolved/commands","evolved/agents","projects","skill-signals","skill-evals","skill-changelog") | ForEach-Object { Ensure-Dir (Join-Path $HomunculusDir $_) }
 
     # CLAUDE.md
@@ -62,7 +63,7 @@ function Install-User {
     Safe-CopyNew (Join-Path $ScriptDir "user-level/rules/general-standards.md") (Join-Path $ClaudeHome "rules/general-standards.md")
 
     # Skills
-    @("memory","continuous-learning","prototype-workflow") | ForEach-Object {
+    @("memory","continuous-learning","prototype-workflow","test-strategy","context-handoff") | ForEach-Object {
         $src = Join-Path $ScriptDir "user-level/skills/$_/SKILL.md"
         if (Test-Path $src) {
             Copy-Item $src (Join-Path $ClaudeHome "skills/$_/SKILL.md") -Force
@@ -120,12 +121,24 @@ function Install-Project {
     Write-Host "  git add CLAUDE.md .claude/ docs/solutions/" -ForegroundColor Cyan
 }
 
+function Install-Obsidian {
+    Write-Section "Initializing Obsidian vault"
+    $initScript = Join-Path $ScriptDir "scripts/init-obsidian-vault.js"
+    if (Test-Path $initScript) {
+        & node $initScript
+        Write-OK "Obsidian vault initialized"
+    } else {
+        Write-Warn "scripts/init-obsidian-vault.js not found"
+    }
+}
+
 # Check Node.js
 try { $nv = (& node --version 2>&1).ToString() -replace 'v',''; if ([int]($nv.Split('.')[0]) -lt 18) { throw "old" } } catch { Write-Host "[FAIL] Node.js >= 18 required" -ForegroundColor Red; exit 1 }
 
-if ($Help) { Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -HooksOnly`n" }
+if ($Help) { Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -Obsidian | -HooksOnly`n" }
 elseif ($All) { Install-User; Install-Project }
 elseif ($User) { Install-User }
 elseif ($Project) { Install-Project }
+elseif ($Obsidian) { Install-Obsidian }
 elseif ($HooksOnly) { $hd = Join-Path $ClaudeHome "skills/continuous-learning/hooks"; Ensure-Dir $hd; Get-ChildItem (Join-Path $ScriptDir "scripts") -Filter "*.js" | ForEach-Object { Copy-Item $_.FullName (Join-Path $hd $_.Name) -Force }; Write-OK "hooks updated" }
-else { Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -HooksOnly`n" }
+else { Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -Obsidian | -HooksOnly`n" }

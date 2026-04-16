@@ -105,7 +105,9 @@ function generateGraphConfig() {
       { query: 'tag:#session', color: { a: 1, rgb: 2263842 } },
       { query: 'tag:#rule', color: { a: 1, rgb: 16744192 } },
       { query: 'tag:#solution', color: { a: 1, rgb: 65382 } },
-      { query: 'tag:#architecture', color: { a: 1, rgb: 16711680 } }
+      { query: 'tag:#architecture', color: { a: 1, rgb: 16711680 } },
+      { query: 'tag:#sprint', color: { a: 1, rgb: 29695 } },
+      { query: 'tag:#handoff', color: { a: 1, rgb: 16761095 } }
     ],
     collapse_display: false,
     lineSizeMultiplier: 1,
@@ -209,6 +211,44 @@ related_instincts: []
 `;
 }
 
+function generateHandoffTemplate() {
+  return `---
+type: sprint-handoff
+sprint_doc: "{{sprint_doc}}"
+checkpoint_number: {{number}}
+created: "{{datetime}}"
+phase: "{{phase}}"
+tasks_done: {{tasks_done}}
+tasks_total: {{tasks_total}}
+tags:
+  - handoff
+  - sprint
+---
+
+# Sprint Handoff #{{number}}
+
+## Sprint 状态
+- 文档: {{sprint_doc}}
+- 阶段: {{phase}}
+- Task: {{tasks_done}}/{{tasks_total}} 完成
+
+## 已完成的 Task
+
+## 未完成的 Task
+
+## 关键决策
+
+## 已修改的文件
+
+## 当前测试状态
+
+## 下一步
+
+## Related
+- [[{{sprint_doc_name}}]]
+`;
+}
+
 function generateDashboard() {
   return `---
 tags:
@@ -250,6 +290,30 @@ TABLE confidence, domain, trigger
 FROM #instinct
 WHERE number(confidence) >= 0.7
 SORT confidence DESC
+\`\`\`
+
+## Active Sprints
+\`\`\`dataview
+TABLE status, tasks_done + "/" + tasks_total AS progress
+FROM #sprint
+WHERE status != "completed"
+SORT file.mtime DESC
+\`\`\`
+
+## Recent Checkpoints
+\`\`\`dataview
+TABLE sprint_doc, phase, checkpoint_number
+FROM #handoff
+SORT created DESC
+LIMIT 5
+\`\`\`
+
+## Recent Solutions
+\`\`\`dataview
+TABLE date
+FROM #solution
+SORT date DESC
+LIMIT 5
 \`\`\`
 `;
 }
@@ -325,7 +389,8 @@ function main() {
   fs.writeFileSync(path.join(templatesDir, 'instinct.md'), generateInstinctTemplate());
   fs.writeFileSync(path.join(templatesDir, 'session-summary.md'), generateSessionTemplate());
   fs.writeFileSync(path.join(templatesDir, 'solution.md'), generateSolutionTemplate());
-  console.log('   ✅ _templates/ 模板文件 (3 个)');
+  fs.writeFileSync(path.join(templatesDir, 'handoff.md'), generateHandoffTemplate());
+  console.log('   ✅ _templates/ 模板文件 (4 个)');
 
   // _inbox/ (新笔记默认位置)
   const inboxDir = path.join(vaultPath, '_inbox');
@@ -333,13 +398,19 @@ function main() {
 
   // Dashboard
   const dashboardPath = path.join(vaultPath, 'Dashboard.md');
-  if (!fs.existsSync(dashboardPath)) {
+  if (fs.existsSync(dashboardPath)) {
+    // Backup and regenerate with new queries
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
+    fs.copyFileSync(dashboardPath, dashboardPath + '.bak.' + ts);
+    fs.writeFileSync(dashboardPath, generateDashboard());
+    console.log('   ✅ Dashboard.md 更新 (旧版已备份)');
+  } else {
     fs.writeFileSync(dashboardPath, generateDashboard());
     console.log('   ✅ Dashboard.md 知识仪表板');
   }
 
   // evolved/ 目录（确保存在）
-  const evolvedDirs = ['evolved/skills', 'evolved/rules'];
+  const evolvedDirs = ['evolved/skills', 'evolved/rules', 'skill-signals', 'skill-evals', 'skill-changelog'];
   evolvedDirs.forEach(dir => {
     fs.mkdirSync(path.join(vaultPath, dir), { recursive: true });
   });

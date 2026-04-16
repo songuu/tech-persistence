@@ -3,14 +3,11 @@
 /**
  * inject-context.js — SessionStart Hook 上下文注入
  *
- * 灵感来源：
- *   - Claude-Mem: SessionStart 时注入近期会话摘要和观察
- *   - ECC v2.1: 注入高置信度的项目本能
- *
  * 在每次新会话开始时：
- *   1. 加载最近 N 个会话摘要
- *   2. 加载高置信度本能（>=0.7 自动应用）
- *   3. 格式化后通过 hookSpecificOutput.additionalContext 注入
+ *   1. 检测未完成的 sprint handoff 文件（最高优先）
+ *   2. 加载最近 N 个会话摘要
+ *   3. 加载高置信度本能（>=0.7 自动应用）
+ *   4. 格式化后通过 hookSpecificOutput.additionalContext 注入
  */
 
 const fs = require('fs');
@@ -69,6 +66,61 @@ function loadRecentSessions(sessionsDir, limit = 5) {
     .reverse();
 }
 
+/**
+ * 检测未完成的 sprint handoff 文件
+ * 查找 docs/plans/ 下最新的 *-handoff-*.md
+ */
+function detectPendingHandoff() {
+  const plansDir = path.join(process.cwd(), 'docs', 'plans');
+  if (!fs.existsSync(plansDir)) return null;
+
+  const handoffs = fs.readdirSync(plansDir)
+    .filter(f => f.includes('-handoff-') && f.endsWith('.md'))
+    .sort()
+    .reverse();
+
+  if (handoffs.length === 0) return null;
+
+  const latest = handoffs[0];
+  const content = fs.readFileSync(path.join(plansDir, latest), 'utf-8');
+
+  // 检查关联的 sprint 文档是否还是 in-progress/checkpoint 状态
+  const sprintDocMatch = content.match(/sprint_doc:\s*"?([^"\n]+)"?/);
+  if (sprintDocMatch) {
+    const sprintDocPath = path.join(process.cwd(), sprintDocMatch[1]);
+    if (fs.existsSync(sprintDocPath)) {
+      const sprintContent = fs.readFileSync(sprintDocPath, 'utf-8');
+      // 如果 sprint 已经 completed 则不注入 handoff
+      if (sprintContent.match(/status:\s*completed/)) return null;
+    }
+  }
+
+  return { file: latest, content: content };
+}
+
+/**
+ * 检测未完成的 prototype 收敛状态
+ */
+function detectPendingPrototype() {
+  const plansDir = path.join(process.cwd(), '.claude', 'plans');
+  if (!fs.existsSync(plansDir)) return null;
+
+  const statuses = fs.readdirSync(plansDir)
+    .filter(f => f.startsWith('prototype-') && f.endsWith('-status.md'))
+    .sort()
+    .reverse();
+
+  if (statuses.length === 0) return null;
+
+  const latest = statuses[0];
+  const content = fs.readFileSync(path.join(plansDir, latest), 'utf-8');
+
+  // 如果已收敛完成则不注入
+  if (content.includes('收敛完成') || content.includes('converged')) return null;
+
+  return { file: latest, content: content.slice(0, 500) }; // 只取摘要
+}
+
 function main() {
   const project = detectProject();
   const home = process.env.HOME || process.env.USERPROFILE;
@@ -76,6 +128,18 @@ function main() {
   const projectDir = path.join(hDir, 'projects', project.id);
 
   const sections = [];
+
+  // 0. 未完成的 sprint handoff（最高优先）
+  const handoff = detectPendingHandoff();
+  if (handoff) {
+    sections.push(`## ⚡ 未完成的 Sprint (从 checkpoint 恢复)\n\n文件: docs/plans/${handoff.file}\n\n${handoff.content.slice(0, 1500)}`);
+  }
+
+  // 0b. 未完成的 prototype 收敛
+  const prototype = detectPendingPrototype();
+  if (prototype) {
+    sections.push(`## 🔄 未完成的原型收敛\n\n文件: .claude/plans/${prototype.file}\n\n${prototype.content}`);
+  }
 
   // 1. 近期会话摘要
   const sessions = loadRecentSessions(path.join(projectDir, 'sessions'), 3);
@@ -105,15 +169,13 @@ function main() {
   }
 
   if (sections.length === 0) {
-    process.exit(0); // 无内容可注入
+    process.exit(0);
   }
 
-  // 输出格式：Claude Code 2.1+ 通过 additionalContext 注入
   const context = `<learned-context project="${project.name}">
 ${sections.join('\n\n')}
 </learned-context>`;
 
-  // 通过 stdout 输出 JSON，Claude Code 会读取
   const output = JSON.stringify({
     hookSpecificOutput: {
       additionalContext: context

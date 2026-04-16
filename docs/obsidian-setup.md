@@ -103,6 +103,8 @@ bash install.sh --obsidian /path/to/your/vault
 | `#rule` | 橙色 | 规则文件 |
 | `#solution` | 深绿 | 解决方案 |
 | `#architecture` | 红色 | 架构决策 |
+| `#sprint` | 青色 | Sprint 文档 |
+| `#handoff` | 金色 | Sprint 交接点 |
 
 在 Graph View 中可以清晰看到不同类型知识节点的分布和关联。
 

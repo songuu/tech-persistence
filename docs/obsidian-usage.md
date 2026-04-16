@@ -283,3 +283,65 @@ Claude Code 会话
                                → Dataview 查询
                                → 全文搜索
 ```
+
+---
+
+## Sprint 交接工作流
+
+### 自动 Checkpoint
+
+Stop Hook 在每次会话结束时自动检测活跃 Sprint：
+- 如果 `docs/plans/` 中有 `status: in-progress` 的 Sprint 文档
+- 自动生成 `*-handoff-N.md` 交接文件
+- 文件包含：Task 进度、修改文件列表、观察统计
+- 下次 SessionStart 自动检测并注入 handoff 状态
+
+### 手动 Checkpoint
+
+```
+/checkpoint               ← 保存详细状态（含关键决策）
+/sprint resume            ← 从最新 handoff 恢复
+```
+
+### Graph View 中的 Sprint 链路
+
+```
+Sprint 文档 (青色 #sprint)
+  ├── Handoff #1 (金色 #handoff) ← 自动生成
+  ├── Handoff #2 (金色 #handoff)
+  ├── Solution A (深绿 #solution)
+  └── Instinct X (紫色 #instinct)
+```
+
+### Sprint 相关 Dataview 查询
+
+**活跃 Sprint：**
+````
+```dataview
+TABLE status, tasks_done + "/" + tasks_total AS progress
+FROM #sprint
+WHERE status != "completed"
+```
+````
+
+**Sprint 的 Checkpoint 历史：**
+````
+```dataview
+TABLE checkpoint_number, phase, created
+FROM #handoff
+WHERE sprint_doc = "docs/plans/YOUR-SPRINT.md"
+SORT checkpoint_number ASC
+```
+````
+
+## 完整知识类型映射
+
+| 类型 | Tag | Graph 颜色 | 产生方式 |
+|------|-----|-----------|---------|
+| 本能 | `#instinct` | 紫色 | Hook + /compound |
+| 会话 | `#session` | 绿色 | Stop Hook |
+| 解决方案 | `#solution` | 深绿 | /compound |
+| 规则 | `#rule` | 橙色 | /compound /learn |
+| 架构决策 | `#architecture` | 红色 | /compound |
+| Sprint | `#sprint` | 青色 | /sprint |
+| 交接点 | `#handoff` | 金色 | Stop Hook 自动 + /checkpoint |
