@@ -47,6 +47,30 @@ const replacements = [
   [/\.claude\/plans/g, '.codex/plans'],
 ];
 
+const runHookJs = `#!/usr/bin/env node
+
+const path = require('path');
+
+const [, , scriptName, ...scriptArgs] = process.argv;
+
+if (!scriptName) {
+  process.exit(0);
+}
+
+process.env.TECH_PERSISTENCE_RUNTIME = 'codex';
+
+const scriptPath = path.join(__dirname, scriptName);
+process.argv = [process.argv[0], scriptPath, ...scriptArgs];
+require(scriptPath);
+`;
+
+const runHookCmd = `@echo off
+setlocal
+set "SCRIPT_DIR=%~dp0"
+node "%SCRIPT_DIR%run-hook.js" %*
+exit /b 0
+`;
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -67,6 +91,11 @@ function copyTextFile(source, target, shouldTransform = true) {
   ensureDir(path.dirname(target));
   const content = fs.readFileSync(source, 'utf-8');
   fs.writeFileSync(target, shouldTransform ? transform(content) : content);
+}
+
+function writeTextFile(target, content) {
+  ensureDir(path.dirname(target));
+  fs.writeFileSync(target, content);
 }
 
 function assertInventory(label, actual, expected) {
@@ -133,7 +162,9 @@ function copyHooks() {
     path.join(repoRoot, 'scripts', 'lib', 'runtime-paths.js'),
     path.join(targetDir, 'lib', 'runtime-paths.js')
   );
-  return 4;
+  writeTextFile(path.join(targetDir, 'run-hook.js'), runHookJs);
+  writeTextFile(path.join(targetDir, 'run-hook.cmd'), runHookCmd);
+  return 6;
 }
 
 function copyHomunculusTemplate() {

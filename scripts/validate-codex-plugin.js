@@ -165,9 +165,9 @@ if (isFile(hooksPath, 'hooks.json')) {
   isFile(path.join(pluginRoot, 'hooks', script), `hook script ${script}`);
 });
 
-validateOptionalFile(path.join(pluginRoot, 'hooks', 'lib', 'runtime-paths.js'), 'hook script lib/runtime-paths.js');
-validateOptionalFile(path.join(pluginRoot, 'hooks', 'run-hook.cmd'), 'hook script run-hook.cmd');
-validateOptionalFile(path.join(pluginRoot, 'hooks', 'run-hook.js'), 'hook script run-hook.js');
+isFile(path.join(pluginRoot, 'hooks', 'lib', 'runtime-paths.js'), 'hook script lib/runtime-paths.js');
+isFile(path.join(pluginRoot, 'hooks', 'run-hook.cmd'), 'hook script run-hook.cmd');
+isFile(path.join(pluginRoot, 'hooks', 'run-hook.js'), 'hook script run-hook.js');
 validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence-small.svg'), 'asset tech-persistence-small.svg');
 validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence.svg'), 'asset tech-persistence.svg');
 
