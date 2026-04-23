@@ -164,9 +164,29 @@ function runCodexPreflight() {
       'prototype-workflow',
       'test-strategy',
       'context-handoff',
+      'checkpoint',
+      'compound',
+      'evolve',
+      'instinct-export',
+      'instinct-import',
+      'instinct-status',
+      'learn',
+      'plan',
+      'prototype',
+      'review',
+      'review-learnings',
+      'session-summary',
+      'skill-diagnose',
+      'skill-eval',
+      'skill-improve',
+      'skill-publish',
+      'sprint',
+      'test',
+      'think',
+      'work',
     ];
     if (!fs.existsSync(skillsDir)) {
-      console.log('     不存在 — 将安装 5 个用户技能');
+      console.log(`     不存在 — 将安装 ${requiredSkills.length} 个 Codex skills`);
       return true;
     }
     const missing = requiredSkills.filter((name) => !fs.existsSync(path.join(skillsDir, name, 'SKILL.md')));
@@ -174,7 +194,7 @@ function runCodexPreflight() {
       console.log(`     缺少: ${missing.join(', ')} — 安装时会补齐`);
       return true;
     }
-    console.log('     5 个用户技能已存在 — 安装时会刷新本系统技能');
+    console.log(`     ${requiredSkills.length} 个 Codex skills 已存在 — 安装时会刷新本系统技能`);
     return 'warn';
   });
 
@@ -212,7 +232,7 @@ function runCodexPreflight() {
         return false;
       }
       if (entry.policy?.installation !== 'INSTALLED_BY_DEFAULT') {
-        console.log('     tech-persistence 需要 INSTALLED_BY_DEFAULT 才能直接加载命令');
+        console.log('     tech-persistence 需要 INSTALLED_BY_DEFAULT 才能直接加载 Codex skills');
         return false;
       }
       console.log('     可通过 codex plugin marketplace add . 注册');

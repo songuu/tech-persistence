@@ -1,0 +1,94 @@
+---
+name: review
+description: Codex-compatible entry point for the former /review command. 多角度代码审查：安全/性能/架构/质量/测试覆盖(风险自适应)
+---
+
+# Review
+
+Codex CLI currently registers plugin bundles as skills, apps, and MCP servers. It does not register custom plugin `commands/*.md` files as interactive slash commands in the TUI, so use this skill as the supported Codex entry point for the former `/review` command.
+
+## Invocation
+
+Use `$review <arguments>` or select this skill through Codex's `@` picker. Treat the user's text after the skill name as the command arguments.
+
+When the command instructions below mention `/review`, interpret that as this `$review` skill invocation while running in Codex.
+
+## Command Instructions
+
+# /review — 多视角审查模式
+
+对当前变更进行多角度审查。
+
+## 输入
+- 无参数：审查 `git diff` 全部变更
+- `$ARGUMENTS` 指定文件或目录：只审查指定范围
+
+## 5 个审查视角
+
+### 视角 1: 安全审查员 🔒
+SQL 注入、XSS、CSRF、密钥硬编码、输入验证、权限检查
+
+### 视角 2: 性能工程师 ⚡
+N+1 查询、不必要全量加载、缺少索引、内存泄漏、可缓存未缓存
+
+### 视角 3: 架构审查员 🏗️
+是否遵循项目模式、分层边界、不必要耦合、DRY/YAGNI、与本能一致
+
+### 视角 4: 代码质量 📝
+命名语义、函数长度（>50行警告）、错误处理完整性、类型正确性、边缘情况
+
+### 视角 5: 测试覆盖 🧪（风险自适应）
+
+**不是简单检查"有没有测试"，而是检查"测试深度是否匹配风险等级"：**
+
+对每个变更文件评估风险等级，然后检查实际测试：
+
+```markdown
+| 文件 | 风险 | 应测等级 | 实际用例 | 结论 |
+|------|------|---------|---------|------|
+| auth.ts | L4 | 20+ | 22 | ✅ 充分 |
+| UserTable.tsx | L2 | 5-10 | 6 | ✅ 充分 |
+| format.ts | L2 | 5-10 | 0 | 🔴 缺失 |
+| table.css | L0 | 免测 | 0 | ✅ 正确 |
+```
+
+关键检查：
+- 🔴 高风险文件(L3/L4) 测试不足 → P0 问题
+- 🔴 Bug 修复无回归测试 → P0 问题
+- 🟡 中风险文件(L2) 测试不足 → P1 问题
+- ✅ 低风险文件(L0/L1) 无测试 → 正确（不浪费）
+
+## 输出格式
+
+```markdown
+## 审查报告
+
+### 🔴 P0 — 必须修复
+| # | 视角 | 文件:行 | 问题 |
+|---|------|---------|------|
+
+### 🟡 P1 — 建议修复
+| # | 视角 | 文件:行 | 问题 |
+|---|------|---------|------|
+
+### 🟢 P2 — 可选优化
+| # | 视角 | 文件:行 | 问题 |
+|---|------|---------|------|
+
+### ✅ 亮点
+
+### 总评
+[1-2 句总结] 置信度: [可以发布/需要修复/需要重做]
+```
+
+## 审查后流程
+- P0：立即修复
+- P1：列出后等用户确认
+- P2：记录 backlog
+- 全部处理后 → `/compound`
+
+## 与本能系统集成
+- 审查时读取 rules/ 中的已知模式
+- 发现新反模式 → 标注 `[🧠 新发现]`
+- 新发现会在 /compound 中被提取为本能
+

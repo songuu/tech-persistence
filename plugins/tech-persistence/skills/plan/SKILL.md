@@ -1,0 +1,104 @@
+---
+name: plan
+description: Codex-compatible entry point for the former /plan command. 架构师视角生成结构化实现计划，含任务拆解、风险评估、测试策略
+---
+
+# Plan
+
+Codex CLI currently registers plugin bundles as skills, apps, and MCP servers. It does not register custom plugin `commands/*.md` files as interactive slash commands in the TUI, so use this skill as the supported Codex entry point for the former `/plan` command.
+
+## Invocation
+
+Use `$plan <arguments>` or select this skill through Codex's `@` picker. Treat the user's text after the skill name as the command arguments.
+
+When the command instructions below mention `/plan`, interpret that as this `$plan` skill invocation while running in Codex.
+
+## Command Instructions
+
+# /plan — 技术规划模式
+
+切换到架构师/技术负责人视角。将需求转化为可执行的实现计划。
+
+## 角色约束
+
+你现在是架构师，不是产品经理也不是码农。
+
+- ✅ 关注：技术方案、任务拆解、风险点、依赖关系、测试策略
+- ❌ 不关注：产品定义（应在 /think 完成）、具体代码实现
+
+## 输入来源（按优先级）
+
+1. `$ARGUMENTS` 中直接描述的需求
+2. `docs/plans/` 下最新的项目文档（由 /think 创建）
+3. 对话上下文中的需求描述
+
+## 执行步骤
+
+### 1. 研究阶段
+
+在制定方案前先研究：
+
+- 读取项目 AGENTS.md 了解架构约定
+- 读取 `.codex/rules/` 了解已有经验和踩坑记录
+- 读取相关源码文件了解现有实现模式
+- 检查高置信度本能（`~/.codex/homunculus/`）了解项目偏好
+
+### 2. 方案设计
+
+输出结构化计划：
+
+```markdown
+## 技术方案
+
+### 方案概述
+[1-2 段描述整体方案]
+
+### 任务拆解
+按实现顺序排列，每个任务应在 1 次 agent 执行中可完成：
+
+- [ ] **Task 1**: [描述] — 文件: `path/to/file`
+- [ ] **Task 2**: [描述] — 依赖 Task 1
+- [ ] **Task 3**: [描述]
+
+### 测试策略
+- 单元测试: [覆盖什么]
+- 集成测试: [覆盖什么]
+- 手动验证: [需要检查什么]
+
+### 风险评估
+| 风险 | 概率 | 影响 | 缓解 |
+|------|------|------|------|
+
+### 涉及文件
+[列出会新建/修改的文件清单]
+```
+
+### 3. 置信度检查
+
+对计划做自我评估：
+
+- **高置信** (>80%): 方案明确，直接进入 /work
+- **中置信** (50-80%): 有不确定点，标注出来请用户确认
+- **低置信** (<50%): 需要用户提供更多信息或做原型验证
+
+### 4. 持久化到项目文档（CRITICAL — 不可跳过）
+
+**MUST** 将计划写入项目文档：
+
+1. **查找已有文档**：检查 `docs/plans/` 下是否已有 /think 阶段创建的文档
+   - 有 → 在该文档的「技术方案」章节填入方案内容
+   - 无 → 创建新文档 `docs/plans/YYYY-MM-DD-<需求简写>.md`，参考 `docs/plans/TEMPLATE.md`，同时简要填写「需求分析」章节
+
+2. **填写内容**：
+   - 更新 Status 为 `planning`
+   - 更新 Updated 日期
+   - 填写「技术方案」章节：方案概述、任务拆解、测试策略、风险评估、涉及文件
+
+3. **告知用户文档路径**，等待确认后进入 /work
+
+## 注意
+
+- 任务拆解粒度：每个 task 应该是 5-30 分钟的工作量
+- 优先做最高风险的部分（fail fast）
+- 如果发现需求不清楚，回退建议 `/think`，不要自己猜测需求
+

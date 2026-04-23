@@ -122,6 +122,63 @@ function assertInventory(label, actual, expected) {
   }
 }
 
+function parseFrontmatter(content) {
+  if (!content.startsWith('---\n')) {
+    return { data: {}, body: content };
+  }
+
+  const end = content.indexOf('\n---', 4);
+  if (end === -1) {
+    return { data: {}, body: content };
+  }
+
+  const raw = content.slice(4, end).trim();
+  const body = content.slice(end + '\n---'.length).replace(/^\s*\n/, '');
+  const data = {};
+  raw.split('\n').forEach((line) => {
+    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!match) return;
+    const [, key, value] = match;
+    data[key] = value.replace(/^"(.*)"$/, '$1');
+  });
+  return { data, body };
+}
+
+function titleFromCommandName(name) {
+  return name
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function commandToSkill(name, content) {
+  const commandName = path.basename(name, '.md');
+  const { data, body } = parseFrontmatter(normalizeLf(transform(content)));
+  const description = data.description
+    || `Run the former /${commandName} workflow in Codex.`;
+  const title = titleFromCommandName(commandName);
+
+  return normalizeLf(`---
+name: ${commandName}
+description: Codex-compatible entry point for the former /${commandName} command. ${description}
+---
+
+# ${title}
+
+Codex CLI currently registers plugin bundles as skills, apps, and MCP servers. It does not register custom plugin \`commands/*.md\` files as interactive slash commands in the TUI, so use this skill as the supported Codex entry point for the former \`/${commandName}\` command.
+
+## Invocation
+
+Use \`$${commandName} <arguments>\` or select this skill through Codex's \`@\` picker. Treat the user's text after the skill name as the command arguments.
+
+When the command instructions below mention \`/${commandName}\`, interpret that as this \`$${commandName}\` skill invocation while running in Codex.
+
+## Command Instructions
+
+${body}
+`);
+}
+
 function copyCommands() {
   const sourceDir = path.join(repoRoot, 'user-level', 'commands');
   const targetDir = path.join(pluginRoot, 'commands');
@@ -156,7 +213,13 @@ function copySkills() {
       path.join(targetDir, name, 'SKILL.md')
     );
   });
-  return skillDirs.length;
+  expectedCommands.forEach((name) => {
+    const source = path.join(repoRoot, 'user-level', 'commands', name);
+    const target = path.join(targetDir, path.basename(name, '.md'), 'SKILL.md');
+    const content = fs.readFileSync(source, 'utf-8');
+    writeTextFile(target, commandToSkill(name, content));
+  });
+  return skillDirs.length + expectedCommands.length;
 }
 
 function copyHooks() {

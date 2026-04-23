@@ -224,7 +224,7 @@ install_codex_user_assets() {
   local command_count rule_count skill_count hooks_target
   command_count="$(copy_codex_commands "${SCRIPT_DIR}/user-level/commands" "${CODEX_HOME}/commands")"
   rule_count="$(copy_codex_rules "${SCRIPT_DIR}/user-level/rules" "${CODEX_HOME}/rules")"
-  skill_count="$(copy_codex_skills "${SCRIPT_DIR}/user-level/skills" "${CODEX_HOME}/skills")"
+  skill_count="$(copy_codex_skills "${PLUGIN_SOURCE}/skills" "${CODEX_HOME}/skills")"
 
   hooks_target="${CODEX_HOME}/skills/continuous-learning/hooks"
   if [[ -d "${PLUGIN_SOURCE}/hooks" ]]; then
@@ -260,6 +260,8 @@ install_project() {
   local project_root="$PWD"
   local codex_dir="${project_root}/.codex"
   log_section "Installing Codex project templates -> ${codex_dir}"
+  require_node
+  build_plugin
   mkdir -p "${codex_dir}/commands" "${codex_dir}/rules" "${codex_dir}/plans" "${codex_dir}/skills" "${project_root}/docs/solutions"
 
   copy_codex_text "${SCRIPT_DIR}/project-level/CLAUDE.md" "${project_root}/AGENTS.md" "no-overwrite"
@@ -273,7 +275,7 @@ install_project() {
   project_rules="$(copy_codex_rules "${SCRIPT_DIR}/project-level/.claude/rules" "${codex_dir}/rules")"
   log_ok "rules copied (${project_rules} project)"
 
-  project_skills="$(copy_codex_skills "${SCRIPT_DIR}/user-level/skills" "${codex_dir}/skills")"
+  project_skills="$(copy_codex_skills "${PLUGIN_SOURCE}/skills" "${codex_dir}/skills")"
   log_ok "${project_skills} project skills copied"
   log_ok "project directories ready"
 }

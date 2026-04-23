@@ -33,6 +33,8 @@ const expectedSkills = [
   'test-strategy',
   'context-handoff',
 ];
+const expectedCommandSkills = expectedCommands.map((name) => path.basename(name, '.md'));
+const expectedCodexSkills = [...expectedSkills, ...expectedCommandSkills].sort();
 
 function fail(message) {
   console.error(`[FAIL] ${message}`);
@@ -154,13 +156,21 @@ if (isDirectory(skillsDir, 'skills dir')) {
   const skillEntries = fs.readdirSync(skillsDir).filter((name) =>
     fs.existsSync(path.join(skillsDir, name)) && fs.lstatSync(path.join(skillsDir, name)).isDirectory()
   );
-  if (skillEntries.length !== expectedSkills.length) {
-    fail(`skills dir must contain exactly ${expectedSkills.length} skill directories`);
+  if (skillEntries.length !== expectedCodexSkills.length) {
+    fail(`skills dir must contain exactly ${expectedCodexSkills.length} skill directories`);
   }
-  expectedSkills.forEach((name) => {
+  expectedCodexSkills.forEach((name) => {
     const skillDir = path.join(skillsDir, name);
     if (isDirectory(skillDir, `skill ${name}`)) {
       isFile(path.join(skillDir, 'SKILL.md'), `skill ${name} SKILL.md`);
+    }
+  });
+  expectedCommandSkills.forEach((name) => {
+    const skillPath = path.join(skillsDir, name, 'SKILL.md');
+    if (!fs.existsSync(skillPath)) return;
+    const content = fs.readFileSync(skillPath, 'utf-8');
+    if (!content.includes(`Codex-compatible entry point for the former /${name} command`)) {
+      fail(`command skill ${name} must explain the Codex-compatible command entry point`);
     }
   });
   validateNoClaudeOnlyText(skillsDir, 'skills dir');

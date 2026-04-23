@@ -66,6 +66,14 @@ function expectedSkills() {
   return listSkillDirs(path.join(repoRoot, 'user-level', 'skills'));
 }
 
+function expectedCodexCommandSkills() {
+  return expectedUserCommands().map((name) => path.basename(name, '.md'));
+}
+
+function expectedCodexSkills() {
+  return [...new Set([...expectedSkills(), ...expectedCodexCommandSkills()])].sort();
+}
+
 function readJson(file, label) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -131,6 +139,22 @@ function validateSkills(dir, expected, label) {
   ok(`${label} has required skills`);
 }
 
+function validateCodexCommandSkills(dir, label) {
+  if (!isDirectory(dir, label)) return;
+  expectedCodexCommandSkills().forEach((name) => {
+    const skillPath = path.join(dir, name, 'SKILL.md');
+    if (!fs.existsSync(skillPath)) {
+      fail(`${label} missing command skill wrapper: ${name}`);
+      return;
+    }
+    const content = fs.readFileSync(skillPath, 'utf8');
+    if (!content.includes(`Codex-compatible entry point for the former /${name} command`)) {
+      fail(`${label} command skill wrapper ${name} missing Codex entry-point marker`);
+    }
+  });
+}
+
+
 function walkMarkdownFiles(dir) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -164,7 +188,8 @@ function validateUserInstall() {
   isFile(path.join(userCodexRoot, 'AGENTS.md'), '~/.codex/AGENTS.md');
   validateInventory(path.join(userCodexRoot, 'commands'), expectedUserCommands(), '~/.codex/commands');
   validateInventory(path.join(userCodexRoot, 'rules'), expectedUserRules(), '~/.codex/rules');
-  validateSkills(path.join(userCodexRoot, 'skills'), expectedSkills(), '~/.codex/skills');
+  validateSkills(path.join(userCodexRoot, 'skills'), expectedCodexSkills(), '~/.codex/skills');
+  validateCodexCommandSkills(path.join(userCodexRoot, 'skills'), '~/.codex/skills');
   validateCodexText(path.join(userCodexRoot, 'commands'), '~/.codex/commands');
   validateCodexText(path.join(userCodexRoot, 'rules'), '~/.codex/rules');
   validateCodexText(path.join(userCodexRoot, 'skills'), '~/.codex/skills');
@@ -179,7 +204,8 @@ function validateProjectInstall() {
     '.codex/commands'
   );
   validateInventory(path.join(projectCodexRoot, 'rules'), expectedProjectRuleUnion(), '.codex/rules');
-  validateSkills(path.join(projectCodexRoot, 'skills'), expectedSkills(), '.codex/skills');
+  validateSkills(path.join(projectCodexRoot, 'skills'), expectedCodexSkills(), '.codex/skills');
+  validateCodexCommandSkills(path.join(projectCodexRoot, 'skills'), '.codex/skills');
   isDirectory(path.join(projectCodexRoot, 'plans'), '.codex/plans');
   validateCodexText(path.join(projectCodexRoot, 'commands'), '.codex/commands');
   validateCodexText(path.join(projectCodexRoot, 'rules'), '.codex/rules');
@@ -204,7 +230,7 @@ function validateRepoMarketplace() {
     fail('tech-persistence marketplace path must be ./plugins/tech-persistence');
   }
   if (entry.policy?.installation !== 'INSTALLED_BY_DEFAULT') {
-    fail('tech-persistence must be INSTALLED_BY_DEFAULT so commands load without a separate UI install');
+    fail('tech-persistence must be INSTALLED_BY_DEFAULT so Codex skills load without a separate UI install');
   }
   if (entry.policy?.authentication !== 'ON_INSTALL') {
     fail('tech-persistence authentication policy must be ON_INSTALL');

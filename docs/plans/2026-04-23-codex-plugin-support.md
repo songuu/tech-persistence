@@ -27,7 +27,8 @@
 
 - 2026-04-23: Added a Codex-native `tech-persistence` plugin package with generated commands, skills, hooks, runtime-aware homunculus paths, install flows, Claude data import, validation, and dual-runtime documentation.
 - 2026-04-23: Fixed Codex installer parity so `~/.codex` receives the same user-level commands/skills/rules as `~/.claude`, project `.codex` receives command/rule/skill mirrors, and UTF-8/case-sensitive template conversion prevents `.Codex`/`Codex.md` mojibake regressions.
-- 2026-04-23: Added repo-root Codex marketplace metadata and installer registration so plugin commands are discoverable as namespaced Codex slash commands such as `/tech-persistence:sprint`.
+- 2026-04-23: Added repo-root Codex marketplace metadata and installer registration so the plugin is visible and installable from the local Codex marketplace.
+- 2026-04-23: Verified current Codex CLI registers plugin workflows through skills, not custom TUI slash commands; generated one Codex skill wrapper per command so workflows are invoked as `$sprint`, `$prototype`, `$plan`, etc., while command markdown remains packaged for compatibility and future support.
 
 ---
 

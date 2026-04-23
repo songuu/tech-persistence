@@ -194,6 +194,8 @@ node scripts/preflight.js && bash install.sh --all
 
 Codex 使用原生插件包 `plugins/tech-persistence/`，用户级安装会复制到 `~/plugins/tech-persistence` 并更新 `~/.agents/plugins/marketplace.json`。Codex 知识库默认写入 `~/.codex/homunculus`，可用 `TECH_PERSISTENCE_HOME` 覆盖。
 
+当前 Codex CLI 的 TUI slash commands 只注册内置命令；插件工作流通过 skills 调用。Claude Code 中仍使用 `/sprint`、`/prototype`，Codex 中使用 `$sprint <需求>`、`$prototype <需求>`、`$plan <需求>`，也可以用 `@` picker 选择同名 skill。
+
 Windows:
 ```powershell
 node scripts\preflight.js --codex
@@ -230,6 +232,8 @@ node scripts/validate-codex-plugin.js
 ---
 
 ## 命令速查（23 个）
+
+表中保留 Claude Code 的 `/command` 写法。Codex 中把前缀换成 `$`，例如 `/sprint` → `$sprint`、`/prototype` → `$prototype`。
 
 ### 工作流（7 个）
 | 命令 | 角色 | 作用 |
@@ -287,6 +291,8 @@ node scripts/validate-codex-plugin.js
 ---
 
 ## 使用节奏
+
+Codex 中使用同名 `$skill` 入口；例如下面的 `/sprint` 在 Codex 中输入 `$sprint`。
 
 ```
 大功能 (>2h):     /sprint '需求' → auto checkpoint if needed
@@ -402,27 +408,28 @@ your-project/                           ← 项目级 (提交 Git)
 
 plugins/tech-persistence/               ← Codex 原生插件包
 ├── .codex-plugin/plugin.json
-├── commands/                            ← 20 个用户命令
-├── skills/                              ← 5 个按需加载技能
+├── commands/                            ← 20 个兼容命令源文件
+├── skills/                              ← 5 个按需技能 + 20 个 command skill wrappers
 ├── hooks.json                           ← 4 Hook 配置
 ├── hooks/                               ← Codex runtime hook scripts
 ├── scripts/                             ← build/import utilities
 └── codex-homunculus-template/
 
-Codex 插件命令带命名空间调用：
-`/tech-persistence:sprint`、`/tech-persistence:prototype`、`/tech-persistence:plan`。
-直接输入 Claude Code 风格的 `/sprint` 会被 Codex 当作未知内置命令。
+Codex 调用方式：
+`$sprint <需求>`、`$prototype <需求>`、`$plan <需求>`，或用 `@` 选择同名 skill。
+当前 Codex CLI 会把 `/sprint` 和 `/tech-persistence:sprint` 当作未知 TUI slash command。
 
 ~/.codex/                              ← Codex 用户级 (与 ~/.claude 对齐)
 ├── AGENTS.md                           ← 核心偏好 + 路由规则
-├── commands/ (20 个)                   ← 全部用户命令
+├── commands/ (20 个)                   ← 兼容命令源文件
 ├── rules/general-standards.md
-├── skills/                             ← 5 个按需加载技能
+├── skills/                             ← 5 个按需技能 + 20 个 command skill wrappers
 │   ├── memory/
 │   ├── continuous-learning/{SKILL.md, hooks/}
 │   ├── prototype-workflow/
 │   ├── test-strategy/
-│   └── context-handoff/
+│   ├── context-handoff/
+│   └── sprint/, prototype/, plan/, work/, review/, ...
 └── homunculus/                         ← Codex 用户级知识存储
     └── projects/{hash}/
 

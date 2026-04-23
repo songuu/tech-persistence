@@ -156,7 +156,7 @@ function Install-CodexUserAssets {
 
     $commandCount = Copy-CodexCommandDir (Join-Path $ScriptDir "user-level\commands") (Join-Path $CodexHome "commands")
     $ruleCount = Copy-CodexRuleDir (Join-Path $ScriptDir "user-level\rules") (Join-Path $CodexHome "rules")
-    $skillCount = Copy-CodexSkillDir (Join-Path $ScriptDir "user-level\skills") (Join-Path $CodexHome "skills")
+    $skillCount = Copy-CodexSkillDir (Join-Path $PluginSource "skills") (Join-Path $CodexHome "skills")
 
     $hooksSource = Join-Path $PluginSource "hooks"
     $hooksTarget = Join-Path $CodexHome "skills\continuous-learning\hooks"
@@ -292,6 +292,8 @@ function Install-Project {
     $root = (Get-Location).Path
     $codexDir = Join-Path $root ".codex"
     Write-Section "Installing Codex project templates -> $codexDir"
+    Test-Node
+    Build-Plugin
 
     @("commands", "rules", "plans", "skills") | ForEach-Object { Ensure-Dir (Join-Path $codexDir $_) }
     Ensure-Dir (Join-Path $root "docs\solutions")
@@ -308,7 +310,7 @@ function Install-Project {
     $projectRules = Copy-CodexRuleDir $rulesSource (Join-Path $codexDir "rules")
     Write-OK "rules copied ($projectRules project)"
 
-    $skillCount = Copy-CodexSkillDir (Join-Path $ScriptDir "user-level\skills") (Join-Path $codexDir "skills")
+    $skillCount = Copy-CodexSkillDir (Join-Path $PluginSource "skills") (Join-Path $codexDir "skills")
     Write-OK "$skillCount project skills copied"
 
     Write-OK "project directories ready"

@@ -31,7 +31,7 @@
 - [ ] README 说明 Claude Code 与 Codex 双运行时安装和目录结构。
 
 ### 风险和假设
-- Codex 插件对 `commands/` 的发现方式以现有官方插件样例为依据，命令文件保留 Markdown slash command 形态。
+- Codex 插件保留 `commands/` Markdown 文件作为兼容源资产；当前 Codex CLI 的可调用入口由同名 skill wrapper 提供。
 - Codex Hook 环境变量与 Claude Code Hook 环境变量可能存在差异，因此 Hook 脚本必须容错，不允许中断主流程。
 - Windows Hook 需要 `.cmd` 包装器或直接使用 `node` 命令，避免 shell 差异导致 Hook 失效。
 - 当前部分命令文档使用 Claude 命名和路径，需要在 Codex 插件中做文本级适配。
@@ -115,7 +115,7 @@ work
 - 将 `Claude`、`Claude Code` 运行时表述替换为 `Codex` 或中性 `agent`，除非是在解释迁移来源。
 - 将 `~/.claude` 主路径替换为 Codex 存储路径。
 - 将 `.claude/rules` 项目路径保留为兼容输入，但新增 `.codex/rules` 作为 Codex 项目级推荐路径。
-- 保留 slash command Markdown 格式，使用插件命名空间由 Codex 负责呈现。
+- 保留 slash command Markdown 格式作为源资产，并生成同名 Codex skill wrapper；当前 Codex CLI 通过 `$skill` / `@` 入口调用这些工作流。
 
 ### 技能适配
 
