@@ -8,7 +8,24 @@
 
 **Tech Stack:** Node.js built-ins, PowerShell, Bash, Codex plugin manifest, Markdown slash commands, Codex skills, Codex/Claude-compatible hooks.
 
-**Implementation Status:** `in-progress` — Tasks 1-7 are implemented and committed; Task 8 documentation is active.
+**Implementation Status:** `completed` — Tasks 1-10 are implemented, verified, and committed on 2026-04-23.
+
+**Task Completion Status**
+
+- [x] Task 1: Add Codex Plugin Validator
+- [x] Task 2: Add Codex Plugin Manifest and Skeleton
+- [x] Task 3: Add Runtime Path Resolver
+- [x] Task 4: Add Codex Plugin Builder
+- [x] Task 5: Add Codex Hooks Configuration
+- [x] Task 6: Add Codex Installation Scripts
+- [x] Task 7: Add Import and Verification Utilities
+- [x] Task 8: Update Documentation
+- [x] Task 9: End-to-End Verification
+- [x] Task 10: Completion Checklist
+
+**Change Log**
+
+- 2026-04-23: Added a Codex-native `tech-persistence` plugin package with generated commands, skills, hooks, runtime-aware homunculus paths, install flows, Claude data import, validation, and dual-runtime documentation.
 
 ---
 
