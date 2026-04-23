@@ -8,6 +8,8 @@
 
 **Tech Stack:** Node.js built-ins, PowerShell, Bash, Codex plugin manifest, Markdown slash commands, Codex skills, Codex/Claude-compatible hooks.
 
+**Implementation Status:** `in-progress` — Tasks 1-7 are implemented and committed; Task 8 documentation is active.
+
 ---
 
 ### Task 1: Add Codex Plugin Validator

@@ -1,8 +1,8 @@
-# Claude Code 自进化工程系统
+# Claude Code / Codex 自进化工程系统
 
 > 融合 gstack 角色分工 + Compound Engineering 复利循环 + ECC/Claude-Mem 自学习本能 + Skill 自迭代 + 风险自适应测试 + 上下文交接 + Obsidian 知识图谱。
 > 20 个用户命令 · 3 个项目命令 · 5 个按需技能 · 4 个 Hook · 5 层知识存储。
-> 每一次工作都让下一次更容易。
+> 支持 Claude Code 原生目录和 Codex 原生插件两种运行时；每一次工作都让下一次更容易。
 
 ---
 
@@ -175,17 +175,50 @@ flowchart LR
 ## 安装
 
 ### 环境要求
-Node.js >= 18 · Git · Claude Code CLI
+Node.js >= 18 · Git · Claude Code CLI 或 Codex CLI
 
-### Windows
+### Claude Code
+
+Windows:
 ```powershell
 node scripts\preflight.js
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -All
 ```
 
-### macOS/Linux
+macOS/Linux:
 ```bash
 node scripts/preflight.js && bash install.sh --all
+```
+
+### Codex
+
+Codex 使用原生插件包 `plugins/tech-persistence/`，用户级安装会复制到 `~/plugins/tech-persistence` 并更新 `~/.agents/plugins/marketplace.json`。Codex 知识库默认写入 `~/.codex/homunculus`，可用 `TECH_PERSISTENCE_HOME` 覆盖。
+
+Windows:
+```powershell
+node scripts\preflight.js --codex
+powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All
+```
+
+macOS/Linux:
+```bash
+node scripts/preflight.js --codex
+bash install-codex.sh --all
+```
+
+迁移 Claude 历史知识库（可选）：
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All -ImportClaude
+```
+
+```bash
+bash install-codex.sh --all --import-claude
+```
+
+插件构建与验证：
+```powershell
+node plugins/tech-persistence/scripts/build-codex-plugin.js
+node scripts/validate-codex-plugin.js
 ```
 
 ### Obsidian 集成（可选）
@@ -366,6 +399,23 @@ your-project/                           ← 项目级 (提交 Git)
 └── docs/
     ├── solutions/                      ← /compound 产出
     └── plans/                          ← /sprint + /checkpoint 产出
+
+plugins/tech-persistence/               ← Codex 原生插件包
+├── .codex-plugin/plugin.json
+├── commands/                            ← 20 个用户命令
+├── skills/                              ← 5 个按需加载技能
+├── hooks.json                           ← 4 Hook 配置
+├── hooks/                               ← Codex runtime hook scripts
+├── scripts/                             ← build/import utilities
+└── codex-homunculus-template/
+
+~/.codex/homunculus/                    ← Codex 用户级知识存储
+└── projects/{hash}/
+
+your-project/                           ← Codex 项目级 (提交 Git)
+├── AGENTS.md
+├── .codex/{commands/, rules/, plans/}
+└── docs/solutions/
 ```
 
 ---
@@ -387,8 +437,8 @@ your-project/                           ← 项目级 (提交 Git)
 
 ## 核心原则
 
-1. **分层存储**：高频→CLAUDE.md · 分类→rules/ · 原子→instincts/ · 方案→solutions/
-2. **分层加载**：CLAUDE.md 路由 · skill 按需 · rules 路径匹配
+1. **分层存储**：高频→CLAUDE.md/AGENTS.md · 分类→rules/ · 原子→instincts/ · 方案→solutions/
+2. **分层加载**：CLAUDE.md/AGENTS.md 路由 · skill 按需 · rules 路径匹配
 3. **假设驱动**：输出方案让用户纠偏，不做冗长问答
 4. **风险自适应**：测试深度跟着变更风险走，不多不少
 5. **自动优先**：Hook 100% 捕获 · 手动命令做深度提取

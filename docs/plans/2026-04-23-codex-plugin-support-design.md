@@ -1,6 +1,6 @@
 # Codex 原生插件支持设计
 
-> **Status:** `planning`
+> **Status:** `in-progress`
 > **Created:** 2026-04-23
 > **Updated:** 2026-04-23
 
@@ -57,14 +57,17 @@ plugins/tech-persistence/
 ├── skills/
 ├── hooks.json
 ├── hooks/
+│   ├── run-hook.js
 │   ├── run-hook.cmd
 │   ├── inject-context.js
 │   ├── observe.js
+│   ├── lib/runtime-paths.js
 │   └── evaluate-session.js
 ├── scripts/
 │   ├── build-codex-plugin.js
-│   ├── validate-codex-plugin.js
 │   └── import-claude-homunculus.js
+├── codex-homunculus-template/
+│   └── config.json
 └── assets/
 ```
 
@@ -184,7 +187,7 @@ bash install-codex.sh --import-claude
 - 将插件复制或链接到 Codex 可发现的插件目录。
 - 创建/更新 `.agents/plugins/marketplace.json`，追加 `tech-persistence` entry。
 - 创建 `~/.codex/homunculus` 目录结构和默认配置。
-- 项目级安装创建 `.codex/rules/`、`.codex/plans/` 和 `docs/solutions/`。
+- 项目级安装创建 `.codex/commands/`、`.codex/rules/`、`.codex/plans/`、`AGENTS.md` 和 `docs/solutions/`。
 - 可选导入 `~/.claude/homunculus` 历史数据。
 
 ### 验证策略
