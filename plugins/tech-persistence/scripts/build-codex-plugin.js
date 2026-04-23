@@ -69,12 +69,14 @@ process.argv = [process.argv[0], scriptPath, ...scriptArgs];
 require(scriptPath);
 `;
 
-const runHookCmd = `@echo off
-setlocal
-set "SCRIPT_DIR=%~dp0"
-node "%SCRIPT_DIR%run-hook.js" %*
-exit /b 0
-`;
+const runHookCmd = [
+  '@echo off',
+  'setlocal',
+  'set "SCRIPT_DIR=%~dp0"',
+  'node "%SCRIPT_DIR%run-hook.js" %*',
+  'exit /b 0',
+  '',
+].join('\r\n');
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -92,10 +94,14 @@ function transform(content) {
   );
 }
 
+function normalizeLf(content) {
+  return content.replace(/\r\n/g, '\n');
+}
+
 function copyTextFile(source, target, shouldTransform = true) {
   ensureDir(path.dirname(target));
   const content = fs.readFileSync(source, 'utf-8');
-  fs.writeFileSync(target, shouldTransform ? transform(content) : content);
+  fs.writeFileSync(target, normalizeLf(shouldTransform ? transform(content) : content));
 }
 
 function writeTextFile(target, content) {

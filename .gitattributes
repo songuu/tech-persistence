@@ -1,0 +1,7 @@
+/.gitattributes text eol=lf
+*.sh text eol=lf
+plugins/tech-persistence/**/*.md text eol=lf
+plugins/tech-persistence/**/*.js text eol=lf
+plugins/tech-persistence/**/*.json text eol=lf
+plugins/tech-persistence/**/*.svg text eol=lf
+plugins/tech-persistence/**/*.cmd text eol=crlf
