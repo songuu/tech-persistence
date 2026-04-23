@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_HOME="${HOME}/.codex"
 HOMUNCULUS_DIR="${CODEX_HOME}/homunculus"
 AGENTS_PLUGINS_DIR="${HOME}/.agents/plugins"
+REPO_AGENTS_PLUGINS_DIR="${SCRIPT_DIR}/.agents/plugins"
 USER_PLUGINS_ROOT="${HOME}/plugins"
 PLUGIN_NAME="tech-persistence"
 PLUGIN_SOURCE="${SCRIPT_DIR}/plugins/${PLUGIN_NAME}"
@@ -133,15 +134,18 @@ copy_codex_skills() {
 }
 
 update_marketplace() {
-  mkdir -p "$AGENTS_PLUGINS_DIR"
-  MARKETPLACE_PATH="${AGENTS_PLUGINS_DIR}/marketplace.json" node <<'NODE'
+  local marketplace_dir="$1" marketplace_name="$2" marketplace_display_name="$3"
+  mkdir -p "$marketplace_dir"
+  MARKETPLACE_PATH="${marketplace_dir}/marketplace.json" \
+  MARKETPLACE_NAME="$marketplace_name" \
+  MARKETPLACE_DISPLAY_NAME="$marketplace_display_name" node <<'NODE'
 const fs = require('fs');
 const path = require('path');
 const marketplacePath = process.env.MARKETPLACE_PATH;
 const pluginName = 'tech-persistence';
 let root = {
-  name: 'local-plugins',
-  interface: { displayName: 'Local Plugins' },
+  name: process.env.MARKETPLACE_NAME || 'local-plugins',
+  interface: { displayName: process.env.MARKETPLACE_DISPLAY_NAME || 'Local Plugins' },
   plugins: [],
 };
 
@@ -164,7 +168,7 @@ root.plugins.push({
     path: './plugins/tech-persistence',
   },
   policy: {
-    installation: 'AVAILABLE',
+    installation: 'INSTALLED_BY_DEFAULT',
     authentication: 'ON_INSTALL',
   },
   category: 'Coding',
@@ -174,6 +178,23 @@ fs.mkdirSync(path.dirname(marketplacePath), { recursive: true });
 fs.writeFileSync(marketplacePath, `${JSON.stringify(root, null, 2)}\n`);
 NODE
   log_ok "marketplace.json registered ${PLUGIN_NAME}"
+}
+
+update_marketplaces() {
+  update_marketplace "$AGENTS_PLUGINS_DIR" "local-plugins" "Local Plugins"
+  update_marketplace "$REPO_AGENTS_PLUGINS_DIR" "tech-persistence-local" "Tech Persistence Local"
+}
+
+register_codex_marketplace() {
+  if command -v codex >/dev/null 2>&1; then
+    if codex plugin marketplace add "$SCRIPT_DIR"; then
+      log_ok "codex marketplace registered: ${SCRIPT_DIR}"
+    else
+      log_warn "codex marketplace add failed; run manually: codex plugin marketplace add \"${SCRIPT_DIR}\""
+    fi
+  else
+    log_warn "codex command not found; run later: codex plugin marketplace add \"${SCRIPT_DIR}\""
+  fi
 }
 
 initialize_homunculus() {
@@ -229,7 +250,8 @@ install_user() {
   fi
   cp -R "$PLUGIN_SOURCE" "$USER_PLUGINS_ROOT/"
   log_ok "plugin copied"
-  update_marketplace
+  update_marketplaces
+  register_codex_marketplace
   initialize_homunculus
   install_codex_user_assets
 }

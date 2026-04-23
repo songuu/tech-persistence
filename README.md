@@ -409,6 +409,10 @@ plugins/tech-persistence/               ← Codex 原生插件包
 ├── scripts/                             ← build/import utilities
 └── codex-homunculus-template/
 
+Codex 插件命令带命名空间调用：
+`/tech-persistence:sprint`、`/tech-persistence:prototype`、`/tech-persistence:plan`。
+直接输入 Claude Code 风格的 `/sprint` 会被 Codex 当作未知内置命令。
+
 ~/.codex/                              ← Codex 用户级 (与 ~/.claude 对齐)
 ├── AGENTS.md                           ← 核心偏好 + 路由规则
 ├── commands/ (20 个)                   ← 全部用户命令

@@ -5,6 +5,7 @@
 /docs/**/*.md text eol=lf
 /install-codex.ps1 text eol=lf
 /scripts/**/*.js text eol=lf
+/.agents/**/*.json text eol=lf
 /project-level/**/*.md text eol=lf
 /user-level/**/*.md text eol=lf
 /.codex/**/*.md text eol=lf

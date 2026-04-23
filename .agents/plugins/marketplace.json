@@ -1,0 +1,20 @@
+{
+    "name":  "tech-persistence-local",
+    "interface":  {
+                      "displayName":  "Tech Persistence Local"
+                  },
+    "plugins":  [
+                    {
+                        "name":  "tech-persistence",
+                        "source":  {
+                                       "source":  "local",
+                                       "path":  "./plugins/tech-persistence"
+                                   },
+                        "policy":  {
+                                       "installation":  "INSTALLED_BY_DEFAULT",
+                                       "authentication":  "ON_INSTALL"
+                                   },
+                        "category":  "Coding"
+                    }
+                ]
+}

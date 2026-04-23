@@ -105,6 +105,7 @@ function runCodexPreflight() {
   const agentsPluginsDir = path.join(homeDir, '.agents', 'plugins');
   const userPluginDir = path.join(homeDir, 'plugins', 'tech-persistence');
   const marketplacePath = path.join(agentsPluginsDir, 'marketplace.json');
+  const repoMarketplacePath = path.join(process.cwd(), '.agents', 'plugins', 'marketplace.json');
 
   check('~/.codex 目录可写', () => {
     try {
@@ -194,6 +195,31 @@ function runCodexPreflight() {
     } catch {
       console.log('     marketplace.json 解析失败 — 安装时会备份并重建');
       return 'warn';
+    }
+  });
+
+  check('repo marketplace root', () => {
+    if (!fs.existsSync(repoMarketplacePath)) {
+      console.log('     缺少 .agents/plugins/marketplace.json — Codex 无法用当前仓库作为 marketplace root');
+      return false;
+    }
+    try {
+      const marketplace = JSON.parse(fs.readFileSync(repoMarketplacePath, 'utf-8'));
+      const plugins = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
+      const entry = plugins.find((plugin) => plugin.name === 'tech-persistence');
+      if (!entry) {
+        console.log('     缺少 tech-persistence entry');
+        return false;
+      }
+      if (entry.policy?.installation !== 'INSTALLED_BY_DEFAULT') {
+        console.log('     tech-persistence 需要 INSTALLED_BY_DEFAULT 才能直接加载命令');
+        return false;
+      }
+      console.log('     可通过 codex plugin marketplace add . 注册');
+      return true;
+    } catch {
+      console.log('     repo marketplace JSON 解析失败');
+      return false;
     }
   });
 

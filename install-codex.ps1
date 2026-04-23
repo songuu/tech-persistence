@@ -18,6 +18,7 @@ $HomeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
 $CodexHome = Join-Path $HomeDir ".codex"
 $HomunculusDir = Join-Path $CodexHome "homunculus"
 $AgentsPluginsDir = Join-Path $HomeDir ".agents\plugins"
+$RepoAgentsPluginsDir = Join-Path $ScriptDir ".agents\plugins"
 $UserPluginsRoot = Join-Path $HomeDir "plugins"
 $PluginName = "tech-persistence"
 $PluginSource = Join-Path $ScriptDir "plugins\$PluginName"
@@ -178,8 +179,14 @@ function Build-Plugin {
 }
 
 function Update-Marketplace {
-    Ensure-Dir $AgentsPluginsDir
-    $marketplacePath = Join-Path $AgentsPluginsDir "marketplace.json"
+    param(
+        [string]$MarketplaceDir = $AgentsPluginsDir,
+        [string]$MarketplaceName = "local-plugins",
+        [string]$MarketplaceDisplayName = "Local Plugins"
+    )
+
+    Ensure-Dir $MarketplaceDir
+    $marketplacePath = Join-Path $MarketplaceDir "marketplace.json"
     $entry = [ordered]@{
         name = $PluginName
         source = [ordered]@{
@@ -187,14 +194,14 @@ function Update-Marketplace {
             path = "./plugins/$PluginName"
         }
         policy = [ordered]@{
-            installation = "AVAILABLE"
+            installation = "INSTALLED_BY_DEFAULT"
             authentication = "ON_INSTALL"
         }
         category = "Coding"
     }
 
-    $name = "local-plugins"
-    $interface = [ordered]@{ displayName = "Local Plugins" }
+    $name = $MarketplaceName
+    $interface = [ordered]@{ displayName = $MarketplaceDisplayName }
     $plugins = @()
 
     if (Test-Path $marketplacePath) {
@@ -219,6 +226,24 @@ function Update-Marketplace {
     }
     Write-Utf8NoBom $marketplacePath ($marketplace | ConvertTo-Json -Depth 20)
     Write-OK "marketplace.json registered $PluginName"
+}
+
+function Update-Marketplaces {
+    Update-Marketplace $AgentsPluginsDir "local-plugins" "Local Plugins"
+    Update-Marketplace $RepoAgentsPluginsDir "tech-persistence-local" "Tech Persistence Local"
+}
+
+function Register-CodexMarketplace {
+    try {
+        & codex plugin marketplace add $ScriptDir | Out-Host
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "codex marketplace registered: $ScriptDir"
+            return
+        }
+        Write-Warn "codex marketplace registration exited $LASTEXITCODE; run manually: codex plugin marketplace add `"$ScriptDir`""
+    } catch {
+        Write-Warn "codex marketplace add unavailable; run manually after install: codex plugin marketplace add `"$ScriptDir`""
+    }
 }
 
 function Initialize-Homunculus {
@@ -257,7 +282,8 @@ function Install-User {
     Copy-Item $PluginSource $UserPluginsRoot -Recurse -Force
     Write-OK "plugin copied"
 
-    Update-Marketplace
+    Update-Marketplaces
+    Register-CodexMarketplace
     Initialize-Homunculus
     Install-CodexUserAssets
 }

@@ -7,6 +7,7 @@ const homeDir = process.env.HOME || process.env.USERPROFILE;
 const userCodexRoot = process.env.CODEX_HOME || path.join(homeDir, '.codex');
 const projectRoot = process.cwd();
 const projectCodexRoot = path.join(projectRoot, '.codex');
+const repoMarketplacePath = path.join(projectRoot, '.agents', 'plugins', 'marketplace.json');
 
 let hasFailure = false;
 
@@ -63,6 +64,15 @@ function expectedProjectRuleUnion() {
 
 function expectedSkills() {
   return listSkillDirs(path.join(repoRoot, 'user-level', 'skills'));
+}
+
+function readJson(file, label) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    fail(`${label} is not valid JSON: ${error.message}`);
+    return null;
+  }
 }
 
 function isFile(file, label) {
@@ -177,8 +187,33 @@ function validateProjectInstall() {
   validateCodexFile(path.join(projectRoot, 'AGENTS.md'), 'AGENTS.md');
 }
 
+function validateRepoMarketplace() {
+  console.log('\nCodex marketplace root:');
+  if (!isFile(repoMarketplacePath, '.agents/plugins/marketplace.json')) return;
+  const marketplace = readJson(repoMarketplacePath, '.agents/plugins/marketplace.json');
+  if (!marketplace) return;
+  const plugins = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
+  const entry = plugins.find((plugin) => plugin.name === 'tech-persistence');
+  if (!entry) {
+    fail('repo marketplace missing tech-persistence entry');
+    return;
+  }
+  ok('repo marketplace has tech-persistence entry');
+  if (entry.source?.source !== 'local') fail('tech-persistence marketplace source must be local');
+  if (entry.source?.path !== './plugins/tech-persistence') {
+    fail('tech-persistence marketplace path must be ./plugins/tech-persistence');
+  }
+  if (entry.policy?.installation !== 'INSTALLED_BY_DEFAULT') {
+    fail('tech-persistence must be INSTALLED_BY_DEFAULT so commands load without a separate UI install');
+  }
+  if (entry.policy?.authentication !== 'ON_INSTALL') {
+    fail('tech-persistence authentication policy must be ON_INSTALL');
+  }
+}
+
 validateUserInstall();
 validateProjectInstall();
+validateRepoMarketplace();
 
 if (hasFailure) process.exit(1);
 console.log('\n[OK] Codex install validation passed');
