@@ -18,7 +18,7 @@ version: "2.0"
   ↓ 验证/衰减/聚类
 进化产物 (evolved/ skills/commands/agents)
   ↓ 人工确认
-永久知识 (rules/ + CLAUDE.md)
+永久知识 (rules/ + AGENTS.md)
 ```
 
 ## Hook 配置
@@ -64,7 +64,7 @@ version: "2.0"
 ## 项目隔离
 
 系统自动检测项目身份（优先级）：
-1. `CLAUDE_PROJECT_DIR` 环境变量
+1. `CODEX_PROJECT_DIR` 环境变量
 2. `git remote get-url origin` → SHA256 hash 前 12 位
 3. `git rev-parse --show-toplevel` → 路径 hash
 4. 当前工作目录 hash（兜底）

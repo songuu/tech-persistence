@@ -371,7 +371,7 @@ ${instinctLinks || '_No instinct changes this session_'}
 function healthCheck(paths) {
   const warnings = [];
 
-  // CLAUDE.md / AGENTS.md 行数
+  // AGENTS.md / AGENTS.md 行数
   if (fs.existsSync(paths.localInstructionsFile)) {
     const lines = fs.readFileSync(paths.localInstructionsFile, 'utf-8').split('\n').length;
     if (lines > 200) {

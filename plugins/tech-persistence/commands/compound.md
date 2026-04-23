@@ -12,7 +12,7 @@ description: "复利步骤：提取经验→写入本能+rules+解决方案+skil
 ### 步骤 1: 扫描会话，提取 7 类知识
 | 类型 | 写入位置 |
 |------|---------|
-| 解决方案 | `docs/solutions/` + CLAUDE.md 索引 |
+| 解决方案 | `docs/solutions/` + AGENTS.md 索引 |
 | 踩坑记录 | `.codex/rules/debugging-gotchas.md` |
 | 架构决策 | `.codex/rules/architecture.md` |
 | 行为本能 | `~/.codex/homunculus/instincts/` |
@@ -56,10 +56,10 @@ aliases: ["问题的别名"]
 - [[session-YYYY-MM-DD]] — 发现此问题的会话
 ```
 
-在 CLAUDE.md 解决方案索引追加一行。
+在 AGENTS.md 解决方案索引追加一行。
 
 ### 步骤 3: 提取经验到 rules
-项目特有 → `.codex/rules/`，跨项目 → `~/.claude/CLAUDE.md`
+项目特有 → `.codex/rules/`，跨项目 → `~/.codex/AGENTS.md`
 
 ### 步骤 4: 创建/更新本能（Obsidian 兼容）
 

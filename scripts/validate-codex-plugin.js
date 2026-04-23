@@ -105,6 +105,25 @@ function validateOptionalFile(file, label = file) {
   return isFile(file, label);
 }
 
+function listMarkdownFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) return listMarkdownFiles(file);
+    return entry.isFile() && entry.name.endsWith('.md') ? [file] : [];
+  });
+}
+
+function validateNoClaudeOnlyText(dir, label) {
+  const forbidden = /Claude Code|Claude|CLAUDE|~\/\.claude|\.claude\//;
+  listMarkdownFiles(dir).forEach((file) => {
+    const content = fs.readFileSync(file, 'utf-8');
+    if (forbidden.test(content)) {
+      fail(`${label} contains Claude-only text: ${path.relative(pluginRoot, file)}`);
+    }
+  });
+}
+
 if (!exists(pluginRoot, 'plugin root')) process.exit(1);
 
 const manifestPath = path.join(pluginRoot, '.codex-plugin', 'plugin.json');
@@ -127,6 +146,7 @@ if (isDirectory(commandsDir, 'commands dir')) {
     fail(`commands dir must contain exactly ${expectedCommands.length} .md files`);
   }
   expectedCommands.forEach((name) => isFile(path.join(commandsDir, name), `command ${name}`));
+  validateNoClaudeOnlyText(commandsDir, 'commands dir');
 }
 
 const skillsDir = path.join(pluginRoot, 'skills');
@@ -143,6 +163,7 @@ if (isDirectory(skillsDir, 'skills dir')) {
       isFile(path.join(skillDir, 'SKILL.md'), `skill ${name} SKILL.md`);
     }
   });
+  validateNoClaudeOnlyText(skillsDir, 'skills dir');
 }
 
 const readmePath = path.join(pluginRoot, 'README.md');

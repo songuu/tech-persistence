@@ -45,7 +45,7 @@ function resolveProjectRulesDir(cwd = process.cwd()) {
 function resolveProjectInstructionFile(cwd = process.cwd()) {
   return runtimeFromEnvironment() === 'codex'
     ? path.join(cwd, 'AGENTS.md')
-    : path.join(cwd, 'CLAUDE.md');
+    : path.join(cwd, 'AGENTS.md');
 }
 
 function resolveSessionId(options = {}) {

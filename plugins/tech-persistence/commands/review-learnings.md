@@ -10,7 +10,7 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 
 | 层次 | 位置 | 内容 |
 |------|------|------|
-| 核心知识 | `CLAUDE.md` | 项目/个人核心信息 |
+| 核心知识 | `AGENTS.md` | 项目/个人核心信息 |
 | 分类经验 | `.codex/rules/*.md` | 按领域分类的成熟经验 |
 | 项目本能 | `~/.codex/homunculus/projects/{id}/instincts/` | 项目级学习的行为 |
 | 全局本能 | `~/.codex/homunculus/instincts/personal/` | 跨项目通用行为 |
@@ -25,7 +25,7 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 📊 知识库统计 — 项目: {name}
 
 经验层:
-  CLAUDE.md: N 行 | rules/: N 个文件, N 条经验
+  AGENTS.md: N 行 | rules/: N 个文件, N 条经验
   
 本能层:
   项目本能: N 个 (🔵N 🟢N 🟡N 🟠N 🔴N)
@@ -58,7 +58,7 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 按时间倒序展示知识积累过程。
 
 ## 健康检查（每次自动执行）
-- ⚠️ CLAUDE.md > 200 行
+- ⚠️ AGENTS.md > 200 行
 - ⚠️ 单个 rules 文件 > 100 行
 - ⚠️ 本能 > 50 个未聚类
 - ⚠️ 观察日志 > 5MB 未归档

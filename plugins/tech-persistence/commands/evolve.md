@@ -35,7 +35,7 @@ code-style 域 (5 个本能):
 | 进化形态 | 适合场景 | 产物位置 |
 |---------|---------|---------|
 | **Skill** | 一组相关的行为规范/工作流 | `~/.codex/homunculus/evolved/skills/` |
-| **Command** | 可以用 /slash 命令触发的流程 | `~/.codex/homunculus/evolved/commands/` 或 `.claude/commands/` |
+| **Command** | 可以用 /slash 命令触发的流程 | `~/.codex/homunculus/evolved/commands/` 或 `.codex/commands/` |
 | **Agent** | 需要专门子代理处理的复杂任务 | `~/.codex/homunculus/evolved/agents/` |
 | **Rule** | 成熟到可以成为永久规则的经验 | `.codex/rules/` |
 
@@ -83,7 +83,7 @@ evolved_from: ["instinct-id-1", "instinct-id-2", ...]
 聚类 1: "代码风格规范" (5 个本能, 平均置信度 0.69)
   来源: prefer-functional-style, use-const-over-let, ...
   建议: → 进化为 Skill
-  预览: .claude/skills/coding-style-conventions/SKILL.md
+  预览: .codex/skills/coding-style-conventions/SKILL.md
 
 聚类 2: "测试前置检查" (3 个本能, 平均置信度 0.72)
   来源: lint-before-test, typecheck-first, ...

@@ -39,10 +39,15 @@ const expectedSkills = [
 
 const replacements = [
   [/~\/\.claude\/homunculus/g, '~/.codex/homunculus'],
+  [/~\/\.claude\/CLAUDE\.md/g, '~/.codex/AGENTS.md'],
   [/`~\/\.claude\/homunculus/g, '`~/.codex/homunculus'],
   [/~\/\.claude\/commands/g, '~/.codex commands via Tech Persistence plugin'],
   [/Claude Code/g, 'Codex'],
   [/Claude/g, 'Codex'],
+  [/CLAUDE_PROJECT_DIR/g, 'CODEX_PROJECT_DIR'],
+  [/CLAUDE\.md/g, 'AGENTS.md'],
+  [/\.claude\/commands/g, '.codex/commands'],
+  [/\.claude\/skills/g, '.codex/skills'],
   [/\.claude\/rules/g, '.codex/rules'],
   [/\.claude\/plans/g, '.codex/plans'],
 ];
