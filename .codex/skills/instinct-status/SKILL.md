@@ -1,0 +1,73 @@
+---
+name: instinct-status
+description: Codex-compatible entry point for the former /instinct-status command. 查看所有已学习的本能及其置信度状态
+---
+
+# Instinct Status
+
+Codex CLI currently registers plugin bundles as skills, apps, and MCP servers. It does not register custom plugin `commands/*.md` files as interactive slash commands in the TUI, so use this skill as the supported Codex entry point for the former `/instinct-status` command.
+
+## Invocation
+
+Use `$instinct-status <arguments>` or select this skill through Codex's `@` picker. Treat the user's text after the skill name as the command arguments.
+
+When the command instructions below mention `/instinct-status`, interpret that as this `$instinct-status` skill invocation while running in Codex.
+
+## Command Instructions
+
+# /instinct-status — 本能状态面板
+
+扫描本能存储目录，展示所有已学习本能的状态面板。
+
+## 执行步骤
+
+### 1. 扫描本能文件
+读取以下目录中所有 `.md` 文件的 YAML frontmatter：
+- `~/.codex/homunculus/projects/{当前项目hash}/instincts/` → 项目本能
+- `~/.codex/homunculus/instincts/personal/` → 全局本能
+- `~/.codex/homunculus/instincts/inherited/` → 导入的本能
+
+### 2. 解析置信度等级
+
+| 置信度 | 等级 | 图标 | 行为 |
+|--------|------|------|------|
+| 0.9+   | 核心 | 🔵 | 自动应用，视为确定规则 |
+| 0.7-0.89| 强  | 🟢 | 自动应用，相关时触发 |
+| 0.5-0.69| 中等 | 🟡 | 建议但不强制 |
+| 0.3-0.49| 初步 | 🟠 | 仅在被问到时提及 |
+| <0.3   | 衰减 | 🔴 | 候选删除 |
+
+### 3. 输出面板
+
+```
+🧠 本能状态面板 — 项目: {project_name}
+
+📂 项目本能 ({count} 个)
+| # | 图标 | 置信度 | 域 | 触发条件 | 最后见到 |
+|----|------|--------|-----|---------|---------|
+| 1  | 🟢  | 0.75  | testing | 测试前先跑 lint | 2 天前 |
+| 2  | 🟡  | 0.55  | code-style | 优先用函数式模式 | 5 天前 |
+| 3  | 🟠  | 0.35  | debugging | 先查日志再看代码 | 12 天前 |
+
+🌍 全局本能 ({count} 个)
+| # | 图标 | 置信度 | 域 | 触发条件 | 最后见到 |
+|----|------|--------|-----|---------|---------|
+| 1  | 🔵  | 0.90  | git | 提交前先 diff 确认 | 1 天前 |
+
+📥 导入的本能 ({count} 个)
+| # | 图标 | 置信度 | 域 | 来源 | 触发条件 |
+|----|------|--------|-----|------|---------|
+
+📊 统计
+  总计: {total} 个本能
+  核心(0.9+): {n} | 强(0.7+): {n} | 中等(0.5+): {n} | 初步(<0.5): {n}
+  域分布: code-style({n}) testing({n}) debugging({n}) ...
+  ⚠️ {n} 个本能置信度持续衰减，建议 /retrospective 审查
+  💡 {n} 个相关本能可聚类，建议 /evolve 进化
+```
+
+### 4. 可选参数
+- `/instinct-status domain:testing` → 只显示指定域
+- `/instinct-status low` → 只显示低置信度（候选裁剪）
+- `/instinct-status high` → 只显示高置信度（可进化）
+

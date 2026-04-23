@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 160" role="img" aria-labelledby="title desc">
+  <title id="title">Tech Persistence</title>
+  <desc id="desc">A teal Codex plugin mark for persistent engineering memory.</desc>
+  <defs>
+    <linearGradient id="bg" x1="24" x2="296" y1="20" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#115e59"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="78" x2="172" y1="32" y2="132" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ccfbf1"/>
+      <stop offset="1" stop-color="#5eead4"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="296" height="136" rx="28" fill="url(#bg)"/>
+  <path d="M52 82c0-29.3 19.8-50.4 45-50.4 14.5 0 26.6 6.5 34.1 17.1L116.8 60c-4.5-6.5-11.1-10.2-19.8-10.2-14.3 0-24.7 12.7-24.7 32.2 0 19 10.6 31.9 25.5 31.9 9.7 0 17.4-4.9 21.6-13.4l15.7 9.2c-7.3 14.9-20.3 23.8-38.3 23.8C71.1 133.5 52 111.6 52 82Z" fill="#f8fafc"/>
+  <path d="M94 26h11v108H94z" fill="url(#glow)" opacity=".95"/>
+  <path d="M162 55h90v13h-90zM162 80h70v13h-70zM162 105h98v13h-98z" fill="#ccfbf1"/>
+  <circle cx="266" cy="62" r="9" fill="#f8fafc"/>
+  <circle cx="244" cy="87" r="7" fill="#99f6e4"/>
+  <circle cx="274" cy="112" r="8" fill="#f8fafc"/>
+  <path d="M266 71 244 80M250 92l18 15" stroke="#99f6e4" stroke-width="4" stroke-linecap="round"/>
+</svg>

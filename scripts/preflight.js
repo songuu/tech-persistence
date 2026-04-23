@@ -43,6 +43,297 @@ function check(label, fn) {
   }
 }
 
+function commandAvailable(command) {
+  const lookup = process.platform === 'win32' ? `where ${command}` : `which ${command}`;
+  execSync(lookup, { stdio: 'pipe' });
+}
+
+function checkWritableDir(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  const testFile = path.join(dir, `.write-test-${Date.now()}`);
+  fs.writeFileSync(testFile, 'test');
+  fs.unlinkSync(testFile);
+}
+
+function expandHome(value, home) {
+  if (!value) return value;
+  if (value === '~') return home;
+  if (value.startsWith('~/') || value.startsWith('~\\')) {
+    return path.join(home, value.slice(2));
+  }
+  return value;
+}
+
+function sharedConfigPath(home) {
+  return process.env.TECH_PERSISTENCE_CONFIG
+    ? path.resolve(expandHome(process.env.TECH_PERSISTENCE_CONFIG, home))
+    : path.join(home, '.tech-persistence', 'config.json');
+}
+
+function describeSharedHomunculus(home) {
+  if (process.env.TECH_PERSISTENCE_HOME) {
+    return {
+      source: 'TECH_PERSISTENCE_HOME',
+      homunculusHome: path.resolve(expandHome(process.env.TECH_PERSISTENCE_HOME, home)),
+    };
+  }
+
+  const configPath = sharedConfigPath(home);
+  if (!fs.existsSync(configPath)) return null;
+
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const configured = config.homunculusHome || config.homunculusDir || config.vaultPath;
+    if (!configured) return { source: configPath, error: 'missing homunculusHome' };
+    return {
+      source: configPath,
+      homunculusHome: path.resolve(expandHome(configured, home)),
+    };
+  } catch (error) {
+    return { source: configPath, error: error.message };
+  }
+}
+
+function finish(recommendedCommand) {
+  console.log('\n' + '─'.repeat(50));
+  if (hasError) {
+    console.log(`\n${FAIL} 存在阻断问题，请先解决后再安装\n`);
+    process.exit(1);
+  }
+  if (hasWarning) {
+    console.log(`\n${WARN} 存在需要注意的项，安装时会自动处理或提示手动合并`);
+    console.log(`${INFO} 可以继续安装: ${recommendedCommand}\n`);
+    return;
+  }
+  console.log(`\n${OK} 环境检查通过，可以安装: ${recommendedCommand}\n`);
+}
+
+function runCodexPreflight() {
+  console.log('\n🔍 Tech Persistence for Codex — 环境检查\n');
+
+  console.log('运行环境:');
+  check('Node.js >= 18', () => {
+    const ver = parseInt(process.versions.node.split('.')[0]);
+    if (ver >= 18) return true;
+    console.log(`     当前版本: ${process.versions.node}`);
+    return false;
+  });
+
+  check('Git 可用', () => {
+    try {
+      execSync('git --version', { stdio: 'pipe' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  check('Codex CLI 可用', () => {
+    try {
+      commandAvailable('codex');
+      return true;
+    } catch {
+      console.log('     未检测到 codex 命令；插件仍可安装，但请确认 Codex CLI/应用可加载插件');
+      return 'warn';
+    }
+  });
+
+  console.log('\n目录权限:');
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  const codexHome = path.join(homeDir, '.codex');
+  const agentsPluginsDir = path.join(homeDir, '.agents', 'plugins');
+  const userPluginDir = path.join(homeDir, 'plugins', 'tech-persistence');
+  const marketplacePath = path.join(agentsPluginsDir, 'marketplace.json');
+  const repoMarketplacePath = path.join(process.cwd(), '.agents', 'plugins', 'marketplace.json');
+
+  check('~/.codex 目录可写', () => {
+    try {
+      checkWritableDir(codexHome);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  check('~/.agents/plugins 目录可写', () => {
+    try {
+      checkWritableDir(agentsPluginsDir);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  console.log('\n现有 Codex 配置:');
+  check('~/plugins/tech-persistence', () => {
+    if (fs.existsSync(userPluginDir)) {
+      console.log('     已存在 — 安装时会创建备份并替换插件目录');
+      return 'warn';
+    }
+    console.log('     不存在 — 将新建');
+    return true;
+  });
+
+  check('~/.codex/homunculus', () => {
+    const homunculusDir = path.join(codexHome, 'homunculus');
+    if (fs.existsSync(homunculusDir)) {
+      console.log('     已存在 — 会保留现有知识库');
+      return 'warn';
+    }
+    console.log('     不存在 — 将初始化');
+    return true;
+  });
+
+  check('shared homunculus config', () => {
+    const shared = describeSharedHomunculus(homeDir);
+    if (!shared) {
+      console.log('     未配置 — Codex 将使用 ~/.codex/homunculus');
+      return true;
+    }
+    if (shared.error) {
+      console.log(`     ${shared.source} 无效: ${shared.error}`);
+      return 'warn';
+    }
+    console.log(`     ${shared.source} -> ${shared.homunculusHome}`);
+    return fs.existsSync(shared.homunculusHome) ? 'warn' : true;
+  });
+
+  check('~/.codex/commands', () => {
+    const commandsDir = path.join(codexHome, 'commands');
+    if (!fs.existsSync(commandsDir)) {
+      console.log('     不存在 — 将安装 20 个用户命令');
+      return true;
+    }
+    const commandCount = fs.readdirSync(commandsDir).filter((name) => name.endsWith('.md')).length;
+    console.log(`     已存在 (${commandCount} 个命令) — 安装时会刷新本系统命令`);
+    return commandCount >= 20 ? 'warn' : true;
+  });
+
+  check('~/.codex/skills', () => {
+    const skillsDir = path.join(codexHome, 'skills');
+    const requiredSkills = [
+      'memory',
+      'continuous-learning',
+      'prototype-workflow',
+      'test-strategy',
+      'context-handoff',
+      'checkpoint',
+      'compound',
+      'evolve',
+      'instinct-export',
+      'instinct-import',
+      'instinct-status',
+      'learn',
+      'plan',
+      'prototype',
+      'review',
+      'review-learnings',
+      'session-summary',
+      'skill-diagnose',
+      'skill-eval',
+      'skill-improve',
+      'skill-publish',
+      'sprint',
+      'test',
+      'think',
+      'work',
+    ];
+    if (!fs.existsSync(skillsDir)) {
+      console.log(`     不存在 — 将安装 ${requiredSkills.length} 个 Codex skills`);
+      return true;
+    }
+    const missing = requiredSkills.filter((name) => !fs.existsSync(path.join(skillsDir, name, 'SKILL.md')));
+    if (missing.length > 0) {
+      console.log(`     缺少: ${missing.join(', ')} — 安装时会补齐`);
+      return true;
+    }
+    console.log(`     ${requiredSkills.length} 个 Codex skills 已存在 — 安装时会刷新本系统技能`);
+    return 'warn';
+  });
+
+  check('marketplace tech-persistence entry', () => {
+    if (!fs.existsSync(marketplacePath)) {
+      console.log('     marketplace.json 不存在 — 将新建');
+      return true;
+    }
+    try {
+      const marketplace = JSON.parse(fs.readFileSync(marketplacePath, 'utf-8'));
+      const plugins = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
+      if (plugins.some((plugin) => plugin.name === 'tech-persistence')) {
+        console.log('     已存在 — 安装时会刷新该 entry');
+        return 'warn';
+      }
+      console.log('     未注册 — 将追加 entry');
+      return true;
+    } catch {
+      console.log('     marketplace.json 解析失败 — 安装时会备份并重建');
+      return 'warn';
+    }
+  });
+
+  check('repo marketplace root', () => {
+    if (!fs.existsSync(repoMarketplacePath)) {
+      console.log('     缺少 .agents/plugins/marketplace.json — Codex 无法用当前仓库作为 marketplace root');
+      return false;
+    }
+    try {
+      const marketplace = JSON.parse(fs.readFileSync(repoMarketplacePath, 'utf-8'));
+      const plugins = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
+      const entry = plugins.find((plugin) => plugin.name === 'tech-persistence');
+      if (!entry) {
+        console.log('     缺少 tech-persistence entry');
+        return false;
+      }
+      if (entry.policy?.installation !== 'INSTALLED_BY_DEFAULT') {
+        console.log('     tech-persistence 需要 INSTALLED_BY_DEFAULT 才能直接加载 Codex skills');
+        return false;
+      }
+      console.log('     可通过 codex plugin marketplace add . 注册');
+      return true;
+    } catch {
+      console.log('     repo marketplace JSON 解析失败');
+      return false;
+    }
+  });
+
+  console.log('\n当前目录:');
+  check('Git 仓库', () => {
+    try {
+      execSync('git rev-parse --is-inside-work-tree', { stdio: 'pipe' });
+      return true;
+    } catch {
+      console.log('     不在 Git 仓库中 — 项目级安装需要在项目根目录');
+      return 'warn';
+    }
+  });
+
+  check('.codex/ 目录', () => {
+    if (fs.existsSync('.codex')) {
+      console.log('     已存在 — 安装时会保留现有文件');
+      return 'warn';
+    }
+    return true;
+  });
+
+  check('AGENTS.md', () => {
+    if (fs.existsSync('AGENTS.md')) {
+      const lines = fs.readFileSync('AGENTS.md', 'utf-8').split('\n').length;
+      console.log(`     已存在 (${lines} 行) — 不会覆盖`);
+      return 'warn';
+    }
+    return true;
+  });
+
+  finish(process.platform === 'win32'
+    ? 'powershell -ExecutionPolicy Bypass -File .\\install-codex.ps1 -All'
+    : 'bash install-codex.sh --all');
+}
+
+if (process.argv.includes('--codex')) {
+  runCodexPreflight();
+  process.exit(hasError ? 1 : 0);
+}
+
 console.log('\n🔍 技术沉淀系统 v2 — 环境检查\n');
 
 // ── Node.js ──
@@ -110,6 +401,20 @@ Object.entries(existingFiles).forEach(([label, filePath]) => {
     console.log(`     不存在 — 将新建`);
     return true;
   });
+});
+
+check('shared homunculus config', () => {
+  const shared = describeSharedHomunculus(home);
+  if (!shared) {
+    console.log('     未配置 — Claude Code 将使用 ~/.claude/homunculus');
+    return true;
+  }
+  if (shared.error) {
+    console.log(`     ${shared.source} 无效: ${shared.error}`);
+    return 'warn';
+  }
+  console.log(`     ${shared.source} -> ${shared.homunculusHome}`);
+  return fs.existsSync(shared.homunculusHome) ? 'warn' : true;
 });
 
 // ── Hook 冲突检测 ──

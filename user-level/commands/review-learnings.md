@@ -26,12 +26,12 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 
 经验层:
   CLAUDE.md: N 行 | rules/: N 个文件, N 条经验
-  
+
 本能层:
   项目本能: N 个 (🔵N 🟢N 🟡N 🟠N 🔴N)
   全局本能: N 个
   导入本能: N 个
-  
+
 进化层:
   Skills: N | Commands: N | Agents: N
 

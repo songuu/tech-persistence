@@ -18,6 +18,12 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const {
+  resolveBaseDir,
+  resolveProjectInstructionFile,
+  resolveProjectRulesDir,
+  resolveSessionId,
+} = require('./lib/runtime-paths');
 
 // ─── 配置 ───
 const CONFIG = {
@@ -66,8 +72,8 @@ function detectProject() {
 
 // ─── 路径解析 ───
 function getPaths(project) {
-  const home = process.env.HOME || process.env.USERPROFILE;
-  const hDir = path.join(home, '.claude', 'homunculus');
+  const hDir = resolveBaseDir();
+  const localInstructionsFile = resolveProjectInstructionFile();
   return {
     // 项目级
     projectDir: path.join(hDir, 'projects', project.id),
@@ -78,8 +84,9 @@ function getPaths(project) {
     globalInstincts: path.join(hDir, 'instincts', 'personal'),
     registry: path.join(hDir, 'projects.json'),
     // 本地项目
-    localRules: path.join(process.cwd(), '.claude', 'rules'),
-    localClaudeMd: path.join(process.cwd(), 'CLAUDE.md'),
+    localRules: resolveProjectRulesDir(),
+    localInstructionsFile,
+    localInstructionsLabel: path.basename(localInstructionsFile),
   };
 }
 
@@ -87,7 +94,7 @@ function getPaths(project) {
 function readSessionObservations(obsPath) {
   if (!fs.existsSync(obsPath)) return [];
   const lines = fs.readFileSync(obsPath, 'utf-8').trim().split('\n').filter(Boolean);
-  const sessionId = process.env.CLAUDE_SESSION_ID;
+  const sessionId = resolveSessionId({ fallback: false });
 
   return lines
     .map(line => { try { return JSON.parse(line); } catch { return null; } })
@@ -364,11 +371,11 @@ ${instinctLinks || '_No instinct changes this session_'}
 function healthCheck(paths) {
   const warnings = [];
 
-  // CLAUDE.md 行数
-  if (fs.existsSync(paths.localClaudeMd)) {
-    const lines = fs.readFileSync(paths.localClaudeMd, 'utf-8').split('\n').length;
+  // CLAUDE.md / AGENTS.md 行数
+  if (fs.existsSync(paths.localInstructionsFile)) {
+    const lines = fs.readFileSync(paths.localInstructionsFile, 'utf-8').split('\n').length;
     if (lines > 200) {
-      warnings.push(`⚠️  CLAUDE.md 已 ${lines} 行 (建议 < 200)，考虑迁移到 .claude/rules/`);
+      warnings.push(`⚠️  ${paths.localInstructionsLabel} 已 ${lines} 行 (建议 < 200)，考虑迁移到 ${path.relative(process.cwd(), paths.localRules)}/`);
     }
   }
 
@@ -377,7 +384,7 @@ function healthCheck(paths) {
     fs.readdirSync(paths.localRules).filter(f => f.endsWith('.md')).forEach(f => {
       const lines = fs.readFileSync(path.join(paths.localRules, f), 'utf-8').split('\n').length;
       if (lines > 100) {
-        warnings.push(`⚠️  .claude/rules/${f} 已 ${lines} 行 (建议 < 100)`);
+        warnings.push(`⚠️  ${path.join(path.relative(process.cwd(), paths.localRules), f)} 已 ${lines} 行 (建议 < 100)`);
       }
     });
   }
@@ -417,6 +424,88 @@ function updateProjectRegistry(paths, project) {
   fs.writeFileSync(paths.registry, JSON.stringify(registry, null, 2));
 }
 
+// ─── Sprint 自动 Checkpoint ───
+function detectActiveSprint() {
+  const plansDir = path.join(process.cwd(), 'docs', 'plans');
+  if (!fs.existsSync(plansDir)) return null;
+
+  const sprintDocs = fs.readdirSync(plansDir)
+    .filter(f => f.endsWith('.md') && !f.includes('-handoff-') && f !== 'TEMPLATE.md')
+    .map(f => {
+      const content = fs.readFileSync(path.join(plansDir, f), 'utf-8');
+      const statusMatch = content.match(/status:\s*["']?([\w-]+)["']?/);
+      const status = statusMatch ? statusMatch[1] : null;
+      return { file: f, status, content };
+    })
+    .filter(d => d.status && ['in-progress', 'planning', 'reviewing', 'draft'].includes(d.status));
+
+  return sprintDocs.length > 0 ? sprintDocs[0] : null;
+}
+
+function autoCheckpoint(sprint, observations) {
+  if (!sprint) return null;
+
+  const plansDir = path.join(process.cwd(), 'docs', 'plans');
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toISOString().split('T')[1].slice(0, 5);
+
+  // 计算 handoff 编号
+  const existingHandoffs = fs.readdirSync(plansDir)
+    .filter(f => f.includes('-handoff-'))
+    .length;
+  const handoffNum = existingHandoffs + 1;
+
+  // 从 sprint 文档中提取任务状态
+  const tasksDone = (sprint.content.match(/- \[x\]/gi) || []).length;
+  const tasksTotal = (sprint.content.match(/- \[[ x]\]/gi) || []).length;
+
+  // 从观察中提取修改的文件
+  const editedFiles = new Set();
+  observations
+    .filter(o => o.tool === 'Write' || o.tool === 'Edit' || o.tool === 'str_replace_editor')
+    .forEach(o => {
+      const fp = (o.input_summary || '').match(/(?:path|file)['":\s]+([^\s'"]+)/)?.[1];
+      if (fp) editedFiles.add(fp);
+    });
+
+  // 生成交接文件
+  const baseName = sprint.file.replace('.md', '');
+  const handoffFile = `${baseName}-handoff-${handoffNum}.md`;
+  const handoffContent = `---
+type: sprint-handoff
+sprint_doc: "docs/plans/${sprint.file}"
+checkpoint_number: ${handoffNum}
+created: "${now.toISOString()}"
+phase: "${sprint.status}"
+tasks_done: ${tasksDone}
+tasks_total: ${tasksTotal}
+tags: [handoff, sprint]
+---
+
+# Sprint Auto-Checkpoint #${handoffNum}
+
+## Sprint 状态
+- 文档: docs/plans/${sprint.file}
+- 阶段: ${sprint.status}
+- Task: ${tasksDone}/${tasksTotal} 完成
+- 时间: ${dateStr} ${timeStr}
+
+## 本次会话修改的文件
+${[...editedFiles].map(f => `- ${f}`).join('\n') || '- (无文件修改记录)'}
+
+## 本次会话观察统计
+- 观察数: ${observations.length}
+- 工具调用: ${observations.filter(o => o.phase === 'post').length}
+
+## Related
+- [[${baseName}]]
+`;
+
+  fs.writeFileSync(path.join(plansDir, handoffFile), handoffContent);
+  return { file: handoffFile, tasksDone, tasksTotal };
+}
+
 // ─── 主流程 ───
 function main() {
   const project = detectProject();
@@ -432,7 +521,6 @@ function main() {
   // 1. 读取观察
   const observations = readSessionObservations(paths.projectObs);
   if (observations.length < 3) {
-    // 会话太短，不分析
     console.log('💡 会话较短，跳过自动学习分析');
     return;
   }
@@ -443,7 +531,6 @@ function main() {
   // 3. 创建/更新本能
   const instinctResults = [];
   patterns.forEach(pattern => {
-    // 判断作用域：通用经验 → global，项目特定 → project
     const targetDir = pattern.domain === 'workflow'
       ? paths.globalInstincts
       : paths.projectInstincts;
@@ -463,10 +550,14 @@ function main() {
   );
   fs.writeFileSync(summaryFile, summary);
 
-  // 6. 健康检查
+  // 6. 自动 Sprint Checkpoint (如果有活跃 sprint)
+  const activeSprint = detectActiveSprint();
+  const checkpoint = autoCheckpoint(activeSprint, observations);
+
+  // 7. 健康检查
   const warnings = healthCheck(paths);
 
-  // 7. 输出报告
+  // 8. 输出报告
   console.log('');
   console.log(`📊 会话自学习报告 [${project.name}]`);
   console.log(`   观察: ${observations.length} | 模式: ${patterns.length} | 本能: +${instinctResults.filter(r => r.action === 'created').length} ↑${instinctResults.filter(r => r.action === 'updated').length}`);
@@ -490,13 +581,18 @@ function main() {
     });
   }
 
+  if (checkpoint) {
+    console.log(`   ⚡ Sprint 自动 checkpoint: ${checkpoint.file} (${checkpoint.tasksDone}/${checkpoint.tasksTotal} tasks)`);
+    console.log(`     下次 /sprint resume 可从此处恢复`);
+  }
+
   if (warnings.length > 0) {
     console.log('   健康检查:');
     warnings.forEach(w => console.log(`     ${w}`));
   }
 
   console.log('');
-  console.log('   💡 运行 /learn 手动提取深度经验 | /instinct-status 查看所有本能');
+  console.log('   💡 运行 /compound 提取深度经验 | /instinct-status 查看所有本能');
   console.log('');
 }
 
