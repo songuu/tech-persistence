@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const root = process.cwd();
+const root = path.resolve(__dirname, '..');
 const pluginRoot = path.join(root, 'plugins', 'tech-persistence');
 const expectedCommands = [
   'checkpoint.md',
@@ -52,6 +52,14 @@ function readJson(file) {
   }
 }
 
+function stat(file) {
+  try {
+    return fs.lstatSync(file);
+  } catch {
+    return null;
+  }
+}
+
 function exists(file, label = file) {
   if (!fs.existsSync(file)) {
     fail(`${label} missing`);
@@ -61,10 +69,46 @@ function exists(file, label = file) {
   return true;
 }
 
+function isFile(file, label = file) {
+  const entry = stat(file);
+  if (!entry) {
+    fail(`${label} missing`);
+    return false;
+  }
+  if (!entry.isFile()) {
+    fail(`${label} must be a file`);
+    return false;
+  }
+  ok(`${label} is a file`);
+  return true;
+}
+
+function isDirectory(file, label = file) {
+  const entry = stat(file);
+  if (!entry) {
+    fail(`${label} missing`);
+    return false;
+  }
+  if (!entry.isDirectory()) {
+    fail(`${label} must be a directory`);
+    return false;
+  }
+  ok(`${label} is a directory`);
+  return true;
+}
+
+function validateOptionalFile(file, label = file) {
+  if (!fs.existsSync(file)) {
+    ok(`${label} missing`);
+    return false;
+  }
+  return isFile(file, label);
+}
+
 if (!exists(pluginRoot, 'plugin root')) process.exit(1);
 
 const manifestPath = path.join(pluginRoot, '.codex-plugin', 'plugin.json');
-if (exists(manifestPath, 'plugin manifest')) {
+if (isFile(manifestPath, 'plugin manifest')) {
   const manifest = readJson(manifestPath);
   if (manifest) {
     ['name', 'version', 'description', 'skills', 'hooks', 'interface'].forEach((key) => {
@@ -75,29 +119,56 @@ if (exists(manifestPath, 'plugin manifest')) {
 }
 
 const commandsDir = path.join(pluginRoot, 'commands');
-if (exists(commandsDir, 'commands dir')) {
-  expectedCommands.forEach((name) => exists(path.join(commandsDir, name), `command ${name}`));
+if (isDirectory(commandsDir, 'commands dir')) {
+  const commandEntries = fs
+    .readdirSync(commandsDir)
+    .filter((name) => name.endsWith('.md'));
+  if (commandEntries.length !== expectedCommands.length) {
+    fail(`commands dir must contain exactly ${expectedCommands.length} .md files`);
+  }
+  expectedCommands.forEach((name) => isFile(path.join(commandsDir, name), `command ${name}`));
 }
 
 const skillsDir = path.join(pluginRoot, 'skills');
-if (exists(skillsDir, 'skills dir')) {
+if (isDirectory(skillsDir, 'skills dir')) {
+  const skillEntries = fs.readdirSync(skillsDir).filter((name) =>
+    fs.existsSync(path.join(skillsDir, name)) && fs.lstatSync(path.join(skillsDir, name)).isDirectory()
+  );
+  if (skillEntries.length !== expectedSkills.length) {
+    fail(`skills dir must contain exactly ${expectedSkills.length} skill directories`);
+  }
   expectedSkills.forEach((name) => {
-    exists(path.join(skillsDir, name, 'SKILL.md'), `skill ${name}`);
+    const skillDir = path.join(skillsDir, name);
+    if (isDirectory(skillDir, `skill ${name}`)) {
+      isFile(path.join(skillDir, 'SKILL.md'), `skill ${name} SKILL.md`);
+    }
   });
 }
 
+const readmePath = path.join(pluginRoot, 'README.md');
+isFile(readmePath, 'README.md');
+
 const hooksPath = path.join(pluginRoot, 'hooks.json');
-if (exists(hooksPath, 'hooks.json')) {
+if (isFile(hooksPath, 'hooks.json')) {
   const hooksConfig = readJson(hooksPath);
-  const hooks = hooksConfig && hooksConfig.hooks ? hooksConfig.hooks : {};
-  ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop'].forEach((hook) => {
-    if (!hooks[hook]) fail(`hooks.json missing ${hook}`);
-  });
+  const hooks = hooksConfig ? hooksConfig.hooks : null;
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
+    fail('hooks.json missing hooks object');
+  } else {
+    ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop'].forEach((hook) => {
+      if (!Array.isArray(hooks[hook])) fail(`hooks.json missing ${hook}`);
+    });
+  }
 }
 
 ['inject-context.js', 'observe.js', 'evaluate-session.js'].forEach((script) => {
-  exists(path.join(pluginRoot, 'hooks', script), `hook script ${script}`);
+  isFile(path.join(pluginRoot, 'hooks', script), `hook script ${script}`);
 });
+
+validateOptionalFile(path.join(pluginRoot, 'hooks', 'lib', 'runtime-paths.js'), 'hook script lib/runtime-paths.js');
+validateOptionalFile(path.join(pluginRoot, 'hooks', 'run-hook.cmd'), 'hook script run-hook.cmd');
+validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence-small.svg'), 'asset tech-persistence-small.svg');
+validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence.svg'), 'asset tech-persistence.svg');
 
 if (process.exitCode) process.exit(process.exitCode);
 console.log('[OK] Codex plugin validation passed');
