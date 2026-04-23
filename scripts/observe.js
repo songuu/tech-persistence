@@ -20,6 +20,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { resolveBaseDir, resolveSessionId } = require('./lib/runtime-paths');
 
 // ─── 项目检测 ───
 function detectProject() {
@@ -47,10 +48,7 @@ function detectProject() {
 
 // ─── 存储路径 ───
 function getObservationPath(project) {
-  const homunculusDir = path.join(
-    process.env.HOME || process.env.USERPROFILE,
-    '.claude', 'homunculus'
-  );
+  const homunculusDir = resolveBaseDir();
   // 项目级观察
   const projectDir = path.join(homunculusDir, 'projects', project.id);
   fs.mkdirSync(projectDir, { recursive: true });
@@ -99,7 +97,7 @@ function main() {
   const observation = {
     timestamp: new Date().toISOString(),
     phase, // pre | post
-    session_id: process.env.CLAUDE_SESSION_ID || `s-${Date.now()}`,
+    session_id: resolveSessionId(),
     project: project,
     tool: toolName,
     input_summary: toolInput,

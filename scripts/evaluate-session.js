@@ -18,6 +18,12 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const {
+  resolveBaseDir,
+  resolveProjectInstructionFile,
+  resolveProjectRulesDir,
+  resolveSessionId,
+} = require('./lib/runtime-paths');
 
 // ─── 配置 ───
 const CONFIG = {
@@ -66,8 +72,8 @@ function detectProject() {
 
 // ─── 路径解析 ───
 function getPaths(project) {
-  const home = process.env.HOME || process.env.USERPROFILE;
-  const hDir = path.join(home, '.claude', 'homunculus');
+  const hDir = resolveBaseDir();
+  const localInstructionsFile = resolveProjectInstructionFile();
   return {
     // 项目级
     projectDir: path.join(hDir, 'projects', project.id),
@@ -78,8 +84,9 @@ function getPaths(project) {
     globalInstincts: path.join(hDir, 'instincts', 'personal'),
     registry: path.join(hDir, 'projects.json'),
     // 本地项目
-    localRules: path.join(process.cwd(), '.claude', 'rules'),
-    localClaudeMd: path.join(process.cwd(), 'CLAUDE.md'),
+    localRules: resolveProjectRulesDir(),
+    localInstructionsFile,
+    localInstructionsLabel: path.basename(localInstructionsFile),
   };
 }
 
@@ -87,7 +94,7 @@ function getPaths(project) {
 function readSessionObservations(obsPath) {
   if (!fs.existsSync(obsPath)) return [];
   const lines = fs.readFileSync(obsPath, 'utf-8').trim().split('\n').filter(Boolean);
-  const sessionId = process.env.CLAUDE_SESSION_ID;
+  const sessionId = resolveSessionId({ fallback: false });
 
   return lines
     .map(line => { try { return JSON.parse(line); } catch { return null; } })
@@ -364,11 +371,11 @@ ${instinctLinks || '_No instinct changes this session_'}
 function healthCheck(paths) {
   const warnings = [];
 
-  // CLAUDE.md 行数
-  if (fs.existsSync(paths.localClaudeMd)) {
-    const lines = fs.readFileSync(paths.localClaudeMd, 'utf-8').split('\n').length;
+  // CLAUDE.md / AGENTS.md 行数
+  if (fs.existsSync(paths.localInstructionsFile)) {
+    const lines = fs.readFileSync(paths.localInstructionsFile, 'utf-8').split('\n').length;
     if (lines > 200) {
-      warnings.push(`⚠️  CLAUDE.md 已 ${lines} 行 (建议 < 200)，考虑迁移到 .claude/rules/`);
+      warnings.push(`⚠️  ${paths.localInstructionsLabel} 已 ${lines} 行 (建议 < 200)，考虑迁移到 ${path.relative(process.cwd(), paths.localRules)}/`);
     }
   }
 
@@ -377,7 +384,7 @@ function healthCheck(paths) {
     fs.readdirSync(paths.localRules).filter(f => f.endsWith('.md')).forEach(f => {
       const lines = fs.readFileSync(path.join(paths.localRules, f), 'utf-8').split('\n').length;
       if (lines > 100) {
-        warnings.push(`⚠️  .claude/rules/${f} 已 ${lines} 行 (建议 < 100)`);
+        warnings.push(`⚠️  ${path.join(path.relative(process.cwd(), paths.localRules), f)} 已 ${lines} 行 (建议 < 100)`);
       }
     });
   }

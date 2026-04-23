@@ -13,6 +13,10 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const {
+  resolveCompatReadDirs,
+  resolveProjectPlansDir,
+} = require('./lib/runtime-paths');
 
 function detectProject() {
   const { execSync } = require('child_process');
@@ -66,6 +70,22 @@ function loadRecentSessions(sessionsDir, limit = 5) {
     .reverse();
 }
 
+function loadRecentSessionsWithFallback(baseDirs, relativeParts, limit = 5) {
+  for (const baseDir of baseDirs) {
+    const sessions = loadRecentSessions(path.join(baseDir, ...relativeParts), limit);
+    if (sessions.length > 0) return sessions;
+  }
+  return [];
+}
+
+function loadInstinctsWithFallback(baseDirs, relativeParts, minConfidence) {
+  for (const baseDir of baseDirs) {
+    const instincts = loadInstincts(path.join(baseDir, ...relativeParts), minConfidence);
+    if (instincts.length > 0) return instincts;
+  }
+  return [];
+}
+
 /**
  * 检测未完成的 sprint handoff 文件
  * 查找 docs/plans/ 下最新的 *-handoff-*.md
@@ -102,7 +122,7 @@ function detectPendingHandoff() {
  * 检测未完成的 prototype 收敛状态
  */
 function detectPendingPrototype() {
-  const plansDir = path.join(process.cwd(), '.claude', 'plans');
+  const plansDir = resolveProjectPlansDir();
   if (!fs.existsSync(plansDir)) return null;
 
   const statuses = fs.readdirSync(plansDir)
@@ -118,14 +138,17 @@ function detectPendingPrototype() {
   // 如果已收敛完成则不注入
   if (content.includes('收敛完成') || content.includes('converged')) return null;
 
-  return { file: latest, content: content.slice(0, 500) }; // 只取摘要
+  const projectConfigDir = path.basename(path.dirname(plansDir));
+  return {
+    file: latest,
+    displayPath: `${projectConfigDir}/plans/${latest}`,
+    content: content.slice(0, 500),
+  }; // 只取摘要
 }
 
 function main() {
   const project = detectProject();
-  const home = process.env.HOME || process.env.USERPROFILE;
-  const hDir = path.join(home, '.claude', 'homunculus');
-  const projectDir = path.join(hDir, 'projects', project.id);
+  const compatReadDirs = resolveCompatReadDirs();
 
   const sections = [];
 
@@ -138,17 +161,25 @@ function main() {
   // 0b. 未完成的 prototype 收敛
   const prototype = detectPendingPrototype();
   if (prototype) {
-    sections.push(`## 🔄 未完成的原型收敛\n\n文件: .claude/plans/${prototype.file}\n\n${prototype.content}`);
+    sections.push(`## 🔄 未完成的原型收敛\n\n文件: ${prototype.displayPath}\n\n${prototype.content}`);
   }
 
   // 1. 近期会话摘要
-  const sessions = loadRecentSessions(path.join(projectDir, 'sessions'), 3);
+  const sessions = loadRecentSessionsWithFallback(
+    compatReadDirs,
+    ['projects', project.id, 'sessions'],
+    3
+  );
   if (sessions.length > 0) {
     sections.push(`## 近期会话 (${project.name})\n${sessions.join('\n---\n')}`);
   }
 
   // 2. 高置信度项目本能 (>=0.5)
-  const projectInstincts = loadInstincts(path.join(projectDir, 'instincts'), 0.5);
+  const projectInstincts = loadInstinctsWithFallback(
+    compatReadDirs,
+    ['projects', project.id, 'instincts'],
+    0.5
+  );
   if (projectInstincts.length > 0) {
     const instinctLines = projectInstincts.slice(0, 10).map(inst => {
       const conf = parseFloat(inst.confidence).toFixed(1);
@@ -159,7 +190,11 @@ function main() {
   }
 
   // 3. 高置信度全局本能 (>=0.7)
-  const globalInstincts = loadInstincts(path.join(hDir, 'instincts', 'personal'), 0.7);
+  const globalInstincts = loadInstinctsWithFallback(
+    compatReadDirs,
+    ['instincts', 'personal'],
+    0.7
+  );
   if (globalInstincts.length > 0) {
     const instinctLines = globalInstincts.slice(0, 5).map(inst => {
       const conf = parseFloat(inst.confidence).toFixed(1);
