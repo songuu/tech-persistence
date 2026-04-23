@@ -167,8 +167,30 @@ if (isFile(hooksPath, 'hooks.json')) {
 
 validateOptionalFile(path.join(pluginRoot, 'hooks', 'lib', 'runtime-paths.js'), 'hook script lib/runtime-paths.js');
 validateOptionalFile(path.join(pluginRoot, 'hooks', 'run-hook.cmd'), 'hook script run-hook.cmd');
+validateOptionalFile(path.join(pluginRoot, 'hooks', 'run-hook.js'), 'hook script run-hook.js');
 validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence-small.svg'), 'asset tech-persistence-small.svg');
 validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence.svg'), 'asset tech-persistence.svg');
+
+isFile(
+  path.join(pluginRoot, 'scripts', 'import-claude-homunculus.js'),
+  'import utility import-claude-homunculus.js'
+);
+isFile(
+  path.join(pluginRoot, 'codex-homunculus-template', 'config.json'),
+  'codex homunculus template config.json'
+);
+
+['inject-context.js', 'observe.js', 'evaluate-session.js'].forEach((script) => {
+  const scriptPath = path.join(pluginRoot, 'hooks', script);
+  if (!fs.existsSync(scriptPath)) return;
+  const content = fs.readFileSync(scriptPath, 'utf-8');
+  if (
+    content.includes("'.claude', 'homunculus'")
+    || content.includes('".claude", "homunculus"')
+  ) {
+    fail(`hook script ${script} hard-codes .claude homunculus`);
+  }
+});
 
 if (process.exitCode) process.exit(process.exitCode);
 console.log('[OK] Codex plugin validation passed');
