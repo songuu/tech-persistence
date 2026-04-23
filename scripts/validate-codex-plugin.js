@@ -207,9 +207,21 @@ isFile(
   'import utility import-claude-homunculus.js'
 );
 isFile(
+  path.join(pluginRoot, 'scripts', 'configure-shared-homunculus.js'),
+  'shared utility configure-shared-homunculus.js'
+);
+isFile(
   path.join(pluginRoot, 'codex-homunculus-template', 'config.json'),
   'codex homunculus template config.json'
 );
+
+const runtimePathsPath = path.join(pluginRoot, 'hooks', 'lib', 'runtime-paths.js');
+if (fs.existsSync(runtimePathsPath)) {
+  const content = fs.readFileSync(runtimePathsPath, 'utf-8');
+  if (!content.includes('TECH_PERSISTENCE_CONFIG') || !content.includes('resolveConfiguredBaseDir')) {
+    fail('hook runtime-paths.js must support shared homunculus config');
+  }
+}
 
 ['inject-context.js', 'observe.js', 'evaluate-session.js'].forEach((script) => {
   const scriptPath = path.join(pluginRoot, 'hooks', script);

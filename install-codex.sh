@@ -24,12 +24,17 @@ Usage:
   bash install-codex.sh --project
   bash install-codex.sh --all
   bash install-codex.sh --all --import-claude
+  bash install-codex.sh --all --shared-homunculus ~/Documents/TechPersistence
 
 Options:
   --user           Install the Codex plugin to ~/plugins/tech-persistence and register marketplace.json.
   --project        Create .codex project directories and project templates.
   --all            Run --user and --project.
   --import-claude  Copy ~/.claude/homunculus to ~/.codex/homunculus when the Codex target does not exist.
+  --shared-homunculus <path>
+                   Configure Claude Code and Codex to use one shared homunculus/Obsidian vault.
+  --allow-outside-home
+                   Allow --shared-homunculus outside the user home directory.
   --help           Show this help.
 EOF
 }
@@ -45,6 +50,21 @@ require_node() {
 
 build_plugin() {
   node "${PLUGIN_SOURCE}/scripts/build-codex-plugin.js"
+}
+
+resolve_user_path() {
+  node -e "const path=require('path'); const home=process.env.HOME||process.env.USERPROFILE; let value=process.argv[1]; if (value==='~') value=home; else if (value.startsWith('~/')||value.startsWith('~\\\\')) value=path.join(home,value.slice(2)); console.log(path.resolve(value));" "$1"
+}
+
+configure_shared_homunculus() {
+  [[ -n "${SHARED_HOMUNCULUS:-}" ]] || return
+  require_node
+  local args=("${SCRIPT_DIR}/scripts/configure-shared-homunculus.js" "--path" "$SHARED_HOMUNCULUS" "--force")
+  if [[ "${ALLOW_OUTSIDE_HOME:-false}" == true ]]; then
+    args+=("--allow-outside-home")
+  fi
+  node "${args[@]}"
+  HOMUNCULUS_DIR="$(resolve_user_path "$SHARED_HOMUNCULUS")"
 }
 
 copy_codex_text() {
@@ -298,6 +318,8 @@ import_claude_homunculus() {
 run_user=false
 run_project=false
 run_import=false
+SHARED_HOMUNCULUS=""
+ALLOW_OUTSIDE_HOME=false
 
 if [[ $# -eq 0 ]]; then
   show_help
@@ -310,12 +332,19 @@ while [[ $# -gt 0 ]]; do
     --project) run_project=true ;;
     --all) run_user=true; run_project=true ;;
     --import-claude) run_import=true ;;
+    --shared-homunculus)
+      SHARED_HOMUNCULUS="${2:-}"
+      [[ -n "$SHARED_HOMUNCULUS" ]] || { echo "[FAIL] --shared-homunculus requires a path" >&2; exit 1; }
+      shift
+      ;;
+    --allow-outside-home) ALLOW_OUTSIDE_HOME=true ;;
     --help|-h) show_help; exit 0 ;;
     *) show_help; exit 1 ;;
   esac
   shift
 done
 
+configure_shared_homunculus
 if [[ "$run_import" == true ]]; then import_claude_homunculus; fi
 if [[ "$run_user" == true ]]; then install_user; fi
 if [[ "$run_project" == true ]]; then install_project; fi

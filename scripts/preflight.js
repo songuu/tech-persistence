@@ -55,6 +55,45 @@ function checkWritableDir(dir) {
   fs.unlinkSync(testFile);
 }
 
+function expandHome(value, home) {
+  if (!value) return value;
+  if (value === '~') return home;
+  if (value.startsWith('~/') || value.startsWith('~\\')) {
+    return path.join(home, value.slice(2));
+  }
+  return value;
+}
+
+function sharedConfigPath(home) {
+  return process.env.TECH_PERSISTENCE_CONFIG
+    ? path.resolve(expandHome(process.env.TECH_PERSISTENCE_CONFIG, home))
+    : path.join(home, '.tech-persistence', 'config.json');
+}
+
+function describeSharedHomunculus(home) {
+  if (process.env.TECH_PERSISTENCE_HOME) {
+    return {
+      source: 'TECH_PERSISTENCE_HOME',
+      homunculusHome: path.resolve(expandHome(process.env.TECH_PERSISTENCE_HOME, home)),
+    };
+  }
+
+  const configPath = sharedConfigPath(home);
+  if (!fs.existsSync(configPath)) return null;
+
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const configured = config.homunculusHome || config.homunculusDir || config.vaultPath;
+    if (!configured) return { source: configPath, error: 'missing homunculusHome' };
+    return {
+      source: configPath,
+      homunculusHome: path.resolve(expandHome(configured, home)),
+    };
+  } catch (error) {
+    return { source: configPath, error: error.message };
+  }
+}
+
 function finish(recommendedCommand) {
   console.log('\n' + '─'.repeat(50));
   if (hasError) {
@@ -143,6 +182,20 @@ function runCodexPreflight() {
     }
     console.log('     不存在 — 将初始化');
     return true;
+  });
+
+  check('shared homunculus config', () => {
+    const shared = describeSharedHomunculus(homeDir);
+    if (!shared) {
+      console.log('     未配置 — Codex 将使用 ~/.codex/homunculus');
+      return true;
+    }
+    if (shared.error) {
+      console.log(`     ${shared.source} 无效: ${shared.error}`);
+      return 'warn';
+    }
+    console.log(`     ${shared.source} -> ${shared.homunculusHome}`);
+    return fs.existsSync(shared.homunculusHome) ? 'warn' : true;
   });
 
   check('~/.codex/commands', () => {
@@ -348,6 +401,20 @@ Object.entries(existingFiles).forEach(([label, filePath]) => {
     console.log(`     不存在 — 将新建`);
     return true;
   });
+});
+
+check('shared homunculus config', () => {
+  const shared = describeSharedHomunculus(home);
+  if (!shared) {
+    console.log('     未配置 — Claude Code 将使用 ~/.claude/homunculus');
+    return true;
+  }
+  if (shared.error) {
+    console.log(`     ${shared.source} 无效: ${shared.error}`);
+    return 'warn';
+  }
+  console.log(`     ${shared.source} -> ${shared.homunculusHome}`);
+  return fs.existsSync(shared.homunculusHome) ? 'warn' : true;
 });
 
 // ── Hook 冲突检测 ──

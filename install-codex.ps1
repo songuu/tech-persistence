@@ -9,6 +9,8 @@ param(
     [switch]$Project,
     [switch]$All,
     [switch]$ImportClaude,
+    [string]$SharedHomunculus,
+    [switch]$AllowOutsideHome,
     [switch]$Help
 )
 
@@ -38,12 +40,17 @@ Usage:
   powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -Project
   powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All
   powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All -ImportClaude
+  powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All -SharedHomunculus "C:\Users\you\Documents\TechPersistence"
 
 Options:
   -User          Install the Codex plugin to ~/plugins/tech-persistence and register marketplace.json.
   -Project       Create .codex project directories and project templates.
   -All           Run -User and -Project.
   -ImportClaude  Copy ~/.claude/homunculus to ~/.codex/homunculus when the Codex target does not exist.
+  -SharedHomunculus <path>
+                 Configure Claude Code and Codex to use one shared homunculus/Obsidian vault.
+  -AllowOutsideHome
+                 Allow -SharedHomunculus outside the user home directory.
   -Help          Show this help.
 "@
 }
@@ -61,6 +68,28 @@ function Test-Node {
 function Write-Utf8NoBom($path, $content) {
     $encoding = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($path, $content, $encoding)
+}
+
+function Resolve-UserPath($path) {
+    if (-not $path) { return $path }
+    if ($path -eq "~") { return $HomeDir }
+    if ($path.StartsWith("~/") -or $path.StartsWith("~\")) {
+        return [System.IO.Path]::GetFullPath((Join-Path $HomeDir $path.Substring(2)))
+    }
+    return [System.IO.Path]::GetFullPath($path)
+}
+
+function Configure-SharedHomunculus {
+    if (-not $SharedHomunculus) { return }
+    Test-Node
+    $configureScript = Join-Path $ScriptDir "scripts\configure-shared-homunculus.js"
+    if (-not (Test-Path $configureScript)) { throw "Missing shared homunculus configurator: $configureScript" }
+
+    $args = @($configureScript, "--path", $SharedHomunculus, "--force")
+    if ($AllowOutsideHome) { $args += "--allow-outside-home" }
+    & node @args
+    if ($LASTEXITCODE -ne 0) { throw "Shared homunculus configuration failed" }
+    $script:HomunculusDir = Resolve-UserPath $SharedHomunculus
 }
 
 function Convert-CodexText($text) {
@@ -334,6 +363,7 @@ function Import-ClaudeHomunculus {
 if ($Help) {
     Show-Help
 } else {
+    Configure-SharedHomunculus
     if ($ImportClaude) { Import-ClaudeHomunculus }
     if ($All) {
         Install-User

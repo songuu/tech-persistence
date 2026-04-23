@@ -192,7 +192,7 @@ node scripts/preflight.js && bash install.sh --all
 
 ### Codex
 
-Codex 使用原生插件包 `plugins/tech-persistence/`，用户级安装会复制到 `~/plugins/tech-persistence` 并更新 `~/.agents/plugins/marketplace.json`。Codex 知识库默认写入 `~/.codex/homunculus`，可用 `TECH_PERSISTENCE_HOME` 覆盖。
+Codex 使用原生插件包 `plugins/tech-persistence/`，用户级安装会复制到 `~/plugins/tech-persistence` 并更新 `~/.agents/plugins/marketplace.json`。Codex 知识库默认写入 `~/.codex/homunculus`，可用 `TECH_PERSISTENCE_HOME` 临时覆盖，也可用 `~/.tech-persistence/config.json` 配置持续共享目录。
 
 当前 Codex CLI 的 TUI slash commands 只注册内置命令；插件工作流通过 skills 调用。Claude Code 中仍使用 `/sprint`、`/prototype`，Codex 中使用 `$sprint <需求>`、`$prototype <需求>`、`$plan <需求>`，也可以用 `@` picker 选择同名 skill。
 
@@ -217,6 +217,22 @@ powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All -ImportClaude
 bash install-codex.sh --all --import-claude
 ```
 
+### Claude Code 与 Codex 共享知识库（推荐）
+
+如果你同时使用 Claude Code 和 Codex，推荐把同一个 homunculus 目录作为 Obsidian vault：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Obsidian -SharedHomunculus "C:\Users\you\Documents\TechPersistence"
+powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All -SharedHomunculus "C:\Users\you\Documents\TechPersistence"
+```
+
+```bash
+bash install.sh --obsidian --shared-homunculus ~/Documents/TechPersistence
+bash install-codex.sh --all --shared-homunculus ~/Documents/TechPersistence
+```
+
+这会写入 `~/.tech-persistence/config.json`，两边 Hook 会自动解析同一个 `homunculusHome`。`--import-claude` 是一次性复制历史数据；`--shared-homunculus` 才是持续同步模式。
+
 插件构建与验证：
 ```powershell
 node plugins/tech-persistence/scripts/build-codex-plugin.js
@@ -227,7 +243,7 @@ node scripts/validate-codex-plugin.js
 ```powershell
 .\install.ps1 -Obsidian     # 初始化 Obsidian vault
 ```
-参考 `docs/obsidian-setup.md` 完成配置。
+参考 `docs/obsidian-setup.md` 完成 Claude 独立、Codex 独立或共享 vault 配置。
 
 ---
 
@@ -349,7 +365,7 @@ Skill 优化:       /skill-diagnose → /skill-improve → /skill-eval → /skil
 
 ## Obsidian 集成
 
-所有知识产出统一使用 Obsidian 兼容格式（frontmatter + wikilinks + tags）。
+所有知识产出统一使用 Obsidian 兼容格式（frontmatter + wikilinks + tags）。共享模式下，Claude Code 和 Codex 会写入同一个 homunculus vault，再由 Obsidian Sync、iCloud、OneDrive、Dropbox 或 Syncthing 做跨设备同步。
 
 | 产出 | Tag | Graph 颜色 | 产生方式 |
 |------|-----|-----------|---------|

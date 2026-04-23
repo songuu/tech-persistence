@@ -251,15 +251,26 @@ function copyHomunculusTemplate() {
   return 1;
 }
 
+function copyUtilityScripts() {
+  copyTextFile(
+    path.join(repoRoot, 'scripts', 'configure-shared-homunculus.js'),
+    path.join(pluginRoot, 'scripts', 'configure-shared-homunculus.js'),
+    false
+  );
+  return 1;
+}
+
 function main() {
   const commandCount = copyCommands();
   const skillCount = copySkills();
   const hookCount = copyHooks();
+  const utilityCount = copyUtilityScripts();
   copyHomunculusTemplate();
 
   console.log(`[OK] generated ${commandCount} commands`);
   console.log(`[OK] generated ${skillCount} skills`);
   console.log(`[OK] generated ${hookCount} hook files`);
+  console.log(`[OK] generated ${utilityCount} utility scripts`);
   console.log('[OK] generated codex homunculus template');
 }
 

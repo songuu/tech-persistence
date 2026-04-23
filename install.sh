@@ -14,6 +14,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_HOME="${HOME}/.claude"
 HOMUNCULUS_DIR="${CLAUDE_HOME}/homunculus"
+SHARED_HOMUNCULUS=""
+ALLOW_OUTSIDE_HOME=false
+OBSIDIAN_VAULT_PATH=""
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
@@ -41,6 +44,20 @@ safe_copy_no_overwrite() {
     return
   fi
   cp "$src" "$dst"
+}
+
+resolve_user_path() {
+  node -e "const path=require('path'); const home=process.env.HOME||process.env.USERPROFILE; let value=process.argv[1]; if (value==='~') value=home; else if (value.startsWith('~/')||value.startsWith('~\\\\')) value=path.join(home,value.slice(2)); console.log(path.resolve(value));" "$1"
+}
+
+configure_shared_homunculus() {
+  [[ -n "${SHARED_HOMUNCULUS:-}" ]] || return
+  local args=("${SCRIPT_DIR}/scripts/configure-shared-homunculus.js" "--path" "$SHARED_HOMUNCULUS" "--force")
+  if [[ "${ALLOW_OUTSIDE_HOME:-false}" == true ]]; then
+    args+=("--allow-outside-home")
+  fi
+  node "${args[@]}"
+  HOMUNCULUS_DIR="$(resolve_user_path "$SHARED_HOMUNCULUS")"
 }
 
 # ──────────────────────────────────────────────
@@ -284,7 +301,9 @@ show_help() {
   echo "  bash install.sh --project     安装项目级别 (→ .claude/)"
   echo "  bash install.sh --all         同时安装两者"
   echo "  bash install.sh --hooks-only  只安装/更新 Hook 脚本"
-  echo "  bash install.sh --obsidian    初始化 Obsidian Vault 集成"
+  echo "  bash install.sh --obsidian [path] 初始化 Obsidian Vault 集成"
+  echo "  bash install.sh --all --shared-homunculus <path>  配置 Claude/Codex 共享知识库"
+  echo "  bash install.sh --allow-outside-home               允许共享路径位于 home 目录外"
   echo "  bash install.sh --help        显示帮助"
   echo ""
   echo "v2 新增能力:"
@@ -303,7 +322,11 @@ install_obsidian() {
 
   local vault_path="${HOMUNCULUS_DIR}"
 
-  if [[ -n "${1:-}" ]]; then
+  if [[ -n "${OBSIDIAN_VAULT_PATH:-}" ]]; then
+    vault_path="$OBSIDIAN_VAULT_PATH"
+  elif [[ -n "${SHARED_HOMUNCULUS:-}" ]]; then
+    vault_path="$SHARED_HOMUNCULUS"
+  elif [[ -n "${1:-}" ]]; then
     vault_path="$1"
   fi
 
@@ -329,7 +352,53 @@ install_obsidian() {
   echo ""
 }
 
-case "${1:-}" in
+COMMAND=""
+
+if [[ $# -eq 0 ]]; then
+  show_help
+  exit 1
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --user|--project|--all|--hooks-only)
+      COMMAND="$1"
+      ;;
+    --obsidian)
+      COMMAND="$1"
+      if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then
+        OBSIDIAN_VAULT_PATH="$2"
+        shift
+      fi
+      ;;
+    --shared-homunculus)
+      SHARED_HOMUNCULUS="${2:-}"
+      [[ -n "$SHARED_HOMUNCULUS" ]] || { echo "[FAIL] --shared-homunculus requires a path" >&2; exit 1; }
+      shift
+      ;;
+    --vault-path)
+      OBSIDIAN_VAULT_PATH="${2:-}"
+      [[ -n "$OBSIDIAN_VAULT_PATH" ]] || { echo "[FAIL] --vault-path requires a path" >&2; exit 1; }
+      shift
+      ;;
+    --allow-outside-home)
+      ALLOW_OUTSIDE_HOME=true
+      ;;
+    --help|-h)
+      show_help
+      exit 0
+      ;;
+    *)
+      show_help
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+configure_shared_homunculus
+
+case "$COMMAND" in
   --user)
     install_user
     ;;
@@ -347,10 +416,7 @@ case "${1:-}" in
     log_ok "Hook 脚本已更新"
     ;;
   --obsidian)
-    install_obsidian "${2:-}"
-    ;;
-  --help|-h)
-    show_help
+    install_obsidian
     ;;
   *)
     show_help

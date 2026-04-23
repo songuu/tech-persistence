@@ -4,14 +4,14 @@
  * init-obsidian-vault.js — 将 Homunculus 知识库初始化为 Obsidian Vault
  *
  * 功能：
- *   1. 在 ~/.claude/homunculus/ 下生成 .obsidian/ 配置
+ *   1. 在 homunculus/Obsidian vault 下生成 .obsidian/ 配置
  *   2. 创建 _templates/ 模板（供 Templater 插件使用）
  *   3. 配置排除规则（.jsonl, archive/ 等非 markdown 文件）
  *   4. 生成 MCP Server 配置片段
  *   5. 不覆盖已有 .obsidian/ 配置
  *
  * 用法：
- *   node scripts/init-obsidian-vault.js [--vault-path <path>]
+ *   node scripts/init-obsidian-vault.js [--vault-path <path>] [--claude|--codex|--shared]
  */
 
 const fs = require('fs');
@@ -21,17 +21,20 @@ const path = require('path');
 function parseArgs() {
   const args = process.argv.slice(2);
   let vaultPath = null;
+  let runtime = null;
   const home = process.env.HOME || process.env.USERPROFILE;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--vault-path' && args[i + 1]) {
       vaultPath = args[i + 1];
       i++;
+    } else if (args[i] === '--claude' || args[i] === '--codex' || args[i] === '--shared') {
+      runtime = args[i].slice(2);
     }
   }
 
   if (!vaultPath) {
-    vaultPath = path.join(home, '.claude', 'homunculus');
+    vaultPath = defaultVaultPath(home, runtime);
   }
 
   // 解析为绝对路径，防止路径遍历
@@ -48,6 +51,48 @@ function parseArgs() {
   }
 
   return { vaultPath };
+}
+
+function expandHome(value, home) {
+  if (!value) return value;
+  if (value === '~') return home;
+  if (value.startsWith('~/') || value.startsWith('~\\')) {
+    return path.join(home, value.slice(2));
+  }
+  return value;
+}
+
+function readSharedConfig(home) {
+  const configPath = process.env.TECH_PERSISTENCE_CONFIG
+    ? path.resolve(expandHome(process.env.TECH_PERSISTENCE_CONFIG, home))
+    : path.join(home, '.tech-persistence', 'config.json');
+  if (!fs.existsSync(configPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function sharedVaultPath(home) {
+  if (process.env.TECH_PERSISTENCE_HOME) {
+    return path.resolve(expandHome(process.env.TECH_PERSISTENCE_HOME, home));
+  }
+  const config = readSharedConfig(home);
+  const configured = config && (config.homunculusHome || config.homunculusDir || config.vaultPath);
+  return configured ? path.resolve(expandHome(configured, home)) : null;
+}
+
+function defaultVaultPath(home, runtime) {
+  if (runtime === 'claude') return path.join(home, '.claude', 'homunculus');
+  if (runtime === 'codex') return path.join(home, '.codex', 'homunculus');
+
+  const shared = sharedVaultPath(home);
+  if (runtime === 'shared' && !shared) {
+    console.error('❌ 未找到共享 homunculus 配置。请先运行 scripts/configure-shared-homunculus.js。');
+    process.exit(1);
+  }
+  return shared || path.join(home, '.claude', 'homunculus');
 }
 
 // ─── Obsidian 核心配置 ───
@@ -422,13 +467,13 @@ function main() {
 
   console.log('');
   console.log('   📋 MCP Server 配置已写入: _mcp-config-snippet.json');
-  console.log('   将其合并到 ~/.claude/settings.json 的 mcpServers 字段即可');
+  console.log('   将其合并到 Claude Code 或 Codex 的 mcpServers 字段即可');
   console.log('');
   console.log('   下一步:');
   console.log('   1. 用 Obsidian 打开此 vault: ' + vaultPath);
   console.log('   2. 安装推荐插件: Dataview, Templater, Graph Analysis');
   console.log('   3. 将 _mcp-config-snippet.json 合并到 Claude Code 配置');
-  console.log('   4. 正常使用 /compound — 知识会自动出现在 Obsidian 中');
+  console.log('   4. 正常使用 /compound 或 $compound — 知识会自动出现在 Obsidian 中');
   console.log('');
 }
 

@@ -9,6 +9,9 @@ param(
     [switch]$Project,
     [switch]$All,
     [switch]$Obsidian,
+    [string]$VaultPath,
+    [string]$SharedHomunculus,
+    [switch]$AllowOutsideHome,
     [switch]$HooksOnly,
     [switch]$Help
 )
@@ -27,6 +30,27 @@ function Safe-Copy($s,$d) {
     Copy-Item $s $d -Force
 }
 function Safe-CopyNew($s,$d) { if (-not (Test-Path $d)) { Copy-Item $s $d -Force } else { Write-Warn "$(Split-Path -Leaf $d) exists, skip" } }
+
+function Resolve-UserPath($path) {
+    if (-not $path) { return $path }
+    if ($path -eq "~") { return $env:USERPROFILE }
+    if ($path.StartsWith("~/") -or $path.StartsWith("~\")) {
+        return [System.IO.Path]::GetFullPath((Join-Path $env:USERPROFILE $path.Substring(2)))
+    }
+    return [System.IO.Path]::GetFullPath($path)
+}
+
+function Configure-SharedHomunculus {
+    if (-not $SharedHomunculus) { return }
+    $configureScript = Join-Path $ScriptDir "scripts/configure-shared-homunculus.js"
+    if (-not (Test-Path $configureScript)) { throw "Missing shared homunculus configurator: $configureScript" }
+
+    $args = @($configureScript, "--path", $SharedHomunculus, "--force")
+    if ($AllowOutsideHome) { $args += "--allow-outside-home" }
+    & node @args
+    if ($LASTEXITCODE -ne 0) { throw "Shared homunculus configuration failed" }
+    $script:HomunculusDir = Resolve-UserPath $SharedHomunculus
+}
 
 function Build-SettingsJson {
     $hp = (Join-Path $ClaudeHome "skills/continuous-learning/hooks") -replace '\\','/'
@@ -124,8 +148,9 @@ function Install-Project {
 function Install-Obsidian {
     Write-Section "Initializing Obsidian vault"
     $initScript = Join-Path $ScriptDir "scripts/init-obsidian-vault.js"
+    $targetVaultPath = if ($VaultPath) { $VaultPath } elseif ($SharedHomunculus) { $SharedHomunculus } else { $HomunculusDir }
     if (Test-Path $initScript) {
-        & node $initScript
+        & node $initScript --vault-path $targetVaultPath
         Write-OK "Obsidian vault initialized"
     } else {
         Write-Warn "scripts/init-obsidian-vault.js not found"
@@ -135,10 +160,13 @@ function Install-Obsidian {
 # Check Node.js
 try { $nv = (& node --version 2>&1).ToString() -replace 'v',''; if ([int]($nv.Split('.')[0]) -lt 18) { throw "old" } } catch { Write-Host "[FAIL] Node.js >= 18 required" -ForegroundColor Red; exit 1 }
 
-if ($Help) { Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -Obsidian | -HooksOnly`n" }
+if ($Help) { Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -Obsidian [-VaultPath <path>] [-SharedHomunculus <path>] | -HooksOnly`n" }
+else { Configure-SharedHomunculus }
+
+if ($Help) { }
 elseif ($All) { Install-User; Install-Project }
 elseif ($User) { Install-User }
 elseif ($Project) { Install-Project }
 elseif ($Obsidian) { Install-Obsidian }
 elseif ($HooksOnly) { $hd = Join-Path $ClaudeHome "skills/continuous-learning/hooks"; Ensure-Dir $hd; Get-ChildItem (Join-Path $ScriptDir "scripts") -Filter "*.js" | ForEach-Object { Copy-Item $_.FullName (Join-Path $hd $_.Name) -Force }; Write-OK "hooks updated" }
-else { Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -Obsidian | -HooksOnly`n" }
+else { Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -Obsidian [-VaultPath <path>] [-SharedHomunculus <path>] | -HooksOnly`n" }

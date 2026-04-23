@@ -7,7 +7,7 @@ It includes:
 - Claude-compatible command workflow files for planning, work, review, testing, learning, instincts, sprinting, and handoff.
 - Codex skills for memory, continuous learning, prototype workflow, test strategy, context handoff, and one skill wrapper per command.
 - Runtime-aware hooks for context injection, observation capture, and session evaluation.
-- Obsidian-compatible knowledge storage under `~/.codex/homunculus`.
+- Obsidian-compatible knowledge storage under `~/.codex/homunculus`, or a shared `homunculusHome` configured in `~/.tech-persistence/config.json`.
 
 ## Codex invocation
 
@@ -26,4 +26,18 @@ Validate the package structure:
 ```powershell
 node scripts/validate-codex-plugin.js
 ```
+
+## Sharing with Claude Code
+
+Codex defaults to `~/.codex/homunculus` and Claude Code defaults to `~/.claude/homunculus`. To make both agents learn from the same knowledge base, configure a shared homunculus directory:
+
+```powershell
+node scripts\configure-shared-homunculus.js --path "C:\Users\you\Documents\TechPersistence"
+```
+
+```bash
+node scripts/configure-shared-homunculus.js --path ~/Documents/TechPersistence
+```
+
+Use that directory as your Obsidian vault. `--import-claude` is still available for one-time migration, but the shared config is the recommended ongoing sync mode.
 

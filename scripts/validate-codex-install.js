@@ -20,6 +20,15 @@ function ok(message) {
   console.log(`[OK] ${message}`);
 }
 
+function expandHome(value) {
+  if (!value) return value;
+  if (value === '~') return homeDir;
+  if (value.startsWith('~/') || value.startsWith('~\\')) {
+    return path.join(homeDir, value.slice(2));
+  }
+  return value;
+}
+
 function listMarkdownFiles(dir) {
   if (!fs.existsSync(dir)) return [];
   return fs
@@ -154,6 +163,36 @@ function validateCodexCommandSkills(dir, label) {
   });
 }
 
+function validateSharedHomunculusConfig() {
+  console.log('\nShared homunculus config:');
+  const configPath = process.env.TECH_PERSISTENCE_CONFIG
+    ? path.resolve(expandHome(process.env.TECH_PERSISTENCE_CONFIG))
+    : path.join(homeDir, '.tech-persistence', 'config.json');
+
+  if (process.env.TECH_PERSISTENCE_HOME) {
+    const envHome = path.resolve(expandHome(process.env.TECH_PERSISTENCE_HOME));
+    ok(`TECH_PERSISTENCE_HOME set: ${envHome}`);
+    if (!fs.existsSync(envHome)) fail(`TECH_PERSISTENCE_HOME target missing: ${envHome}`);
+    return;
+  }
+
+  if (!fs.existsSync(configPath)) {
+    ok('not configured; Codex will use ~/.codex/homunculus');
+    return;
+  }
+
+  const config = readJson(configPath, configPath);
+  if (!config) return;
+  const configured = config.homunculusHome || config.homunculusDir || config.vaultPath;
+  if (!configured) {
+    fail('shared config missing homunculusHome');
+    return;
+  }
+  const homunculusHome = path.resolve(expandHome(configured));
+  ok(`shared homunculus configured: ${homunculusHome}`);
+  if (!fs.existsSync(homunculusHome)) fail(`shared homunculus directory missing: ${homunculusHome}`);
+}
+
 
 function walkMarkdownFiles(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -164,8 +203,10 @@ function walkMarkdownFiles(dir) {
   });
 }
 
-function validateCodexText(dir, label) {
-  const forbidden = /CLAUDE\.md|Claude Code|~\/\.claude|\.claude\/|Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/;
+function validateCodexText(dir, label, options = {}) {
+  const forbidden = options.allowCrossRuntimeReferences
+    ? /Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/
+    : /CLAUDE\.md|Claude Code|~\/\.claude|\.claude\/|Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/;
   walkMarkdownFiles(dir).forEach((file) => {
     const content = fs.readFileSync(file, 'utf8');
     if (forbidden.test(content)) {
@@ -208,7 +249,11 @@ function validateProjectInstall() {
   validateCodexCommandSkills(path.join(projectCodexRoot, 'skills'), '.codex/skills');
   isDirectory(path.join(projectCodexRoot, 'plans'), '.codex/plans');
   validateCodexText(path.join(projectCodexRoot, 'commands'), '.codex/commands');
-  validateCodexText(path.join(projectCodexRoot, 'rules'), '.codex/rules');
+  validateCodexText(
+    path.join(projectCodexRoot, 'rules'),
+    '.codex/rules',
+    { allowCrossRuntimeReferences: true }
+  );
   validateCodexText(path.join(projectCodexRoot, 'skills'), '.codex/skills');
   validateCodexFile(path.join(projectRoot, 'AGENTS.md'), 'AGENTS.md');
 }
@@ -240,6 +285,7 @@ function validateRepoMarketplace() {
 validateUserInstall();
 validateProjectInstall();
 validateRepoMarketplace();
+validateSharedHomunculusConfig();
 
 if (hasFailure) process.exit(1);
 console.log('\n[OK] Codex install validation passed');
