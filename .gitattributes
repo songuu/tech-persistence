@@ -1,4 +1,14 @@
 /.gitattributes text eol=lf
+/AGENTS.md text eol=lf
+/CLAUDE.md text eol=lf
+/README.md text eol=lf
+/docs/**/*.md text eol=lf
+/install-codex.ps1 text eol=lf
+/scripts/**/*.js text eol=lf
+/project-level/**/*.md text eol=lf
+/user-level/**/*.md text eol=lf
+/.codex/**/*.md text eol=lf
+/.codex/**/.gitkeep text eol=lf
 *.sh text eol=lf
 plugins/tech-persistence/**/*.md text eol=lf
 plugins/tech-persistence/**/*.js text eol=lf

@@ -26,6 +26,7 @@
 **Change Log**
 
 - 2026-04-23: Added a Codex-native `tech-persistence` plugin package with generated commands, skills, hooks, runtime-aware homunculus paths, install flows, Claude data import, validation, and dual-runtime documentation.
+- 2026-04-23: Fixed Codex installer parity so `~/.codex` receives the same user-level commands/skills/rules as `~/.claude`, project `.codex` receives command/rule/skill mirrors, and UTF-8/case-sensitive template conversion prevents `.Codex`/`Codex.md` mojibake regressions.
 
 ---
 

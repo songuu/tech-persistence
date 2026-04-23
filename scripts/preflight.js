@@ -144,6 +144,39 @@ function runCodexPreflight() {
     return true;
   });
 
+  check('~/.codex/commands', () => {
+    const commandsDir = path.join(codexHome, 'commands');
+    if (!fs.existsSync(commandsDir)) {
+      console.log('     不存在 — 将安装 20 个用户命令');
+      return true;
+    }
+    const commandCount = fs.readdirSync(commandsDir).filter((name) => name.endsWith('.md')).length;
+    console.log(`     已存在 (${commandCount} 个命令) — 安装时会刷新本系统命令`);
+    return commandCount >= 20 ? 'warn' : true;
+  });
+
+  check('~/.codex/skills', () => {
+    const skillsDir = path.join(codexHome, 'skills');
+    const requiredSkills = [
+      'memory',
+      'continuous-learning',
+      'prototype-workflow',
+      'test-strategy',
+      'context-handoff',
+    ];
+    if (!fs.existsSync(skillsDir)) {
+      console.log('     不存在 — 将安装 5 个用户技能');
+      return true;
+    }
+    const missing = requiredSkills.filter((name) => !fs.existsSync(path.join(skillsDir, name, 'SKILL.md')));
+    if (missing.length > 0) {
+      console.log(`     缺少: ${missing.join(', ')} — 安装时会补齐`);
+      return true;
+    }
+    console.log('     5 个用户技能已存在 — 安装时会刷新本系统技能');
+    return 'warn';
+  });
+
   check('marketplace tech-persistence entry', () => {
     if (!fs.existsSync(marketplacePath)) {
       console.log('     marketplace.json 不存在 — 将新建');

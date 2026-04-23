@@ -57,23 +57,117 @@ function Test-Node {
     }
 }
 
-function Convert-CodexText($text) {
-    return $text `
-        -replace 'Claude Code', 'Codex' `
-        -replace 'Claude', 'Codex' `
-        -replace 'CLAUDE\.md', 'AGENTS.md' `
-        -replace '~\/\.claude\/homunculus', '~/.codex/homunculus' `
-        -replace '\.claude', '.codex'
+function Write-Utf8NoBom($path, $content) {
+    $encoding = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($path, $content, $encoding)
 }
 
-function Copy-CodexText($source, $target, [switch]$NoOverwrite) {
+function Convert-CodexText($text) {
+    $result = $text
+    $result = $result -creplace '~\/\.claude\/CLAUDE\.md', '~/.codex/AGENTS.md'
+    $result = $result -creplace '~\/\.claude\/homunculus', '~/.codex/homunculus'
+    $result = $result -creplace 'CLAUDE_PROJECT_DIR', 'CODEX_PROJECT_DIR'
+    $result = $result -creplace 'CLAUDE\.md', 'AGENTS.md'
+    $result = $result -creplace '\.claude\/commands', '.codex/commands'
+    $result = $result -creplace '\.claude\/skills', '.codex/skills'
+    $result = $result -creplace '\.claude\/rules', '.codex/rules'
+    $result = $result -creplace '\.claude\/plans', '.codex/plans'
+    $result = $result -creplace '\.claude', '.codex'
+    $result = $result -creplace 'Claude Code', 'Codex'
+    $result = $result -creplace 'Claude', 'Codex'
+    return $result
+}
+
+function Test-GeneratedCodexTemplateNeedsRepair($path) {
+    if (-not (Test-Path $path)) { return $false }
+    $content = Get-Content $path -Raw -Encoding UTF8
+    return $content -match 'Codex\.md|\.Codex|~\/\.Codex|\u951B|\u9286|\u93CB|\u7EDB|\u7481|\u9350|\u9428|\u6D93\u20AC'
+}
+
+function Backup-ExistingFile($path) {
+    if (Test-Path $path) {
+        Copy-Item $path "$path.bak.$(Get-Date -Format 'yyyyMMddHHmmss')" -Force
+    }
+}
+
+function Copy-CodexText($source, $target, [switch]$NoOverwrite, [switch]$BackupExisting, [switch]$RepairGenerated) {
     if ($NoOverwrite -and (Test-Path $target)) {
-        Write-Warn "$(Split-Path -Leaf $target) exists, skip"
-        return
+        if ($RepairGenerated -and (Test-GeneratedCodexTemplateNeedsRepair $target)) {
+            Backup-ExistingFile $target
+            Write-Warn "$(Split-Path -Leaf $target) looked generated/broken, backed up and repaired"
+        } else {
+            Write-Warn "$(Split-Path -Leaf $target) exists, skip"
+            return
+        }
+    } elseif ($BackupExisting -and (Test-Path $target)) {
+        Backup-ExistingFile $target
     }
     Ensure-Dir (Split-Path -Parent $target)
-    $content = Get-Content $source -Raw
-    Set-Content $target (Convert-CodexText $content) -Encoding UTF8
+    $content = Get-Content $source -Raw -Encoding UTF8
+    Write-Utf8NoBom $target (Convert-CodexText $content)
+}
+
+function Copy-CodexCommandDir($sourceDir, $targetDir) {
+    if (-not (Test-Path $sourceDir)) { return 0 }
+    Ensure-Dir $targetDir
+    $count = 0
+    Get-ChildItem $sourceDir -Filter "*.md" | ForEach-Object {
+        Copy-CodexText $_.FullName (Join-Path $targetDir $_.Name) -BackupExisting
+        $count++
+    }
+    return $count
+}
+
+function Copy-CodexRuleDir($sourceDir, $targetDir) {
+    if (-not (Test-Path $sourceDir)) { return 0 }
+    Ensure-Dir $targetDir
+    $count = 0
+    Get-ChildItem $sourceDir -Filter "*.md" | ForEach-Object {
+        Copy-CodexText $_.FullName (Join-Path $targetDir $_.Name) -NoOverwrite -RepairGenerated
+        $count++
+    }
+    return $count
+}
+
+function Copy-CodexSkillDir($sourceDir, $targetDir) {
+    if (-not (Test-Path $sourceDir)) { return 0 }
+    Ensure-Dir $targetDir
+    $count = 0
+    Get-ChildItem $sourceDir -Directory | ForEach-Object {
+        $skillSource = Join-Path $_.FullName "SKILL.md"
+        if (Test-Path $skillSource) {
+            $skillTarget = Join-Path $targetDir "$($_.Name)\SKILL.md"
+            Copy-CodexText $skillSource $skillTarget -BackupExisting
+            $count++
+        }
+    }
+    return $count
+}
+
+function Install-CodexUserAssets {
+    Write-Section "Installing Codex user assets -> $CodexHome"
+
+    Ensure-Dir (Join-Path $CodexHome "commands")
+    Ensure-Dir (Join-Path $CodexHome "rules")
+    Ensure-Dir (Join-Path $CodexHome "skills")
+
+    Copy-CodexText (Join-Path $ScriptDir "user-level\CLAUDE.md") (Join-Path $CodexHome "AGENTS.md") -NoOverwrite -RepairGenerated
+
+    $commandCount = Copy-CodexCommandDir (Join-Path $ScriptDir "user-level\commands") (Join-Path $CodexHome "commands")
+    $ruleCount = Copy-CodexRuleDir (Join-Path $ScriptDir "user-level\rules") (Join-Path $CodexHome "rules")
+    $skillCount = Copy-CodexSkillDir (Join-Path $ScriptDir "user-level\skills") (Join-Path $CodexHome "skills")
+
+    $hooksSource = Join-Path $PluginSource "hooks"
+    $hooksTarget = Join-Path $CodexHome "skills\continuous-learning\hooks"
+    if (Test-Path $hooksSource) {
+        Ensure-Dir $hooksTarget
+        Copy-Item (Join-Path $hooksSource "*") $hooksTarget -Recurse -Force
+        Write-OK "continuous-learning hooks copied"
+    }
+
+    Write-OK "$commandCount user commands copied"
+    Write-OK "$ruleCount user rules copied"
+    Write-OK "$skillCount user skills copied"
 }
 
 function Build-Plugin {
@@ -123,7 +217,7 @@ function Update-Marketplace {
         interface = $interface
         plugins = @($plugins + $entry)
     }
-    Set-Content $marketplacePath ($marketplace | ConvertTo-Json -Depth 20) -Encoding UTF8
+    Write-Utf8NoBom $marketplacePath ($marketplace | ConvertTo-Json -Depth 20)
     Write-OK "marketplace.json registered $PluginName"
 }
 
@@ -146,7 +240,7 @@ function Initialize-Homunculus {
         Write-OK "homunculus config.json"
     }
     $registry = Join-Path $HomunculusDir "projects.json"
-    if (-not (Test-Path $registry)) { Set-Content $registry "{}" -Encoding UTF8 }
+    if (-not (Test-Path $registry)) { Write-Utf8NoBom $registry "{}" }
 }
 
 function Install-User {
@@ -165,6 +259,7 @@ function Install-User {
 
     Update-Marketplace
     Initialize-Homunculus
+    Install-CodexUserAssets
 }
 
 function Install-Project {
@@ -172,27 +267,23 @@ function Install-Project {
     $codexDir = Join-Path $root ".codex"
     Write-Section "Installing Codex project templates -> $codexDir"
 
-    @("commands", "rules", "plans") | ForEach-Object { Ensure-Dir (Join-Path $codexDir $_) }
+    @("commands", "rules", "plans", "skills") | ForEach-Object { Ensure-Dir (Join-Path $codexDir $_) }
     Ensure-Dir (Join-Path $root "docs\solutions")
 
     $agentsTarget = Join-Path $root "AGENTS.md"
-    Copy-CodexText (Join-Path $ScriptDir "project-level\CLAUDE.md") $agentsTarget -NoOverwrite
+    Copy-CodexText (Join-Path $ScriptDir "project-level\CLAUDE.md") $agentsTarget -NoOverwrite -RepairGenerated
 
+    $userCommands = Copy-CodexCommandDir (Join-Path $ScriptDir "user-level\commands") (Join-Path $codexDir "commands")
+    $projectCommands = Copy-CodexCommandDir (Join-Path $ScriptDir "project-level\.claude\commands") (Join-Path $codexDir "commands")
+    Write-OK "commands copied ($userCommands user, $projectCommands project)"
+
+    Copy-CodexRuleDir (Join-Path $ScriptDir "user-level\rules") (Join-Path $codexDir "rules") | Out-Null
     $rulesSource = Join-Path $ScriptDir "project-level\.claude\rules"
-    if (Test-Path $rulesSource) {
-        Get-ChildItem $rulesSource -Filter "*.md" | ForEach-Object {
-            Copy-CodexText $_.FullName (Join-Path $codexDir "rules\$($_.Name)") -NoOverwrite
-        }
-        Write-OK "rules copied"
-    }
+    $projectRules = Copy-CodexRuleDir $rulesSource (Join-Path $codexDir "rules")
+    Write-OK "rules copied ($projectRules project)"
 
-    $commandsSource = Join-Path $ScriptDir "project-level\.claude\commands"
-    if (Test-Path $commandsSource) {
-        Get-ChildItem $commandsSource -Filter "*.md" | ForEach-Object {
-            Copy-CodexText $_.FullName (Join-Path $codexDir "commands\$($_.Name)")
-        }
-        Write-OK "project commands copied"
-    }
+    $skillCount = Copy-CodexSkillDir (Join-Path $ScriptDir "user-level\skills") (Join-Path $codexDir "skills")
+    Write-OK "$skillCount project skills copied"
 
     Write-OK "project directories ready"
 }

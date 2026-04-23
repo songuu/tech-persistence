@@ -88,7 +88,7 @@ evolved_from: ["instinct-id-1", "instinct-id-2", ...]
 聚类 2: "测试前置检查" (3 个本能, 平均置信度 0.72)
   来源: lint-before-test, typecheck-first, ...
   建议: → 进化为 Rule (写入 .claude/rules/testing-patterns.md)
-  
+
 是否执行进化? (输入聚类编号，或 'all')
 ```
 

@@ -86,7 +86,7 @@ description: "根据代码变更的风险等级自动决定测试深度并执行
 
 ```markdown
 ✅ auth.test.ts — 22 用例 (L4)
-✅ UserTable.test.tsx — 6 用例 (L2)  
+✅ UserTable.test.tsx — 6 用例 (L2)
 ✅ format.test.ts — 5 用例 (L2)
 ⏭️ table.css — 免测 (L0)
 
@@ -105,7 +105,7 @@ description: "根据代码变更的风险等级自动决定测试深度并执行
   UserTable.test.tsx > 搜索输入触发查询
   Expected: debounce 300ms 后调用 onSearch
   Received: 立即调用 onSearch
-  
+
   → 这是 bug 还是测试写错了？
 ```
 
@@ -164,7 +164,7 @@ Bug 修复时自动生成回归测试：
 /debug-journal 记录了 bug
   ↓ 修复代码
   ↓ 自动生成回归测试:
-  
+
   it('regression: 手机号空值不应崩溃 (#fix-2025-06-20)', () => {
     // 之前这里会 TypeError: Cannot read property 'slice' of undefined
     expect(formatPhone(null)).toBe('');

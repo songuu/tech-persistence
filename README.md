@@ -409,12 +409,22 @@ plugins/tech-persistence/               ← Codex 原生插件包
 ├── scripts/                             ← build/import utilities
 └── codex-homunculus-template/
 
-~/.codex/homunculus/                    ← Codex 用户级知识存储
-└── projects/{hash}/
+~/.codex/                              ← Codex 用户级 (与 ~/.claude 对齐)
+├── AGENTS.md                           ← 核心偏好 + 路由规则
+├── commands/ (20 个)                   ← 全部用户命令
+├── rules/general-standards.md
+├── skills/                             ← 5 个按需加载技能
+│   ├── memory/
+│   ├── continuous-learning/{SKILL.md, hooks/}
+│   ├── prototype-workflow/
+│   ├── test-strategy/
+│   └── context-handoff/
+└── homunculus/                         ← Codex 用户级知识存储
+    └── projects/{hash}/
 
 your-project/                           ← Codex 项目级 (提交 Git)
 ├── AGENTS.md
-├── .codex/{commands/, rules/, plans/}
+├── .codex/{commands/, rules/, plans/, skills/}
 └── docs/solutions/
 ```
 

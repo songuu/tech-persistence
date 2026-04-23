@@ -48,29 +48,88 @@ build_plugin() {
 
 copy_codex_text() {
   local src="$1" dst="$2" mode="${3:-overwrite}"
-  if [[ "$mode" == "no-overwrite" && -f "$dst" ]]; then
-    log_warn "$(basename "$dst") exists, skip"
-    return
-  fi
   mkdir -p "$(dirname "$dst")"
-  node - "$src" "$dst" <<'NODE'
+  node - "$src" "$dst" "$mode" <<'NODE'
 const fs = require('fs');
 const path = require('path');
 const source = process.argv[2];
 const target = process.argv[3];
+const mode = process.argv[4] || 'overwrite';
+
+function isGeneratedBroken(file) {
+  if (!fs.existsSync(file)) return false;
+  const text = fs.readFileSync(file, 'utf8');
+  return /Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/.test(text);
+}
+
+function backup(file) {
+  fs.copyFileSync(file, `${file}.bak.${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`);
+}
+
+if (fs.existsSync(target)) {
+  if (mode === 'no-overwrite' && !isGeneratedBroken(target)) {
+    process.exit(0);
+  }
+  if (mode === 'backup' || mode === 'no-overwrite') {
+    backup(target);
+  }
+}
+
 let text = fs.readFileSync(source, 'utf8');
 [
+  [/~\/\.claude\/CLAUDE\.md/g, '~/.codex/AGENTS.md'],
+  [/~\/\.claude\/homunculus/g, '~/.codex/homunculus'],
+  [/CLAUDE_PROJECT_DIR/g, 'CODEX_PROJECT_DIR'],
+  [/CLAUDE\.md/g, 'AGENTS.md'],
+  [/\.claude\/commands/g, '.codex/commands'],
+  [/\.claude\/skills/g, '.codex/skills'],
+  [/\.claude\/rules/g, '.codex/rules'],
+  [/\.claude\/plans/g, '.codex/plans'],
+  [/\.claude/g, '.codex'],
   [/Claude Code/g, 'Codex'],
   [/Claude/g, 'Codex'],
-  [/CLAUDE\.md/g, 'AGENTS.md'],
-  [/~\/\.claude\/homunculus/g, '~/.codex/homunculus'],
-  [/\.claude/g, '.codex'],
 ].forEach(([pattern, replacement]) => {
   text = text.replace(pattern, replacement);
 });
 fs.mkdirSync(path.dirname(target), { recursive: true });
 fs.writeFileSync(target, text);
 NODE
+}
+
+copy_codex_commands() {
+  local source_dir="$1" target_dir="$2" count=0
+  [[ -d "$source_dir" ]] || { echo 0; return; }
+  mkdir -p "$target_dir"
+  for file in "$source_dir"/*.md; do
+    [[ -f "$file" ]] || continue
+    copy_codex_text "$file" "${target_dir}/$(basename "$file")" "backup"
+    count=$((count + 1))
+  done
+  echo "$count"
+}
+
+copy_codex_rules() {
+  local source_dir="$1" target_dir="$2" count=0
+  [[ -d "$source_dir" ]] || { echo 0; return; }
+  mkdir -p "$target_dir"
+  for file in "$source_dir"/*.md; do
+    [[ -f "$file" ]] || continue
+    copy_codex_text "$file" "${target_dir}/$(basename "$file")" "no-overwrite"
+    count=$((count + 1))
+  done
+  echo "$count"
+}
+
+copy_codex_skills() {
+  local source_dir="$1" target_dir="$2" count=0
+  [[ -d "$source_dir" ]] || { echo 0; return; }
+  mkdir -p "$target_dir"
+  for skill_dir in "$source_dir"/*; do
+    [[ -f "${skill_dir}/SKILL.md" ]] || continue
+    copy_codex_text "${skill_dir}/SKILL.md" "${target_dir}/$(basename "$skill_dir")/SKILL.md" "backup"
+    count=$((count + 1))
+  done
+  echo "$count"
 }
 
 update_marketplace() {
@@ -135,6 +194,29 @@ initialize_homunculus() {
   [[ -f "${HOMUNCULUS_DIR}/projects.json" ]] || printf '{}\n' > "${HOMUNCULUS_DIR}/projects.json"
 }
 
+install_codex_user_assets() {
+  log_section "Installing Codex user assets -> ${CODEX_HOME}"
+  mkdir -p "${CODEX_HOME}/commands" "${CODEX_HOME}/rules" "${CODEX_HOME}/skills"
+
+  copy_codex_text "${SCRIPT_DIR}/user-level/CLAUDE.md" "${CODEX_HOME}/AGENTS.md" "no-overwrite"
+
+  local command_count rule_count skill_count hooks_target
+  command_count="$(copy_codex_commands "${SCRIPT_DIR}/user-level/commands" "${CODEX_HOME}/commands")"
+  rule_count="$(copy_codex_rules "${SCRIPT_DIR}/user-level/rules" "${CODEX_HOME}/rules")"
+  skill_count="$(copy_codex_skills "${SCRIPT_DIR}/user-level/skills" "${CODEX_HOME}/skills")"
+
+  hooks_target="${CODEX_HOME}/skills/continuous-learning/hooks"
+  if [[ -d "${PLUGIN_SOURCE}/hooks" ]]; then
+    mkdir -p "$hooks_target"
+    cp -R "${PLUGIN_SOURCE}/hooks/." "$hooks_target/"
+    log_ok "continuous-learning hooks copied"
+  fi
+
+  log_ok "${command_count} user commands copied"
+  log_ok "${rule_count} user rules copied"
+  log_ok "${skill_count} user skills copied"
+}
+
 install_user() {
   log_section "Installing Codex plugin -> ${PLUGIN_TARGET}"
   require_node
@@ -149,31 +231,28 @@ install_user() {
   log_ok "plugin copied"
   update_marketplace
   initialize_homunculus
+  install_codex_user_assets
 }
 
 install_project() {
   local project_root="$PWD"
   local codex_dir="${project_root}/.codex"
   log_section "Installing Codex project templates -> ${codex_dir}"
-  mkdir -p "${codex_dir}/commands" "${codex_dir}/rules" "${codex_dir}/plans" "${project_root}/docs/solutions"
+  mkdir -p "${codex_dir}/commands" "${codex_dir}/rules" "${codex_dir}/plans" "${codex_dir}/skills" "${project_root}/docs/solutions"
 
   copy_codex_text "${SCRIPT_DIR}/project-level/CLAUDE.md" "${project_root}/AGENTS.md" "no-overwrite"
 
-  if [[ -d "${SCRIPT_DIR}/project-level/.claude/rules" ]]; then
-    for file in "${SCRIPT_DIR}"/project-level/.claude/rules/*.md; do
-      [[ -f "$file" ]] || continue
-      copy_codex_text "$file" "${codex_dir}/rules/$(basename "$file")" "no-overwrite"
-    done
-    log_ok "rules copied"
-  fi
+  local user_commands project_commands project_rules project_skills
+  user_commands="$(copy_codex_commands "${SCRIPT_DIR}/user-level/commands" "${codex_dir}/commands")"
+  project_commands="$(copy_codex_commands "${SCRIPT_DIR}/project-level/.claude/commands" "${codex_dir}/commands")"
+  log_ok "commands copied (${user_commands} user, ${project_commands} project)"
 
-  if [[ -d "${SCRIPT_DIR}/project-level/.claude/commands" ]]; then
-    for file in "${SCRIPT_DIR}"/project-level/.claude/commands/*.md; do
-      [[ -f "$file" ]] || continue
-      copy_codex_text "$file" "${codex_dir}/commands/$(basename "$file")"
-    done
-    log_ok "project commands copied"
-  fi
+  copy_codex_rules "${SCRIPT_DIR}/user-level/rules" "${codex_dir}/rules" >/dev/null
+  project_rules="$(copy_codex_rules "${SCRIPT_DIR}/project-level/.claude/rules" "${codex_dir}/rules")"
+  log_ok "rules copied (${project_rules} project)"
+
+  project_skills="$(copy_codex_skills "${SCRIPT_DIR}/user-level/skills" "${codex_dir}/skills")"
+  log_ok "${project_skills} project skills copied"
   log_ok "project directories ready"
 }
 
