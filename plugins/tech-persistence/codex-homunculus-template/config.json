@@ -1,0 +1,33 @@
+{
+  "version": "2.0",
+  "observation": {
+    "enabled": true,
+    "max_file_size_mb": 10,
+    "archive_after_days": 7
+  },
+  "instincts": {
+    "min_confidence": 0.3,
+    "auto_approve_threshold": 0.7,
+    "confidence_decay_rate": 0.05,
+    "confidence_boost": 0.1,
+    "max_per_project": 100,
+    "max_global": 50
+  },
+  "context_injection": {
+    "enabled": true,
+    "max_sessions": 3,
+    "max_instincts_project": 10,
+    "max_instincts_global": 5,
+    "min_confidence_inject": 0.5
+  },
+  "evolution": {
+    "cluster_threshold": 3,
+    "min_confidence_for_evolve": 0.5
+  },
+  "patterns_to_detect": [
+    "user_corrections",
+    "error_resolutions",
+    "repeated_workflows",
+    "tool_preferences"
+  ]
+}
