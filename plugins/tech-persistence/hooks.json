@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" inject-context.js",
+            "async": false,
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" observe.js pre",
+            "async": true,
+            "timeout": 2000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" observe.js post",
+            "async": true,
+            "timeout": 2000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" evaluate-session.js",
+            "async": false,
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}
