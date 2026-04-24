@@ -1,11 +1,11 @@
 ---
-description: "基于 Hook 的持续自学习系统：观察会话 → 检测模式 → 生成本能 → 进化为知识"
-version: "2.0"
+description: "基于 Hook 的持续自学习系统：观察会话 → Memory v5 → 本能 → 进化为知识"
+version: "5.0"
 ---
 
 # 持续自学习技能
 
-融合 ECC Continuous Learning v2 的本能架构 + Codex-Mem 的语义观察压缩。
+融合 ECC Continuous Learning v2 的本能架构 + Codex auto memory 的 `MEMORY.md` 索引方式 + Codex-Mem 的语义观察压缩。
 
 ## 系统架构
 
@@ -14,6 +14,8 @@ version: "2.0"
   ↓ PreToolUse / PostToolUse Hook (100% 触发)
 观察日志 (observations.jsonl)
   ↓ Stop Hook 模式检测
+Memory v5 (memory/MEMORY.md + topic files)
+  ↓ 置信度门控
 本能 (instincts/*.md, 置信度 0.3-0.9)
   ↓ 验证/衰减/聚类
 进化产物 (evolved/ skills/commands/agents)
@@ -27,10 +29,17 @@ version: "2.0"
 
 | Hook | 脚本 | 作用 |
 |------|------|------|
-| SessionStart | inject-context.js | 注入近期摘要 + 高置信本能 |
-| PreToolUse | observe.js pre | 记录即将执行的工具 |
-| PostToolUse | observe.js post | 捕获工具结果 |
-| Stop | evaluate-session.js | 模式检测 + 本能创建 + 摘要 |
+| SessionStart | inject-context.js | 注入 Memory v5 索引 + 近期摘要 + 高置信本能 |
+| PreToolUse | observe.js pre | 规范化并脱敏即将执行的工具 |
+| PostToolUse | observe.js post | 捕获工具结果、命令状态、文件路径 |
+| Stop | evaluate-session.js | 模式检测 + Memory v5 写入 + 本能创建 + 摘要 |
+
+## Memory v5
+
+- `memory/MEMORY.md` 是启动索引，目标 `< 200 行 / 25KB`
+- `memory/{topic}.md` 保存调试、测试、工具链、工作流等细节
+- 只有通过未来价值、去重、脱敏和置信度门控的模式才写入
+- SessionStart 默认只注入 `MEMORY.md`，保持上下文轻量
 
 ## 本能 (Instinct) 生命周期
 
@@ -89,6 +98,10 @@ version: "2.0"
     └── {project-hash}/
         ├── observations.jsonl     # 原始观察日志
         ├── observations.archive/  # 归档的旧观察
+        ├── memory/                # Memory v5 自动记忆
+        │   ├── MEMORY.md          # 启动索引
+        │   ├── debugging.md
+        │   └── toolchain.md
         ├── instincts/             # 项目本能
         │   └── prefer-vitest.md
         ├── sessions/              # 会话摘要
@@ -121,6 +134,14 @@ version: "2.0"
     "max_instincts_project": 10,
     "max_instincts_global": 5,
     "min_confidence_inject": 0.5
+  },
+  "memory_v5": {
+    "enabled": true,
+    "index_max_lines": 200,
+    "index_max_bytes": 25600,
+    "max_index_entries": 40,
+    "max_topic_entries": 80,
+    "min_memory_confidence": 0.45
   },
   "evolution": {
     "cluster_threshold": 3

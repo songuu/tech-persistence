@@ -97,9 +97,14 @@ function Install-User {
 
     # Hook scripts
     $hooksDir = Join-Path $ClaudeHome "skills/continuous-learning/hooks"
+    Ensure-Dir (Join-Path $hooksDir "lib")
     Get-ChildItem (Join-Path $ScriptDir "scripts") -Filter "*.js" | ForEach-Object {
         Copy-Item $_.FullName (Join-Path $hooksDir $_.Name) -Force
         Write-OK "hook $($_.Name)"
+    }
+    Get-ChildItem (Join-Path $ScriptDir "scripts\lib") -Filter "*.js" | ForEach-Object {
+        Copy-Item $_.FullName (Join-Path $hooksDir "lib\$($_.Name)") -Force
+        Write-OK "hook lib\$($_.Name)"
     }
 
     # Homunculus config
@@ -168,5 +173,5 @@ elseif ($All) { Install-User; Install-Project }
 elseif ($User) { Install-User }
 elseif ($Project) { Install-Project }
 elseif ($Obsidian) { Install-Obsidian }
-elseif ($HooksOnly) { $hd = Join-Path $ClaudeHome "skills/continuous-learning/hooks"; Ensure-Dir $hd; Get-ChildItem (Join-Path $ScriptDir "scripts") -Filter "*.js" | ForEach-Object { Copy-Item $_.FullName (Join-Path $hd $_.Name) -Force }; Write-OK "hooks updated" }
+elseif ($HooksOnly) { $hd = Join-Path $ClaudeHome "skills/continuous-learning/hooks"; Ensure-Dir $hd; Ensure-Dir (Join-Path $hd "lib"); Get-ChildItem (Join-Path $ScriptDir "scripts") -Filter "*.js" | ForEach-Object { Copy-Item $_.FullName (Join-Path $hd $_.Name) -Force }; Get-ChildItem (Join-Path $ScriptDir "scripts\lib") -Filter "*.js" | ForEach-Object { Copy-Item $_.FullName (Join-Path $hd "lib\$($_.Name)") -Force }; Write-OK "hooks updated" }
 else { Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -Obsidian [-VaultPath <path>] [-SharedHomunculus <path>] | -HooksOnly`n" }

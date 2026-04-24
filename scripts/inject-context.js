@@ -17,6 +17,13 @@ const {
   resolveCompatReadDirs,
   resolveProjectPlansDir,
 } = require('./lib/runtime-paths');
+const {
+  DEFAULT_MEMORY_CONFIG,
+  boundText,
+  parseFrontmatter,
+} = require('./lib/memory-v5');
+
+const CONTEXT_BUDGET_CHARS = 12000;
 
 function detectProject() {
   const { execSync } = require('child_process');
@@ -84,6 +91,52 @@ function loadInstinctsWithFallback(baseDirs, relativeParts, minConfidence) {
     if (instincts.length > 0) return instincts;
   }
   return [];
+}
+
+function loadMemoryIndex(memoryDir) {
+  const memoryPath = path.join(memoryDir, 'MEMORY.md');
+  if (!fs.existsSync(memoryPath)) return '';
+  const content = fs.readFileSync(memoryPath, 'utf-8');
+  const { body } = parseFrontmatter(content);
+  return boundText(
+    body,
+    DEFAULT_MEMORY_CONFIG.indexMaxLines,
+    DEFAULT_MEMORY_CONFIG.indexMaxBytes
+  );
+}
+
+function loadMemoryIndexWithFallback(baseDirs, relativeParts) {
+  for (const baseDir of baseDirs) {
+    const content = loadMemoryIndex(path.join(baseDir, ...relativeParts));
+    if (content) return content;
+  }
+  return '';
+}
+
+function addSection(sections, title, body, maxChars) {
+  if (!body) return;
+  sections.push({
+    title,
+    body: String(body).trim().slice(0, maxChars),
+  });
+}
+
+function renderSections(sections) {
+  let remaining = CONTEXT_BUDGET_CHARS;
+  const rendered = [];
+
+  for (const section of sections) {
+    if (remaining <= 0) break;
+    const heading = `## ${section.title}\n\n`;
+    const available = Math.max(0, remaining - heading.length);
+    const body = section.body.slice(0, available).trim();
+    if (!body) continue;
+    const block = `${heading}${body}`;
+    rendered.push(block);
+    remaining -= block.length + 2;
+  }
+
+  return rendered.join('\n\n');
 }
 
 /**
@@ -155,13 +208,37 @@ function main() {
   // 0. 未完成的 sprint handoff（最高优先）
   const handoff = detectPendingHandoff();
   if (handoff) {
-    sections.push(`## ⚡ 未完成的 Sprint (从 checkpoint 恢复)\n\n文件: docs/plans/${handoff.file}\n\n${handoff.content.slice(0, 1500)}`);
+    addSection(
+      sections,
+      '未完成的 Sprint (从 checkpoint 恢复)',
+      `文件: docs/plans/${handoff.file}\n\n${handoff.content}`,
+      1500
+    );
   }
 
   // 0b. 未完成的 prototype 收敛
   const prototype = detectPendingPrototype();
   if (prototype) {
-    sections.push(`## 🔄 未完成的原型收敛\n\n文件: ${prototype.displayPath}\n\n${prototype.content}`);
+    addSection(
+      sections,
+      '未完成的原型收敛',
+      `文件: ${prototype.displayPath}\n\n${prototype.content}`,
+      700
+    );
+  }
+
+  // 0c. Codex memory v5: Claude Code auto memory style concise index
+  const memoryIndex = loadMemoryIndexWithFallback(
+    compatReadDirs,
+    ['projects', project.id, 'memory']
+  );
+  if (memoryIndex) {
+    addSection(
+      sections,
+      'Auto Memory v5 (MEMORY.md concise index)',
+      memoryIndex,
+      DEFAULT_MEMORY_CONFIG.indexMaxBytes
+    );
   }
 
   // 1. 近期会话摘要
@@ -171,7 +248,7 @@ function main() {
     3
   );
   if (sessions.length > 0) {
-    sections.push(`## 近期会话 (${project.name})\n${sessions.join('\n---\n')}`);
+    addSection(sections, `近期会话 (${project.name})`, sessions.join('\n---\n'), 3000);
   }
 
   // 2. 高置信度项目本能 (>=0.5)
@@ -186,7 +263,7 @@ function main() {
       const flag = parseFloat(inst.confidence) >= 0.7 ? '🟢' : '🟡';
       return `- ${flag} [${conf}] [${inst.domain || '?'}] ${inst.trigger || inst.id}`;
     });
-    sections.push(`## 项目本能 (已学习的行为模式)\n${instinctLines.join('\n')}`);
+    addSection(sections, '项目本能 (已学习的行为模式)', instinctLines.join('\n'), 1600);
   }
 
   // 3. 高置信度全局本能 (>=0.7)
@@ -200,7 +277,7 @@ function main() {
       const conf = parseFloat(inst.confidence).toFixed(1);
       return `- 🟢 [${conf}] [${inst.domain || '?'}] ${inst.trigger || inst.id}`;
     });
-    sections.push(`## 全局本能 (跨项目通用)\n${instinctLines.join('\n')}`);
+    addSection(sections, '全局本能 (跨项目通用)', instinctLines.join('\n'), 1000);
   }
 
   if (sections.length === 0) {
@@ -208,7 +285,7 @@ function main() {
   }
 
   const context = `<learned-context project="${project.name}">
-${sections.join('\n\n')}
+${renderSections(sections)}
 </learned-context>`;
 
   const output = JSON.stringify({

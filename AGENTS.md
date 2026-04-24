@@ -30,6 +30,9 @@ pnpm lint         # 检查
 ## 关键决策记录
 <!-- 由 /learn 自动追加 -->
 
+## 解决方案索引
+- [2026-04-24] [memory/codex/hooks] Codex Memory v5：新增 `MEMORY.md` 启动索引 + topic 文件，解决 v4 记忆注入过粗或过重的问题 → `docs/solutions/2026-04-24-codex-memory-v5.md`
+
 ## 已知陷阱（高频）
 <!-- 只放最高频的坑，详细在 .codex/rules/debugging-gotchas.md -->
 

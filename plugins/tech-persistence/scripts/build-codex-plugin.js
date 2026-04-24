@@ -236,9 +236,13 @@ function copyHooks() {
     path.join(repoRoot, 'scripts', 'lib', 'runtime-paths.js'),
     path.join(targetDir, 'lib', 'runtime-paths.js')
   );
+  copyTextFile(
+    path.join(repoRoot, 'scripts', 'lib', 'memory-v5.js'),
+    path.join(targetDir, 'lib', 'memory-v5.js')
+  );
   writeTextFile(path.join(targetDir, 'run-hook.js'), runHookJs);
   writeTextFile(path.join(targetDir, 'run-hook.cmd'), runHookCmd);
-  return 6;
+  return 7;
 }
 
 function copyHomunculusTemplate() {

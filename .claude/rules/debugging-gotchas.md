@@ -7,6 +7,8 @@
 
 ## HIGH — 容易踩到
 
+- Hook 脚本一旦新增 `scripts/lib/*` 依赖，必须同步更新安装脚本和 Codex plugin 构建脚本；否则用户环境中的 hook 会因 `Cannot find module './lib/...'` 静默失效。验证时至少跑 `node plugins/tech-persistence/scripts/build-codex-plugin.js`、`node scripts/validate-codex-plugin.js` 和临时 `TECH_PERSISTENCE_HOME` smoke test。
+
 - [2026-04-15] [powershell, encoding] **本项目生成的 .ps1 脚本必须带 UTF-8 BOM**
   - 现象：PS 脚本执行时中文变乱码（如 `测试` → `娴嬭瘯`），tokenizer 报 "ExpressionsMustBeFirstInPipeline"、"一元运算符 + 后面缺少表达式"、"语句块中缺少右 }" 等一连串语法错，看似脚本被整体破坏。
   - 根因：中文 Windows 系统 ACP = 936 (GBK)。PowerShell 5.1 对 **无 BOM** 的 .ps1 用系统 ANSI 码页解码。UTF-8 字节被当 GBK 解析后，中文字符变成非法标识符/运算符序列，tokenizer 级联崩塌。**与脚本逻辑无关**，纯编码问题。

@@ -68,6 +68,7 @@ install_hooks() {
 
   local hooks_dir="${CLAUDE_HOME}/skills/continuous-learning/hooks"
   mkdir -p "$hooks_dir"
+  mkdir -p "$hooks_dir/lib"
 
   cp "${SCRIPT_DIR}/scripts/observe.js" "$hooks_dir/observe.js"
   log_ok "observe.js → PreToolUse/PostToolUse 观察捕获"
@@ -78,7 +79,11 @@ install_hooks() {
   cp "${SCRIPT_DIR}/scripts/inject-context.js" "$hooks_dir/inject-context.js"
   log_ok "inject-context.js → SessionStart 上下文注入"
 
+  cp "${SCRIPT_DIR}/scripts/lib/"*.js "$hooks_dir/lib/"
+  log_ok "hook lib/ → runtime paths + memory v5"
+
   chmod +x "$hooks_dir"/*.js
+  chmod +x "$hooks_dir"/lib/*.js
 }
 
 # ──────────────────────────────────────────────
