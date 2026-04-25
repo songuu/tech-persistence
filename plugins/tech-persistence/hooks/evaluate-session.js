@@ -24,6 +24,18 @@ const {
   resolveProjectRulesDir,
   resolveSessionId,
 } = require('./lib/runtime-paths');
+const {
+  DEFAULT_MEMORY_CONFIG,
+  MEMORY_VERSION,
+  hashText,
+  parseFrontmatter,
+  patternSignature,
+  similarityScore,
+  summarizeValue,
+  topicForDomain,
+  topicTitle,
+  yamlEscape,
+} = require('./lib/memory-v5');
 
 // ─── 配置 ───
 const CONFIG = {
@@ -33,6 +45,7 @@ const CONFIG = {
   confidence_boost: 0.1,
   cluster_threshold: 3, // 3+ 相关本能触发进化
   max_observations_per_session: 500,
+  memory: DEFAULT_MEMORY_CONFIG,
   domains: [
     'code-style', 'testing', 'git', 'debugging', 'performance',
     'architecture', 'security', 'toolchain', 'api-design', 'workflow'
@@ -75,10 +88,12 @@ function getPaths(project) {
   const hDir = resolveBaseDir();
   const localInstructionsFile = resolveProjectInstructionFile();
   return {
+    baseDir: hDir,
     // 项目级
     projectDir: path.join(hDir, 'projects', project.id),
     projectObs: path.join(hDir, 'projects', project.id, 'observations.jsonl'),
     projectInstincts: path.join(hDir, 'projects', project.id, 'instincts'),
+    projectMemory: path.join(hDir, 'projects', project.id, 'memory'),
     projectSessions: path.join(hDir, 'projects', project.id, 'sessions'),
     // 全局
     globalInstincts: path.join(hDir, 'instincts', 'personal'),
@@ -110,20 +125,61 @@ function readSessionObservations(obsPath) {
 }
 
 // ─── 模式检测 ───
+function isPostObservation(obs) {
+  return obs.phase === 'post';
+}
+
+function isEditObservation(obs) {
+  const tool = String(obs.tool || '').toLowerCase();
+  return [
+    'write',
+    'edit',
+    'multiedit',
+    'str_replace_editor',
+    'apply_patch',
+    'functions.apply_patch',
+  ].some((name) => tool.includes(name));
+}
+
+function commandDomain(command) {
+  const value = String(command || '').toLowerCase();
+  if (/\b(test|vitest|jest|playwright|pytest|cargo test|go test)\b/.test(value)) return 'testing';
+  if (/\b(lint|eslint|biome|tsc|typecheck|validate|preflight|check|build)\b/.test(value)) return 'toolchain';
+  if (/\bgit\b/.test(value)) return 'git';
+  return 'toolchain';
+}
+
+function commandDisplay(obs) {
+  return obs.command || obs.command_family || obs.tool || 'unknown';
+}
+
+function buildPattern(rawPattern) {
+  const pattern = {
+    confidence: CONFIG.min_confidence,
+    domain: 'workflow',
+    evidence: '',
+    ...rawPattern,
+  };
+  pattern.signature = pattern.signature || patternSignature(pattern);
+  pattern.memory = pattern.memory || null;
+  return pattern;
+}
+
 function detectPatterns(observations) {
   const patterns = [];
+  const addPattern = (pattern) => patterns.push(buildPattern(pattern));
+  const postObservations = observations.filter(isPostObservation);
 
   // 1. 工具使用频率统计
   const toolCounts = {};
-  observations.forEach(obs => {
-    if (obs.phase === 'post' && obs.tool) {
+  postObservations.forEach(obs => {
+    if (obs.tool) {
       toolCounts[obs.tool] = (toolCounts[obs.tool] || 0) + 1;
     }
   });
 
   // 2. 检测重复工具序列（repeated_workflow）
-  const toolSequence = observations
-    .filter(o => o.phase === 'post')
+  const toolSequence = postObservations
     .map(o => o.tool)
     .filter(Boolean);
 
@@ -137,27 +193,63 @@ function detectPatterns(observations) {
     Object.entries(seqCounts)
       .filter(([, count]) => count >= 2)
       .forEach(([seq, count]) => {
-        patterns.push({
+        addPattern({
           type: 'repeated_workflow',
           description: `反复执行工具序列: ${seq}`,
           evidence: `本次会话中出现 ${count} 次`,
           confidence: Math.min(0.3 + count * 0.1, 0.7),
           domain: 'workflow',
+          memory: {
+            topic: 'workflow',
+            summary: `观察到重复工具序列: ${seq}`,
+            detail: `本次会话中出现 ${count} 次，可考虑沉淀为 skill 或脚本。`,
+          },
         });
       });
   }
 
-  // 3. 检测错误解决模式 (error_resolution)
-  const errorObs = observations.filter(o =>
-    o.phase === 'post' && o.output_summary &&
-    (o.output_summary.includes('error') || o.output_summary.includes('Error') ||
-     o.output_summary.includes('FAIL') || o.output_summary.includes('exception'))
+  // 3. 检测错误恢复模式：先失败，后续同类命令/工具成功
+  const failedObservations = postObservations.filter(o =>
+    o.error_signal === true ||
+    o.status === 'error' ||
+    /\b(error|exception|failed|failure|traceback|enoent)\b/i.test(o.output_summary || '')
   );
-  if (errorObs.length > 0) {
-    patterns.push({
+  const resolvedFailures = new Set();
+  failedObservations.forEach((failed) => {
+    const failedIndex = observations.indexOf(failed);
+    const failedFamily = failed.command_family || failed.tool;
+    const laterSuccess = postObservations.find((candidate) => {
+      if (observations.indexOf(candidate) <= failedIndex) return false;
+      const candidateFamily = candidate.command_family || candidate.tool;
+      return candidateFamily === failedFamily && candidate.status === 'success';
+    });
+    if (!laterSuccess) return;
+    resolvedFailures.add(failed);
+    addPattern({
       type: 'error_resolution',
-      description: `会话中遇到 ${errorObs.length} 个错误/异常`,
-      evidence: errorObs.map(o => `${o.tool}: ${(o.output_summary || '').slice(0, 100)}`).join('\n'),
+      description: `失败后恢复成功: ${failedFamily}`,
+      evidence: `${commandDisplay(failed)} -> ${commandDisplay(laterSuccess)}`,
+      confidence: 0.55,
+      domain: 'debugging',
+      command_family: failed.command_family || '',
+      memory: {
+        topic: 'debugging',
+        summary: `当 ${failedFamily} 失败后，优先复用后续成功的同类验证路径。`,
+        detail: `${summarizeValue(failed.output_summary || failed.input_summary, 180)} -> ${summarizeValue(laterSuccess.output_summary || laterSuccess.input_summary, 180)}`,
+      },
+    });
+  });
+
+  const unresolvedErrorCount = failedObservations.filter(obs => !resolvedFailures.has(obs)).length;
+  if (unresolvedErrorCount > 0) {
+    addPattern({
+      type: 'error_observed',
+      description: `会话中出现 ${unresolvedErrorCount} 个未确认恢复的错误/异常`,
+      evidence: failedObservations
+        .filter(obs => !resolvedFailures.has(obs))
+        .slice(0, 5)
+        .map(o => `${o.tool}: ${(o.output_summary || '').slice(0, 120)}`)
+        .join('\n'),
       confidence: 0.3,
       domain: 'debugging',
     });
@@ -166,31 +258,62 @@ function detectPatterns(observations) {
   // 4. 检测文件编辑热区
   const editedFiles = {};
   observations
-    .filter(o => o.tool === 'Write' || o.tool === 'Edit' || o.tool === 'str_replace_editor')
+    .filter(isEditObservation)
     .forEach(o => {
-      const filePath = (o.input_summary || '').match(/(?:path|file)['":\s]+([^\s'"]+)/)?.[1];
-      if (filePath) editedFiles[filePath] = (editedFiles[filePath] || 0) + 1;
+      const paths = Array.isArray(o.input_paths) && o.input_paths.length > 0
+        ? o.input_paths
+        : [(o.input_summary || '').match(/(?:path|file)['":\s]+([^\s'"]+)/)?.[1]].filter(Boolean);
+      paths.forEach((filePath) => {
+        editedFiles[filePath] = (editedFiles[filePath] || 0) + 1;
+      });
     });
   Object.entries(editedFiles)
     .filter(([, count]) => count >= 3)
     .forEach(([file, count]) => {
-      patterns.push({
+      addPattern({
         type: 'repeated_workflow',
         description: `频繁编辑文件: ${file} (${count} 次)`,
         evidence: `可能需要重构或抽取`,
         confidence: 0.3,
         domain: 'code-style',
+        primary_file: file,
+        memory: {
+          topic: 'code-style',
+          summary: `文件 ${file} 是高频修改点，相关改动应优先检查边界和重复逻辑。`,
+          detail: `本次会话记录到 ${count} 次编辑。`,
+        },
+      });
+    });
+
+  // 5. 记录可复用的验证/工具链命令，形成类似 Codex auto memory 的项目索引
+  const commandCounts = {};
+  postObservations
+    .filter(o => o.command && o.status !== 'error')
+    .forEach((obs) => {
+      commandCounts[obs.command] = (commandCounts[obs.command] || 0) + 1;
+    });
+
+  Object.entries(commandCounts)
+    .filter(([command, count]) => count >= 2 || /\b(test|lint|validate|preflight|build|check|tsc)\b/i.test(command))
+    .slice(0, 8)
+    .forEach(([command, count]) => {
+      const domain = commandDomain(command);
+      addPattern({
+        type: 'tool_preference',
+        description: `项目常用命令: ${command}`,
+        evidence: `本次会话成功/可用 ${count} 次`,
+        confidence: Math.min(0.45 + count * 0.05, 0.75),
+        domain,
+        command_family: command,
+        memory: {
+          topic: domain,
+          summary: `本项目可复用命令: \`${command}\`。`,
+          detail: `本次会话观察到 ${count} 次成功或非错误执行。`,
+        },
       });
     });
 
   return patterns;
-}
-
-// ─── YAML 安全转义 ───
-function yamlEscape(str) {
-  if (typeof str !== 'string') return '""';
-  // 移除换行符，转义双引号，截断后包裹在双引号内
-  return '"' + str.replace(/[\r\n]+/g, ' ').replace(/"/g, '\\"') + '"';
 }
 
 // ─── 本能 (Instinct) 管理 ───
@@ -200,17 +323,33 @@ function loadInstincts(instinctDir) {
     .filter(f => f.endsWith('.yaml') || f.endsWith('.md'))
     .map(f => {
       const content = fs.readFileSync(path.join(instinctDir, f), 'utf-8');
-      // 解析 YAML frontmatter
-      const match = content.match(/^---\n([\s\S]*?)\n---/);
-      if (!match) return null;
-      const meta = {};
-      match[1].split('\n').forEach(line => {
-        const [key, ...vals] = line.split(':');
-        if (key && vals.length) meta[key.trim()] = vals.join(':').trim().replace(/^["']|["']$/g, '');
-      });
+      const { meta } = parseFrontmatter(content);
+      if (!meta || Object.keys(meta).length === 0) return null;
       return { ...meta, file: f, fullContent: content };
     })
     .filter(Boolean);
+}
+
+function replaceOrInsertFrontmatterField(content, key, value) {
+  const field = `${key}: ${value}`;
+  const pattern = new RegExp(`^${key}:\\s*.*$`, 'm');
+  if (pattern.test(content)) return content.replace(pattern, field);
+  return content.replace(/^---\n/, `---\n${field}\n`);
+}
+
+function appendEvidence(content, evidenceLine) {
+  const evidenceIdx = content.indexOf('## Evidence');
+  if (evidenceIdx !== -1) {
+    const relatedIdx = content.indexOf('## Related', evidenceIdx);
+    if (relatedIdx !== -1) {
+      return `${content.slice(0, relatedIdx).trimEnd()}\n${evidenceLine}\n\n${content.slice(relatedIdx)}`;
+    }
+  }
+  const relatedIdx = content.indexOf('## Related');
+  if (relatedIdx !== -1) {
+    return `${content.slice(0, relatedIdx).trimEnd()}\n\n## Evidence\n${evidenceLine}\n\n${content.slice(relatedIdx)}`;
+  }
+  return `${content.trimEnd()}\n${evidenceLine}\n`;
 }
 
 function createOrUpdateInstinct(instinctDir, pattern) {
@@ -219,32 +358,25 @@ function createOrUpdateInstinct(instinctDir, pattern) {
 
   // 检查是否有相似本能
   const similar = existing.find(inst =>
-    inst.domain === pattern.domain &&
-    (inst.description || '').includes(pattern.description.slice(0, 30))
+    inst.signature === pattern.signature ||
+    (
+      inst.domain === pattern.domain &&
+      similarityScore(inst.trigger || inst.description || inst.id, pattern.description) >= 0.55
+    )
   );
 
   if (similar) {
     // 更新置信度（提升）
     const oldConf = parseFloat(similar.confidence) || 0.3;
-    const newConf = Math.min(oldConf + CONFIG.confidence_boost, 0.95);
+    const newConf = Math.min(Math.max(oldConf, pattern.confidence) + CONFIG.confidence_boost, 0.95);
     const filePath = path.join(instinctDir, similar.file);
     let content = fs.readFileSync(filePath, 'utf-8');
-    content = content.replace(
-      /confidence:\s*[\d.]+/,
-      `confidence: ${newConf.toFixed(2)}`
-    );
-    content = content.replace(
-      /last_seen:\s*.*/,
-      `last_seen: "${new Date().toISOString().split('T')[0]}"`
-    );
-    // 在 ## Related 之前插入证据（如果有），否则追加到末尾
+    content = replaceOrInsertFrontmatterField(content, 'confidence', newConf.toFixed(2));
+    content = replaceOrInsertFrontmatterField(content, 'last_seen', `"${new Date().toISOString().split('T')[0]}"`);
+    content = replaceOrInsertFrontmatterField(content, 'signature', yamlEscape(pattern.signature));
+    content = replaceOrInsertFrontmatterField(content, 'memory_version', yamlEscape(MEMORY_VERSION));
     const evidenceLine = `\n- ${new Date().toISOString().split('T')[0]}: ${pattern.evidence.replace(/[\r\n]+/g, ' ').slice(0, 200)}`;
-    const relatedIdx = content.indexOf('## Related');
-    if (relatedIdx !== -1) {
-      content = content.slice(0, relatedIdx) + evidenceLine + '\n\n' + content.slice(relatedIdx);
-    } else {
-      content += evidenceLine;
-    }
+    content = appendEvidence(content, evidenceLine);
     fs.writeFileSync(filePath, content);
     return { action: 'updated', id: similar.id, newConfidence: newConf };
   }
@@ -259,13 +391,15 @@ function createOrUpdateInstinct(instinctDir, pattern) {
   const content = `---
 id: ${yamlEscape(id)}
 trigger: ${yamlEscape(safeDescription)}
+signature: ${yamlEscape(pattern.signature)}
 confidence: ${pattern.confidence.toFixed(2)}
 domain: ${yamlEscape(safeDomain)}
 type: ${yamlEscape(pattern.type)}
 source: "session-observation"
+memory_version: ${yamlEscape(MEMORY_VERSION)}
 created: "${dateStr}"
 last_seen: "${dateStr}"
-scope: "project"
+scope: ${yamlEscape(pattern.scope || 'project')}
 tags: [instinct, ${yamlEscape(safeDomain)}]
 aliases: [${yamlEscape(safeDescription.slice(0, 50))}]
 ---
@@ -320,8 +454,244 @@ function decayInstincts(instinctDir) {
   return decayed;
 }
 
+// ─── Codex Memory v5: Codex auto-memory style index + topic files ───
+function memoryEntryFromPattern(pattern) {
+  if (!pattern.memory || pattern.confidence < CONFIG.memory.minMemoryConfidence) return null;
+  const dateStr = new Date().toISOString().split('T')[0];
+  const topic = topicForDomain(pattern.memory.topic || pattern.domain);
+  const summary = summarizeValue(pattern.memory.summary || pattern.description, 220);
+  if (!summary) return null;
+
+  return {
+    id: pattern.signature || patternSignature(pattern),
+    date: dateStr,
+    confidence: pattern.confidence,
+    topic,
+    type: pattern.type,
+    summary,
+    detail: summarizeValue(pattern.memory.detail || pattern.evidence, 260),
+  };
+}
+
+function loadMemoryConfig(baseDir) {
+  const configPath = path.join(baseDir, 'config.json');
+  let configured = {};
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    configured = config.memory_v5 || config.memoryV5 || config.memory || {};
+  } catch {}
+
+  return {
+    ...DEFAULT_MEMORY_CONFIG,
+    enabled: configured.enabled !== false,
+    indexMaxLines: configured.index_max_lines || configured.indexMaxLines || DEFAULT_MEMORY_CONFIG.indexMaxLines,
+    indexMaxBytes: configured.index_max_bytes || configured.indexMaxBytes || DEFAULT_MEMORY_CONFIG.indexMaxBytes,
+    maxIndexEntries: configured.max_index_entries || configured.maxIndexEntries || DEFAULT_MEMORY_CONFIG.maxIndexEntries,
+    maxTopicEntries: configured.max_topic_entries || configured.maxTopicEntries || DEFAULT_MEMORY_CONFIG.maxTopicEntries,
+    minMemoryConfidence: configured.min_memory_confidence || configured.minMemoryConfidence || DEFAULT_MEMORY_CONFIG.minMemoryConfidence,
+  };
+}
+
+function topicFilePath(memoryDir, topic) {
+  return path.join(memoryDir, `${topic}.md`);
+}
+
+function formatMemoryLine(entry) {
+  const detail = entry.detail ? ` Evidence: ${entry.detail}` : '';
+  return `- ${entry.date} [${entry.confidence.toFixed(2)}] [${entry.type}] ${entry.summary}${detail}`;
+}
+
+function topicFrontmatter(topic, project) {
+  const dateStr = new Date().toISOString().split('T')[0];
+  return `---
+type: memory-topic
+memory_version: ${yamlEscape(MEMORY_VERSION)}
+topic: ${yamlEscape(topic)}
+project: ${yamlEscape(project.name)}
+updated: "${dateStr}"
+tags: [memory, ${yamlEscape(topic)}]
+---
+
+# ${topicTitle(topic)} Memory
+
+Generated by Tech Persistence memory v5. Keep durable notes here; MEMORY.md stays a concise startup index.
+
+## Notes
+`;
+}
+
+function upsertMemoryEntry(memoryDir, entry, project) {
+  fs.mkdirSync(memoryDir, { recursive: true });
+  const filePath = topicFilePath(memoryDir, entry.topic);
+  const marker = `<!-- memory:v5:${entry.id} -->`;
+  const replacement = `${marker}\n${formatMemoryLine(entry)}`;
+  let content = fs.existsSync(filePath)
+    ? fs.readFileSync(filePath, 'utf-8')
+    : topicFrontmatter(entry.topic, project);
+
+  if (!content.includes('## Notes')) {
+    content = `${content.trimEnd()}\n\n## Notes\n`;
+  }
+
+  const existingPattern = new RegExp(`<!-- memory:v5:${entry.id} -->\\r?\\n- [^\\n]*`, 'm');
+  const action = existingPattern.test(content) ? 'updated' : 'created';
+  if (action === 'updated') {
+    content = content.replace(existingPattern, replacement);
+  } else {
+    content = `${content.trimEnd()}\n${replacement}\n`;
+  }
+
+  content = replaceOrInsertFrontmatterField(content, 'updated', `"${entry.date}"`);
+  content = replaceOrInsertFrontmatterField(content, 'memory_version', yamlEscape(MEMORY_VERSION));
+  content = pruneMemoryTopicEntries(content, entry.topic);
+  fs.writeFileSync(filePath, content);
+  return action;
+}
+
+function parseMemoryEntriesFromTopic(topic, content) {
+  const entries = [];
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length - 1; i++) {
+    const markerMatch = lines[i].match(/<!-- memory:v5:([a-f0-9]+) -->/);
+    if (!markerMatch || !lines[i + 1].startsWith('- ')) continue;
+    const line = lines[i + 1];
+    const date = line.match(/^- (\d{4}-\d{2}-\d{2})/)?.[1] || '1970-01-01';
+    const confidence = parseFloat(line.match(/\[(\d(?:\.\d+)?)\]/)?.[1] || '0.3');
+    entries.push({
+      id: markerMatch[1],
+      topic,
+      date,
+      confidence,
+      line,
+    });
+  }
+  return entries;
+}
+
+function pruneMemoryTopicEntries(content, topic) {
+  const entries = parseMemoryEntriesFromTopic(topic, content);
+  if (entries.length <= CONFIG.memory.maxTopicEntries) return content;
+
+  const keepIds = new Set(entries
+    .sort((a, b) => {
+      if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+      return b.date.localeCompare(a.date);
+    })
+    .slice(0, CONFIG.memory.maxTopicEntries)
+    .map(entry => entry.id));
+
+  const lines = content.split(/\r?\n/);
+  const pruned = [];
+  for (let i = 0; i < lines.length; i++) {
+    const markerMatch = lines[i].match(/<!-- memory:v5:([a-f0-9]+) -->/);
+    if (markerMatch && !keepIds.has(markerMatch[1])) {
+      i += 1;
+      continue;
+    }
+    pruned.push(lines[i]);
+  }
+  return pruned.join('\n');
+}
+
+function collectMemoryEntries(memoryDir) {
+  if (!fs.existsSync(memoryDir)) return [];
+  return fs.readdirSync(memoryDir)
+    .filter(file => file.endsWith('.md') && file !== 'MEMORY.md')
+    .flatMap((file) => {
+      const topic = path.basename(file, '.md');
+      const content = fs.readFileSync(path.join(memoryDir, file), 'utf-8');
+      return parseMemoryEntriesFromTopic(topic, content);
+    });
+}
+
+function writeMemoryIndex(memoryDir, project) {
+  const entries = collectMemoryEntries(memoryDir)
+    .sort((a, b) => {
+      if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+      return b.date.localeCompare(a.date);
+    })
+    .slice(0, CONFIG.memory.maxIndexEntries);
+
+  const dateStr = new Date().toISOString().split('T')[0];
+  const groupedTopics = [...new Set(entries.map(entry => entry.topic))].sort();
+  const activeNotes = entries.map((entry) =>
+    `- [${topicTitle(entry.topic)}] ${entry.line.replace(/^- \d{4}-\d{2}-\d{2} /, '')}`
+  );
+  const topicLines = groupedTopics.map(topic =>
+    `- [[${topic}]] - ${entries.filter(entry => entry.topic === topic).length} active notes`
+  );
+
+  let content = `---
+type: auto-memory-index
+memory_version: ${yamlEscape(MEMORY_VERSION)}
+project: ${yamlEscape(project.name)}
+updated: "${dateStr}"
+tags: [memory, index]
+---
+
+# MEMORY
+
+This file is generated by Tech Persistence memory v5 and mirrors Codex auto memory: concise startup index first, detailed topic files on demand.
+
+## Active Notes
+${activeNotes.join('\n') || '- No durable notes yet.'}
+
+## Topics
+${topicLines.join('\n') || '- No topic files yet.'}
+`;
+
+  const lines = content.split(/\r?\n/);
+  if (lines.length > CONFIG.memory.indexMaxLines) {
+    content = lines.slice(0, CONFIG.memory.indexMaxLines).join('\n');
+  }
+  while (Buffer.byteLength(content, 'utf8') > CONFIG.memory.indexMaxBytes && activeNotes.length > 0) {
+    activeNotes.pop();
+    content = `---
+type: auto-memory-index
+memory_version: ${yamlEscape(MEMORY_VERSION)}
+project: ${yamlEscape(project.name)}
+updated: "${dateStr}"
+tags: [memory, index]
+---
+
+# MEMORY
+
+This file is generated by Tech Persistence memory v5 and mirrors Codex auto memory: concise startup index first, detailed topic files on demand.
+
+## Active Notes
+${activeNotes.join('\n') || '- No durable notes yet.'}
+
+## Topics
+${topicLines.join('\n') || '- No topic files yet.'}
+`;
+  }
+
+  fs.writeFileSync(path.join(memoryDir, 'MEMORY.md'), content);
+  return entries.length;
+}
+
+function writeMemoryNotes(memoryDir, patterns, project) {
+  const seen = new Set();
+  const results = { created: 0, updated: 0, skipped: 0, indexed: 0 };
+  patterns
+    .map(memoryEntryFromPattern)
+    .filter(Boolean)
+    .forEach((entry) => {
+      if (seen.has(entry.id)) {
+        results.skipped += 1;
+        return;
+      }
+      seen.add(entry.id);
+      const action = upsertMemoryEntry(memoryDir, entry, project);
+      results[action] += 1;
+    });
+
+  results.indexed = writeMemoryIndex(memoryDir, project);
+  return results;
+}
+
 // ─── 生成会话摘要 ───
-function generateSessionSummary(observations, patterns, instinctResults, project) {
+function generateSessionSummary(observations, patterns, instinctResults, memoryResults, project) {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const timeStr = now.toTimeString().split(' ')[0].slice(0, 5);
@@ -361,6 +731,7 @@ tags: [session, ${yamlEscape(projectName)}]
 - Top tools: ${topTools || 'none'}
 - Patterns detected: ${patterns.length}
 - Instincts: +${instinctResults.filter(r => r.action === 'created').length} new, ${instinctResults.filter(r => r.action === 'updated').length} updated
+- Memory v5: +${memoryResults.created} new, ${memoryResults.updated} updated, ${memoryResults.indexed} indexed
 
 ## Instinct Links
 ${instinctLinks || '_No instinct changes this session_'}
@@ -405,6 +776,17 @@ function healthCheck(paths) {
     }
   }
 
+  // Memory v5 索引预算：对齐 Codex auto memory 的 200 行 / 25KB 启动索引
+  const memoryIndex = path.join(paths.projectMemory, 'MEMORY.md');
+  if (fs.existsSync(memoryIndex)) {
+    const content = fs.readFileSync(memoryIndex, 'utf-8');
+    const lines = content.split('\n').length;
+    const size = Buffer.byteLength(content, 'utf8');
+    if (lines > CONFIG.memory.indexMaxLines || size > CONFIG.memory.indexMaxBytes) {
+      warnings.push(`⚠️  MEMORY.md 已 ${lines} 行 / ${(size / 1024).toFixed(1)}KB，建议裁剪 topic 索引`);
+    }
+  }
+
   return warnings;
 }
 
@@ -435,11 +817,26 @@ function detectActiveSprint() {
       const content = fs.readFileSync(path.join(plansDir, f), 'utf-8');
       const statusMatch = content.match(/status:\s*["']?([\w-]+)["']?/);
       const status = statusMatch ? statusMatch[1] : null;
-      return { file: f, status, content };
+      const tasksDone = (content.match(/- \[x\]/gi) || []).length;
+      const tasksTotal = (content.match(/- \[[ x]\]/gi) || []).length;
+      return { file: f, status, content, tasksDone, tasksTotal };
     })
-    .filter(d => d.status && ['in-progress', 'planning', 'reviewing', 'draft'].includes(d.status));
+    .filter(d =>
+      d.status &&
+      ['in-progress', 'planning', 'reviewing', 'draft'].includes(d.status) &&
+      !(d.tasksTotal > 0 && d.tasksDone >= d.tasksTotal)
+    );
 
   return sprintDocs.length > 0 ? sprintDocs[0] : null;
+}
+
+function shouldAutoCheckpoint(observations) {
+  if (process.env.TECH_PERSISTENCE_DISABLE_CHECKPOINT === '1') return false;
+  if (process.env.TECH_PERSISTENCE_FORCE_CHECKPOINT === '1') return true;
+
+  const toolCalls = observations.filter(isPostObservation).length;
+  const editCalls = observations.filter(isEditObservation).length;
+  return observations.length >= 30 || toolCalls >= 20 || editCalls >= 5;
 }
 
 function autoCheckpoint(sprint, observations) {
@@ -510,9 +907,10 @@ ${[...editedFiles].map(f => `- ${f}`).join('\n') || '- (无文件修改记录)'}
 function main() {
   const project = detectProject();
   const paths = getPaths(project);
+  CONFIG.memory = loadMemoryConfig(paths.baseDir);
 
   // 确保目录存在
-  [paths.projectDir, paths.projectInstincts, paths.projectSessions, paths.globalInstincts]
+  [paths.projectDir, paths.projectInstincts, paths.projectMemory, paths.projectSessions, paths.globalInstincts]
     .forEach(dir => fs.mkdirSync(dir, { recursive: true }));
 
   // 更新注册表
@@ -534,33 +932,39 @@ function main() {
     const targetDir = pattern.domain === 'workflow'
       ? paths.globalInstincts
       : paths.projectInstincts;
+    pattern.scope = pattern.domain === 'workflow' ? 'global' : 'project';
     const result = createOrUpdateInstinct(targetDir, pattern);
     instinctResults.push(result);
   });
 
-  // 4. 置信度衰减
+  // 4. 写入 Codex Memory v5 索引和 topic 文件
+  const memoryResults = CONFIG.memory.enabled
+    ? writeMemoryNotes(paths.projectMemory, patterns, project)
+    : { created: 0, updated: 0, skipped: 0, indexed: 0 };
+
+  // 5. 置信度衰减
   const projectDecayed = decayInstincts(paths.projectInstincts);
   const globalDecayed = decayInstincts(paths.globalInstincts);
 
-  // 5. 生成会话摘要
-  const summary = generateSessionSummary(observations, patterns, instinctResults, project);
+  // 6. 生成会话摘要
+  const summary = generateSessionSummary(observations, patterns, instinctResults, memoryResults, project);
   const summaryFile = path.join(
     paths.projectSessions,
     `${new Date().toISOString().split('T')[0]}-${Date.now().toString(36)}.md`
   );
   fs.writeFileSync(summaryFile, summary);
 
-  // 6. 自动 Sprint Checkpoint (如果有活跃 sprint)
-  const activeSprint = detectActiveSprint();
+  // 7. 自动 Sprint Checkpoint (如果有活跃 sprint)
+  const activeSprint = shouldAutoCheckpoint(observations) ? detectActiveSprint() : null;
   const checkpoint = autoCheckpoint(activeSprint, observations);
 
-  // 7. 健康检查
+  // 8. 健康检查
   const warnings = healthCheck(paths);
 
-  // 8. 输出报告
+  // 9. 输出报告
   console.log('');
   console.log(`📊 会话自学习报告 [${project.name}]`);
-  console.log(`   观察: ${observations.length} | 模式: ${patterns.length} | 本能: +${instinctResults.filter(r => r.action === 'created').length} ↑${instinctResults.filter(r => r.action === 'updated').length}`);
+  console.log(`   观察: ${observations.length} | 模式: ${patterns.length} | 本能: +${instinctResults.filter(r => r.action === 'created').length} ↑${instinctResults.filter(r => r.action === 'updated').length} | Memory v5: +${memoryResults.created} ↑${memoryResults.updated}`);
 
   if (instinctResults.length > 0) {
     console.log('   本能变更:');
@@ -571,6 +975,10 @@ function main() {
         console.log(`     ⬆️  ${r.id} → 置信度 ${r.newConfidence.toFixed(2)}`);
       }
     });
+  }
+
+  if (memoryResults.created > 0 || memoryResults.updated > 0) {
+    console.log(`   Memory v5: MEMORY.md 索引 ${memoryResults.indexed} 条，topic notes +${memoryResults.created} ↑${memoryResults.updated}`);
   }
 
   const allDecayed = [...projectDecayed, ...globalDecayed];

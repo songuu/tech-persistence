@@ -1,7 +1,7 @@
 # Claude Code / Codex 自进化工程系统
 
 > 融合 gstack 角色分工 + Compound Engineering 复利循环 + ECC/Claude-Mem 自学习本能 + Skill 自迭代 + 风险自适应测试 + 上下文交接 + Obsidian 知识图谱。
-> 20 个用户命令 · 3 个项目命令 · 5 个按需技能 · 4 个 Hook · 5 层知识存储。
+> 20 个用户命令 · 3 个项目命令 · 5 个按需技能 · 4 个 Hook · Memory v5 · 5 层知识存储。
 > 支持 Claude Code 原生目录和 Codex 原生插件两种运行时；每一次工作都让下一次更容易。
 
 ---
@@ -12,7 +12,7 @@
 |------|------|------|
 | 如何分工 | gstack | 同一模型不同阶段切换角色（CEO→架构师→工程师→审查团队） |
 | 如何复利 | Compound Engineering | 每次工作的经验沉淀为文档，供下次规划自动读取 |
-| 如何记忆 | ECC + Claude-Mem | 4 Hook 自动观察，提取带置信度的"本能"，自动衰减和进化 |
+| 如何记忆 | ECC + Claude-Mem + Memory v5 | 4 Hook 自动观察，生成 `MEMORY.md` 启动索引、topic 记忆和带置信度的本能 |
 | 如何适应 | Skill 自迭代 | 使用信号 → 诊断 → 改进提案 → eval 验证 → 发布新版 |
 | 如何测试 | 风险自适应 | 评估变更风险等级(L0-L4)，自动匹配测试深度 |
 | 如何持续 | 上下文交接 | 长任务 checkpoint + 交接文件 + 自动恢复 |
@@ -38,7 +38,7 @@ block-beta
 
   space
 
-  block:know["知识层 — 4 hooks + instinct lifecycle + skill self-iteration"]
+  block:know["知识层 — 4 hooks + Memory v5 + instinct lifecycle + skill self-iteration"]
     columns 4
     h1["SessionStart\ninject + handoff"]
     h2["Pre/PostToolUse\nobserve"]
@@ -60,7 +60,7 @@ block-beta
 
   exec --> know
   know --> store
-  store -- "SessionStart injects Tier 1-4 + handoff" --> exec
+  store -- "SessionStart injects Memory v5 + Tier 1-4 + handoff" --> exec
 
   style exec fill:#EEEDFE,stroke:#534AB7,color:#26215C
   style know fill:#E1F5EE,stroke:#0F6E56,color:#04342C
@@ -111,13 +111,15 @@ flowchart TD
 ```mermaid
 flowchart TD
     T0["Tier 0: observations.jsonl\nHook auto-capture"]
+    M0["Memory v5: memory/MEMORY.md\nConcise index + topic files"]
     T1["Tier 1: instincts/*.md\nConfidence 0.3→0.9, auto-decay"]
     T2["Tier 2: evolved/\n/evolve clusters 3+ instincts"]
     T3["Tier 3: rules/ + solutions/\nMature experience"]
     T4["Tier 4: CLAUDE.md\nCore < 200 lines"]
     OBS["Obsidian Graph View\nAll .md files visualized"]
 
-    T0 -->|"pattern detect"| T1
+    T0 -->|"quality gate"| M0
+    M0 -->|"pattern detect"| T1
     T1 -->|"repeated validation"| T2
     T2 -->|"human confirm"| T3
     T3 -->|"highest freq"| T4
@@ -328,10 +330,10 @@ Skill 优化:       /skill-diagnose → /skill-improve → /skill-eval → /skil
 
 | Hook | 脚本 | 作用 |
 |------|------|------|
-| SessionStart | inject-context.js | 注入本能 + 会话摘要 + 检测 handoff/prototype 状态 |
-| PreToolUse | observe.js pre | 记录工具输入 |
-| PostToolUse | observe.js post | 捕获工具结果 |
-| Stop | evaluate-session.js | 模式检测 + 本能提取 + 衰减 |
+| SessionStart | inject-context.js | 注入 Memory v5 索引、本能、会话摘要 + 检测 handoff/prototype 状态 |
+| PreToolUse | observe.js pre | 规范化并脱敏工具输入 |
+| PostToolUse | observe.js post | 捕获工具结果、命令状态、文件路径 |
+| Stop | evaluate-session.js | 模式检测 + Memory v5 写入 + 本能提取 + 衰减 |
 
 ---
 
@@ -370,6 +372,7 @@ Skill 优化:       /skill-diagnose → /skill-improve → /skill-eval → /skil
 | 产出 | Tag | Graph 颜色 | 产生方式 |
 |------|-----|-----------|---------|
 | 本能 | `#instinct` | 紫色 | Hook + /compound |
+| Memory | `#memory` | 蓝色 | Stop Hook |
 | 会话 | `#session` | 绿色 | Stop Hook |
 | 解决方案 | `#solution` | 深绿 | /compound |
 | 规则 | `#rule` | 橙色 | /compound /learn |
@@ -414,6 +417,10 @@ Skill 优化:       /skill-diagnose → /skill-improve → /skill-eval → /skil
     ├── skill-evals/                    ← 测试集
     ├── skill-changelog/                ← 变更记录
     └── projects/{hash}/
+        ├── memory/MEMORY.md             ← Memory v5 启动索引 (<200 行 / 25KB)
+        ├── memory/{topic}.md            ← 调试/测试/工具链等细节
+        ├── instincts/
+        └── sessions/
 
 your-project/                           ← 项目级 (提交 Git)
 ├── CLAUDE.md
@@ -448,6 +455,10 @@ Codex 调用方式：
 │   └── sprint/, prototype/, plan/, work/, review/, ...
 └── homunculus/                         ← Codex 用户级知识存储
     └── projects/{hash}/
+        ├── memory/MEMORY.md             ← Memory v5 启动索引 (<200 行 / 25KB)
+        ├── memory/{topic}.md            ← 调试/测试/工具链等细节
+        ├── instincts/
+        └── sessions/
 
 your-project/                           ← Codex 项目级 (提交 Git)
 ├── AGENTS.md
@@ -462,6 +473,7 @@ your-project/                           ← Codex 项目级 (提交 Git)
 | 指标 | 阈值 | 动作 |
 |------|------|------|
 | CLAUDE.md | > 200 行 | 迁移到 rules/ |
+| MEMORY.md | > 200 行或 > 25KB | 裁剪索引，细节保留在 topic 文件 |
 | rules 文件 | > 100 行 | 拆分 |
 | 本能数量 | > 50 | /evolve |
 | 观察日志 | > 10 MB | 归档 |
@@ -475,16 +487,17 @@ your-project/                           ← Codex 项目级 (提交 Git)
 ## 核心原则
 
 1. **分层存储**：高频→CLAUDE.md/AGENTS.md · 分类→rules/ · 原子→instincts/ · 方案→solutions/
-2. **分层加载**：CLAUDE.md/AGENTS.md 路由 · skill 按需 · rules 路径匹配
-3. **假设驱动**：输出方案让用户纠偏，不做冗长问答
-4. **风险自适应**：测试深度跟着变更风险走，不多不少
-5. **自动优先**：Hook 100% 捕获 · 手动命令做深度提取
-6. **复利导向**：/compound 产出 → 下次 /plan 自动读取
-7. **Skill 进化**：使用信号 → 诊断 → 验证 → 发布
-8. **上下文安全**：长任务自动 checkpoint，不怕上下文溢出
-9. **Obsidian 原生**：所有产出 frontmatter + wikilinks，Graph View 可视化
-10. **80/20 分配**：80% 规划审查 · 20% 执行
-11. **先学后压**：永远先 /compound 再 /compact
+2. **分层加载**：CLAUDE.md/AGENTS.md 路由 · Memory v5 启动索引 · skill 按需 · rules 路径匹配
+3. **轻量记忆**：`MEMORY.md` 只放高价值索引，细节进入 topic 文件，避免污染上下文
+4. **假设驱动**：输出方案让用户纠偏，不做冗长问答
+5. **风险自适应**：测试深度跟着变更风险走，不多不少
+6. **自动优先**：Hook 100% 捕获 · 手动命令做深度提取
+7. **复利导向**：/compound 产出 → 下次 /plan 自动读取
+8. **Skill 进化**：使用信号 → 诊断 → 验证 → 发布
+9. **上下文安全**：长任务自动 checkpoint，不怕上下文溢出
+10. **Obsidian 原生**：所有产出 frontmatter + wikilinks，Graph View 可视化
+11. **80/20 分配**：80% 规划审查 · 20% 执行
+12. **先学后压**：永远先 /compound 再 /compact
 
 ---
 
@@ -501,4 +514,6 @@ timeline
       Role switching : Compound loop : /sprint : /prototype convergence
     section v4 — Self-iteration
       Skill signals+diagnose+eval : Risk-adaptive testing : Context checkpoint+resume : Obsidian deep integration
+    section v5 — Codex Memory
+      Codex payload normalization : MEMORY.md index under 200 lines/25KB : topic files : confidence-gated writes
 ```

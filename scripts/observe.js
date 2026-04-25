@@ -21,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { resolveBaseDir, resolveSessionId } = require('./lib/runtime-paths');
+const { MEMORY_VERSION, normalizeHookPayload } = require('./lib/memory-v5');
 
 // ─── 项目检测 ───
 function detectProject() {
@@ -74,34 +75,25 @@ function main() {
     // stdin 不可用时静默继续
   }
 
-  let toolName = 'unknown';
-  let toolInput = '';
-  let toolOutput = '';
-
-  if (input) {
-    try {
-      const payload = JSON.parse(input);
-      toolName = payload.tool_name || payload.name || 'unknown';
-      toolInput = typeof payload.input === 'string'
-        ? payload.input.slice(0, 500)
-        : JSON.stringify(payload.input || '').slice(0, 500);
-      toolOutput = typeof payload.output === 'string'
-        ? payload.output.slice(0, 1000)
-        : JSON.stringify(payload.output || '').slice(0, 1000);
-    } catch {
-      // 非 JSON 格式，记录原始内容的摘要
-      toolInput = input.slice(0, 300);
-    }
-  }
+  const normalized = normalizeHookPayload(input, phase);
 
   const observation = {
+    schema_version: MEMORY_VERSION,
     timestamp: new Date().toISOString(),
     phase, // pre | post
     session_id: resolveSessionId(),
     project: project,
-    tool: toolName,
-    input_summary: toolInput,
-    output_summary: phase === 'post' ? toolOutput : undefined,
+    runtime: process.env.TECH_PERSISTENCE_RUNTIME || 'auto',
+    tool: normalized.tool,
+    input_summary: normalized.input_summary,
+    output_summary: phase === 'post' ? normalized.output_summary : undefined,
+    input_paths: normalized.input_paths,
+    command: normalized.command || undefined,
+    command_family: normalized.command_family || undefined,
+    status: normalized.status,
+    error_signal: normalized.error_signal,
+    payload_format: normalized.payload_format,
+    payload_keys: normalized.payload_keys,
     cwd: process.cwd(),
   };
 

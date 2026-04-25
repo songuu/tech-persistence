@@ -197,6 +197,7 @@ if (isFile(hooksPath, 'hooks.json')) {
 });
 
 isFile(path.join(pluginRoot, 'hooks', 'lib', 'runtime-paths.js'), 'hook script lib/runtime-paths.js');
+isFile(path.join(pluginRoot, 'hooks', 'lib', 'memory-v5.js'), 'hook script lib/memory-v5.js');
 isFile(path.join(pluginRoot, 'hooks', 'run-hook.cmd'), 'hook script run-hook.cmd');
 isFile(path.join(pluginRoot, 'hooks', 'run-hook.js'), 'hook script run-hook.js');
 validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence-small.svg'), 'asset tech-persistence-small.svg');
