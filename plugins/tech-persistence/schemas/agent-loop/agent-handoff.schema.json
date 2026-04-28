@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/agent-handoff.schema.json",
+  "title": "Agent Loop Implementation Handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "changedFiles",
+    "validation",
+    "risks",
+    "followUp"
+  ],
+  "properties": {
+    "summary": { "type": "string" },
+    "changedFiles": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "validation": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "risks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "followUp": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

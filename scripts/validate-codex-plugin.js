@@ -5,6 +5,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const pluginRoot = path.join(root, 'plugins', 'tech-persistence');
 const expectedCommands = [
+  'agent-loop.md',
   'checkpoint.md',
   'compound.md',
   'evolve.md',
@@ -211,6 +212,21 @@ isFile(
   path.join(pluginRoot, 'scripts', 'configure-shared-homunculus.js'),
   'shared utility configure-shared-homunculus.js'
 );
+isFile(
+  path.join(pluginRoot, 'scripts', 'agent-orchestrator.js'),
+  'agent-loop utility agent-orchestrator.js'
+);
+[
+  'requirement-spec.schema.json',
+  'task-breakdown.schema.json',
+  'agent-handoff.schema.json',
+  'review-result.schema.json',
+].forEach((schema) => {
+  isFile(
+    path.join(pluginRoot, 'schemas', 'agent-loop', schema),
+    `agent-loop schema ${schema}`
+  );
+});
 isFile(
   path.join(pluginRoot, 'codex-homunculus-template', 'config.json'),
   'codex homunculus template config.json'

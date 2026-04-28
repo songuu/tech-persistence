@@ -8,6 +8,7 @@ const userCodexRoot = process.env.CODEX_HOME || path.join(homeDir, '.codex');
 const projectRoot = process.cwd();
 const projectCodexRoot = path.join(projectRoot, '.codex');
 const repoMarketplacePath = path.join(projectRoot, '.agents', 'plugins', 'marketplace.json');
+const args = new Set(process.argv.slice(2));
 
 let hasFailure = false;
 
@@ -282,9 +283,42 @@ function validateRepoMarketplace() {
   }
 }
 
-validateUserInstall();
-validateProjectInstall();
-validateRepoMarketplace();
+function validateAgentLoopAssets() {
+  console.log('\nAgent loop v6 assets:');
+  isFile(path.join(repoRoot, 'scripts', 'agent-orchestrator.js'), 'scripts/agent-orchestrator.js');
+  [
+    'requirement-spec.schema.json',
+    'task-breakdown.schema.json',
+    'agent-handoff.schema.json',
+    'review-result.schema.json',
+  ].forEach((schema) => {
+    isFile(
+      path.join(repoRoot, 'schemas', 'agent-loop', schema),
+      `schemas/agent-loop/${schema}`
+    );
+  });
+}
+
+const allowedArgs = new Set(['--help', '--user', '--project']);
+const unknownArgs = [...args].filter((arg) => !allowedArgs.has(arg));
+if (unknownArgs.length > 0) {
+  fail(`unknown arguments: ${unknownArgs.join(', ')}`);
+}
+
+if (args.has('--help')) {
+  console.log('Usage: node scripts/validate-codex-install.js [--user] [--project]');
+  process.exit(0);
+}
+
+const validateUser = args.size === 0 || args.has('--user');
+const validateProject = args.size === 0 || args.has('--project');
+
+if (validateUser) validateUserInstall();
+if (validateProject) {
+  validateProjectInstall();
+  validateRepoMarketplace();
+  validateAgentLoopAssets();
+}
 validateSharedHomunculusConfig();
 
 if (hasFailure) process.exit(1);

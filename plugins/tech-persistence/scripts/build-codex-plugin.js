@@ -7,6 +7,7 @@ const pluginRoot = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(pluginRoot, '..', '..');
 
 const expectedCommands = [
+  'agent-loop.md',
   'checkpoint.md',
   'compound.md',
   'evolve.md',
@@ -256,12 +257,30 @@ function copyHomunculusTemplate() {
 }
 
 function copyUtilityScripts() {
-  copyTextFile(
-    path.join(repoRoot, 'scripts', 'configure-shared-homunculus.js'),
-    path.join(pluginRoot, 'scripts', 'configure-shared-homunculus.js'),
-    false
-  );
-  return 1;
+  [
+    'configure-shared-homunculus.js',
+    'agent-orchestrator.js',
+  ].forEach((name) => {
+    copyTextFile(
+      path.join(repoRoot, 'scripts', name),
+      path.join(pluginRoot, 'scripts', name),
+      false
+    );
+  });
+  return 2;
+}
+
+function copySchemas() {
+  const sourceDir = path.join(repoRoot, 'schemas', 'agent-loop');
+  const targetDir = path.join(pluginRoot, 'schemas', 'agent-loop');
+  emptyDir(targetDir);
+  fs.readdirSync(sourceDir)
+    .filter((name) => name.endsWith('.json'))
+    .sort()
+    .forEach((name) => {
+      copyTextFile(path.join(sourceDir, name), path.join(targetDir, name), false);
+    });
+  return fs.readdirSync(targetDir).filter((name) => name.endsWith('.json')).length;
 }
 
 function main() {
@@ -269,12 +288,14 @@ function main() {
   const skillCount = copySkills();
   const hookCount = copyHooks();
   const utilityCount = copyUtilityScripts();
+  const schemaCount = copySchemas();
   copyHomunculusTemplate();
 
   console.log(`[OK] generated ${commandCount} commands`);
   console.log(`[OK] generated ${skillCount} skills`);
   console.log(`[OK] generated ${hookCount} hook files`);
   console.log(`[OK] generated ${utilityCount} utility scripts`);
+  console.log(`[OK] generated ${schemaCount} schemas`);
   console.log('[OK] generated codex homunculus template');
 }
 

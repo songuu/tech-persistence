@@ -77,7 +77,7 @@ function Install-User {
     Safe-CopyNew (Join-Path $ScriptDir "user-level/CLAUDE.md") (Join-Path $ClaudeHome "CLAUDE.md")
     Write-OK "CLAUDE.md"
 
-    # Commands (19 total)
+    # Commands
     Get-ChildItem (Join-Path $ScriptDir "user-level/commands") -Filter "*.md" | ForEach-Object {
         Safe-Copy $_.FullName (Join-Path $ClaudeHome "commands/$($_.Name)")
         Write-OK ("cmd /" + ($_.BaseName))

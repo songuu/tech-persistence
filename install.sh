@@ -131,45 +131,30 @@ install_user() {
   mkdir -p "${CLAUDE_HOME}/skills/memory"
   mkdir -p "${CLAUDE_HOME}/skills/continuous-learning"
   mkdir -p "${CLAUDE_HOME}/skills/prototype-workflow"
+  mkdir -p "${CLAUDE_HOME}/skills/test-strategy"
+  mkdir -p "${CLAUDE_HOME}/skills/context-handoff"
 
   # CLAUDE.md
   safe_copy_no_overwrite "${SCRIPT_DIR}/user-level/CLAUDE.md" "${CLAUDE_HOME}/CLAUDE.md"
   [[ -f "${CLAUDE_HOME}/CLAUDE.md" ]] && log_ok "~/.claude/CLAUDE.md"
 
   # Commands (覆盖安装)
-  # 学习层命令（user-level/commands/）
-  local cmds=(
-    learn.md review-learnings.md session-summary.md
-    instinct-status.md evolve.md instinct-export.md instinct-import.md
-    # v4: Skill 自迭代闭环
-    skill-diagnose.md skill-improve.md skill-eval.md skill-publish.md
-  )
-  for cmd in "${cmds[@]}"; do
-    if [[ -f "${SCRIPT_DIR}/user-level/commands/${cmd}" ]]; then
-      safe_copy "${SCRIPT_DIR}/user-level/commands/${cmd}" "${CLAUDE_HOME}/commands/${cmd}"
-      log_ok "命令 /${cmd%.md}"
-    fi
-  done
-
-  # 工作流层命令（user-commands/）
-  local workflow_cmds=(think.md plan.md work.md review.md compound.md sprint.md prototype.md)
-  for cmd in "${workflow_cmds[@]}"; do
-    if [[ -f "${SCRIPT_DIR}/user-commands/${cmd}" ]]; then
-      safe_copy "${SCRIPT_DIR}/user-commands/${cmd}" "${CLAUDE_HOME}/commands/${cmd}"
-      log_ok "工作流 /${cmd%.md}"
-    fi
+  for file in "${SCRIPT_DIR}/user-level/commands/"*.md; do
+    [[ -f "$file" ]] || continue
+    safe_copy "$file" "${CLAUDE_HOME}/commands/$(basename "$file")"
+    log_ok "命令 /$(basename "$file" .md)"
   done
 
   # Rules
   safe_copy_no_overwrite "${SCRIPT_DIR}/user-level/rules/general-standards.md" "${CLAUDE_HOME}/rules/general-standards.md"
 
   # Skills
-  cp "${SCRIPT_DIR}/user-level/skills/memory/SKILL.md" "${CLAUDE_HOME}/skills/memory/SKILL.md"
-  cp "${SCRIPT_DIR}/user-level/skills/continuous-learning/SKILL.md" "${CLAUDE_HOME}/skills/continuous-learning/SKILL.md"
-  if [[ -f "${SCRIPT_DIR}/user-level/skills/prototype-workflow/SKILL.md" ]]; then
-    cp "${SCRIPT_DIR}/user-level/skills/prototype-workflow/SKILL.md" "${CLAUDE_HOME}/skills/prototype-workflow/SKILL.md"
-  fi
-  log_ok "技能 memory + continuous-learning + prototype-workflow"
+  for skill in memory continuous-learning prototype-workflow test-strategy context-handoff; do
+    if [[ -f "${SCRIPT_DIR}/user-level/skills/${skill}/SKILL.md" ]]; then
+      cp "${SCRIPT_DIR}/user-level/skills/${skill}/SKILL.md" "${CLAUDE_HOME}/skills/${skill}/SKILL.md"
+    fi
+  done
+  log_ok "技能 memory + continuous-learning + prototype-workflow + test-strategy + context-handoff"
 
   # Hooks
   install_hooks
@@ -201,7 +186,7 @@ install_user() {
   echo "  已安装:"
   echo "    学习层:  /learn /review-learnings /session-summary"
   echo "             /instinct-status /evolve /instinct-export /instinct-import"
-  echo "    工作流:  /think /plan /work /review /compound /sprint /prototype"
+  echo "    工作流:  /think /plan /work /review /compound /sprint /prototype /agent-loop"
   echo "    Skill自迭代: /skill-diagnose /skill-improve /skill-eval /skill-publish"
   echo "    技能:    memory, continuous-learning, prototype-workflow"
   echo "    Hook:    SessionStart, PreToolUse, PostToolUse, Stop"

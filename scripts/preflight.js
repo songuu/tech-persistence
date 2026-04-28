@@ -201,17 +201,18 @@ function runCodexPreflight() {
   check('~/.codex/commands', () => {
     const commandsDir = path.join(codexHome, 'commands');
     if (!fs.existsSync(commandsDir)) {
-      console.log('     不存在 — 将安装 20 个用户命令');
+      console.log('     不存在 — 将安装 21 个用户命令');
       return true;
     }
     const commandCount = fs.readdirSync(commandsDir).filter((name) => name.endsWith('.md')).length;
     console.log(`     已存在 (${commandCount} 个命令) — 安装时会刷新本系统命令`);
-    return commandCount >= 20 ? 'warn' : true;
+    return commandCount >= 21 ? 'warn' : true;
   });
 
   check('~/.codex/skills', () => {
     const skillsDir = path.join(codexHome, 'skills');
     const requiredSkills = [
+      'agent-loop',
       'memory',
       'continuous-learning',
       'prototype-workflow',
