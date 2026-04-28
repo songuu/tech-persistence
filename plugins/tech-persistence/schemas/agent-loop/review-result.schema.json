@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/review-result.schema.json",
+  "title": "Agent Loop Review Result",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "decision",
+    "compliant",
+    "findings",
+    "followUpTasks"
+  ],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": ["approved", "changes_requested", "blocked"]
+    },
+    "compliant": { "type": "boolean" },
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["severity", "message"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2"]
+          },
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "message": { "type": "string" },
+          "requiredFix": { "type": "string" }
+        }
+      }
+    },
+    "followUpTasks": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"date":"2026-04-28","skill":"agent-loop","event":"used","context":"优化 agent-loop v6，统一 Claude Code / Codex 入口行为","signals":["provider-launch-resolver","stdin-prompt-transport","contract-normalizer","doctor-self-test"]}

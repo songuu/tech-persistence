@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/requirement-spec.schema.json",
+  "title": "Agent Loop Requirement Spec",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "requirementSpec",
+    "technicalDesign",
+    "taskBreakdown",
+    "assumptions",
+    "outOfScope",
+    "humanReviewChecklist"
+  ],
+  "properties": {
+    "requirementSpec": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "summary",
+        "userValue",
+        "scope",
+        "acceptanceCriteria"
+      ],
+      "properties": {
+        "summary": { "type": "string" },
+        "userValue": { "type": "string" },
+        "scope": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "acceptanceCriteria": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "technicalDesign": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "approach",
+        "files",
+        "risks",
+        "testStrategy"
+      ],
+      "properties": {
+        "approach": { "type": "string" },
+        "files": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "interfaces": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "dataAndState": { "type": "string" },
+        "risks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "testStrategy": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object", "additionalProperties": true }
+          ]
+        }
+      }
+    },
+    "taskBreakdown": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "title",
+          "description",
+          "dependencies",
+          "risk",
+          "doneCriteria"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "dependencies": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "risk": {
+            "type": "string",
+            "enum": ["L0", "L1", "L2", "L3", "L4"]
+          },
+          "doneCriteria": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "suggestedValidation": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "outOfScope": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "questions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "humanReviewChecklist": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -163,3 +163,4 @@
 
 ### 解决方案索引
 <!-- 由 /compound 写入，格式: [日期] [标签] 问题→方案 的一行摘要 + 详情链接 -->
+- [2026-04-27] [architecture/agent-loop/v6] 外部 orchestrator 统一调 `claude -p` 和 `codex exec`，用冻结 spec + handoff + review loop 取代命令内互相模拟 → `docs/solutions/2026-04-27-agent-orchestrator-v6.md`
