@@ -17,6 +17,14 @@
 
 ## 决策列表
 
+### ADR-006: Agent Loop Preflight 区分硬失败、显式跳过与 Provider 环境修复 (2026-04-29)
+- **状态**：已采纳
+- **上下文**：第二轮真实运行中，非 Git 仓库 preflight 直接失败、Claude Code Windows 缺少 Git Bash 环境变量、Spec provider 输出 `taskBreakdown.tasks` 嵌套结构、长耗时 provider run 触发等待超时。它们都不是业务实现问题，而是编排器运行时适配不足。
+- **决策**：Git repo 默认仍是硬约束，但显式 `--skip-git-repo-check` 可把它降级为 no-diff run；Windows 下自动检测并注入 `CLAUDE_CODE_GIT_BASH_PATH`；Spec normalizer 兼容 `taskBreakdown.tasks`，但 canonical `spec.json` 继续保持扁平数组；provider 子进程 timeout 提供 CLI 覆盖并记录到 `providerRuns[]`。
+- **原因**：preflight 应帮用户提前看到环境问题，同时允许高级用户明确选择降级模式；provider adapter 应吸收 Windows CLI 依赖，而不是把一次性环境变量留给用户记忆。
+- **备选**：无条件允许非 Git 目录、要求用户每次手动设置 Git Bash、只靠 prompt 要求 provider 输出扁平 schema。前者会削弱 review 质量，后两者在 provider 输出变化和新仓库中会反复复现。
+- **影响**：`doctor` 需要展示 `claudeGitBash` 和 skip-git 细节；no-diff run 的 review 可信度低于 Git run；历史嵌套 spec 可通过后续 `repair-spec` 命令自动修复。
+
 ### ADR-005: Agent Loop 恢复流必须由 Normalizer 与 Continuation 状态驱动 (2026-04-29)
 - **状态**：已采纳
 - **上下文**：实际使用中出现 `plan.tasks` 无法解析、`summary: "APPROVED"` 被判为 `needs-followup`、`blocked` 无法 resume、Windows Codex sandbox 写入失败、provider 日志覆盖等问题；共同根因是状态机过早依赖 provider 原始字段和一次性执行假设。

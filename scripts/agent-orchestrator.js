@@ -62,6 +62,26 @@ function stampedLogPath(runDir, label, suffix, stamp) {
   return path.join(runDir, 'logs', `${label}.${stamp}.${suffix}`);
 }
 
+function coalesce(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== '');
+}
+
+function providerTimeoutMs(options) {
+  const explicitMs = optionValue(options, 'provider-timeout-ms') || optionValue(options, 'timeout-ms');
+  if (explicitMs !== undefined && explicitMs !== true) {
+    const parsed = Number(explicitMs);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+
+  const explicitMinutes = optionValue(options, 'provider-timeout-minutes') || optionValue(options, 'timeout-minutes');
+  if (explicitMinutes !== undefined && explicitMinutes !== true) {
+    const parsed = Number(explicitMinutes);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed * 60 * 1000;
+  }
+
+  return undefined;
+}
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -409,19 +429,57 @@ function resolveNodeExecutable(shimDir) {
   return candidates.find((candidate) => path.extname(candidate).toLowerCase() === '.exe') || 'node';
 }
 
+function resolveClaudeGitBash() {
+  const fromEnv = process.env.CLAUDE_CODE_GIT_BASH_PATH;
+  if (fromEnv && fs.existsSync(fromEnv)) {
+    return { path: fromEnv, source: 'env' };
+  }
+
+  if (!isWindows()) return { path: null, source: 'not-windows' };
+
+  const candidates = [
+    'C:\\Apps\\Git\\usr\\bin\\bash.exe',
+    'C:\\Apps\\Git\\bin\\bash.exe',
+    'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return { path: candidate, source: 'known-path' };
+  }
+
+  const pathCandidate = findWindowsCommandCandidates('bash')
+    .find((candidate) => /\\Git\\(usr\\bin|bin)\\bash\.exe$/i.test(candidate));
+  if (pathCandidate) return { path: pathCandidate, source: 'path' };
+
+  return { path: null, source: fromEnv ? 'env-missing' : 'missing' };
+}
+
+function claudeProviderEnv() {
+  const resolved = resolveClaudeGitBash();
+  if (resolved.path && !process.env.CLAUDE_CODE_GIT_BASH_PATH) {
+    return { CLAUDE_CODE_GIT_BASH_PATH: resolved.path };
+  }
+  return {};
+}
+
 function runProcess(label, launchOrCommand, args, settings) {
   const launch = typeof launchOrCommand === 'string'
     ? resolveProviderLaunch(launchOrCommand)
     : launchOrCommand;
   const finalArgs = [...(launch.argsPrefix || []), ...args];
+  const timeoutMs = settings.timeoutMs || 30 * 60 * 1000;
   const startedAt = nowIso();
   const result = spawnSync(launch.command, finalArgs, {
     cwd: settings.cwd,
     encoding: 'utf8',
+    env: settings.env ? { ...process.env, ...settings.env } : process.env,
     input: settings.stdin,
     maxBuffer: MAX_BUFFER,
     shell: launch.shell === true,
-    timeout: settings.timeoutMs || 30 * 60 * 1000,
+    timeout: timeoutMs,
   });
   const finishedAt = nowIso();
 
@@ -445,8 +503,13 @@ function runProcess(label, launchOrCommand, args, settings) {
     stdoutFile: settings.stdoutFile || null,
     stderrFile: settings.stderrFile || null,
     stdinBytes: settings.stdin ? Buffer.byteLength(settings.stdin, 'utf8') : 0,
+    timeoutMs,
+    envOverrides: settings.env || null,
   };
 
+  if (result.error && result.error.code === 'ETIMEDOUT') {
+    throw new Error(`${label} timed out after ${timeoutMs}ms; see ${settings.stdoutFile || 'stdout'} and ${settings.stderrFile || 'stderr'}`);
+  }
   if (result.error) {
     throw new Error(`${label} failed to start: ${result.error.message}`);
   }
@@ -615,30 +678,44 @@ function stringArray(value) {
   }).filter(Boolean);
 }
 
+function normalizeTaskContainer(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object') {
+    return coalesce(value.tasks, value.taskBreakdown, value.items, value.steps, value.children, []);
+  }
+  return value;
+}
+
 function normalizeSpec(rawSpec) {
   const raw = rawSpec && typeof rawSpec === 'object' ? rawSpec : {};
   const rawPlan = raw.plan && typeof raw.plan === 'object' ? raw.plan : {};
-  const rawRequirement = raw.requirementSpec
-    || raw.requirements
-    || raw.requirement
-    || rawPlan.requirementSpec
-    || rawPlan.requirements
-    || rawPlan.requirement
-    || {};
-  const rawDesign = raw.technicalDesign
-    || raw.design
-    || raw.technical
-    || rawPlan.technicalDesign
-    || rawPlan.design
-    || rawPlan.technical
-    || {};
-  const rawTasks = raw.taskBreakdown
-    || raw.tasks
-    || raw.implementationTasks
-    || rawPlan.taskBreakdown
-    || rawPlan.tasks
-    || rawPlan.implementationTasks
-    || [];
+  const rawRequirement = coalesce(
+    raw.requirementSpec,
+    raw.requirements,
+    raw.requirement,
+    rawPlan.requirementSpec,
+    rawPlan.requirements,
+    rawPlan.requirement,
+    {}
+  );
+  const rawDesign = coalesce(
+    raw.technicalDesign,
+    raw.design,
+    raw.technical,
+    rawPlan.technicalDesign,
+    rawPlan.design,
+    rawPlan.technical,
+    {}
+  );
+  const rawTasks = normalizeTaskContainer(coalesce(
+    raw.taskBreakdown,
+    raw.tasks,
+    raw.implementationTasks,
+    rawPlan.taskBreakdown,
+    rawPlan.tasks,
+    rawPlan.implementationTasks,
+    []
+  ));
 
   const requirementSpec = {
     summary: String(rawRequirement.summary || raw.summary || rawPlan.summary || ''),
@@ -802,6 +879,12 @@ function buildSpecPrompt(requirement, options) {
     '- The implementation provider must not reinterpret requirements.',
     '- Human review freezes the spec before implementation.',
     '- The review provider checks implementation against the frozen spec.',
+    '',
+    'Output contract:',
+    '- Return one top-level JSON object only; do not wrap it in Markdown.',
+    '- taskBreakdown must be a top-level Task[] array, not { "tasks": [...] }.',
+    '- Each task must include id, title, description, dependencies, risk, doneCriteria, and suggestedValidation.',
+    '- Use this exact top-level shape: { "requirementSpec": {...}, "technicalDesign": {...}, "taskBreakdown": [...], "assumptions": [...], "outOfScope": [...], "questions": [...], "humanReviewChecklist": [...] }.',
     '',
     `Repository root: ${options.workdir}`,
     '',
@@ -975,7 +1058,14 @@ function runSpecProvider(state, statePath, runDir, options) {
     'spec provider',
     providerLaunch(options, 'spec'),
     args,
-    { cwd: state.workdir, stdoutFile, stderrFile, stdin: prompt }
+    {
+      cwd: state.workdir,
+      stdoutFile,
+      stderrFile,
+      stdin: prompt,
+      env: claudeProviderEnv(),
+      timeoutMs: providerTimeoutMs(options),
+    }
   );
   state.providerRuns.push(record);
 
@@ -1102,7 +1192,13 @@ function runImplementationProvider(state, statePath, runDir, options) {
     'implementation provider',
     providerLaunch(options, 'implementation'),
     args,
-    { cwd: state.workdir, stdoutFile, stderrFile, stdin: prompt }
+    {
+      cwd: state.workdir,
+      stdoutFile,
+      stderrFile,
+      stdin: prompt,
+      timeoutMs: providerTimeoutMs(options),
+    }
   );
   state.providerRuns.push(record);
 
@@ -1300,7 +1396,14 @@ function runReviewProvider(state, statePath, runDir, options) {
     'review provider',
     providerLaunch(options, 'review'),
     args,
-    { cwd: state.workdir, stdoutFile, stderrFile, stdin: prompt }
+    {
+      cwd: state.workdir,
+      stdoutFile,
+      stderrFile,
+      stdin: prompt,
+      env: claudeProviderEnv(),
+      timeoutMs: providerTimeoutMs(options),
+    }
   );
   state.providerRuns.push(record);
 
@@ -1384,7 +1487,22 @@ function buildPreflightReport(workdir, options, runDir) {
   add('node', true, process.version);
   add('workdir', fs.existsSync(workdir), workdir);
   add('runDirWritable', canWriteDirectory(runDir), runDir);
-  add('gitRepository', isGitRepository(workdir), gitRoot(workdir) || 'not a git repository; codex will use --skip-git-repo-check');
+  const gitRepository = isGitRepository(workdir);
+  add('gitRepository', gitRepository || boolOption(options, 'skip-git-repo-check'), gitRepository
+    ? gitRoot(workdir)
+    : {
+      skipped: boolOption(options, 'skip-git-repo-check'),
+      detail: boolOption(options, 'skip-git-repo-check')
+        ? 'not a git repository; allowed by --skip-git-repo-check as a no-diff run'
+        : 'not a git repository; pass --skip-git-repo-check to allow a no-diff run',
+    });
+
+  if (isWindows()) {
+    const gitBash = resolveClaudeGitBash();
+    add('claudeGitBash', Boolean(gitBash.path), gitBash.path
+      ? { path: gitBash.path, source: gitBash.source }
+      : 'Claude Code on Windows requires Git Bash; install Git or set CLAUDE_CODE_GIT_BASH_PATH');
+  }
 
   for (const key of ['spec', 'implementation', 'review']) {
     try {
@@ -1597,6 +1715,14 @@ function runSelfTest() {
   });
   assertSelfTest('plan.tasks alias normalizes', nestedPlanSpec.taskBreakdown.length, 1);
 
+  const nestedTaskBreakdownSpec = normalizeSpec({
+    requirementSpec: { summary: 'Nested taskBreakdown', acceptanceCriteria: ['works'] },
+    technicalDesign: { approach: 'Use nested taskBreakdown compatibility' },
+    taskBreakdown: { tasks: [{ title: 'Flatten taskBreakdown.tasks' }] },
+  });
+  assertSelfTest('taskBreakdown.tasks normalizes', nestedTaskBreakdownSpec.taskBreakdown.length, 1);
+  assertSelfTest('provider timeout minutes parses', providerTimeoutMs({ 'provider-timeout-minutes': '2' }), 120000);
+
   const directBusinessJson = extractJsonValue(JSON.stringify({
     result: 'Implementation completed without structured wrapper.',
     files: ['scripts/example.js'],
@@ -1652,6 +1778,8 @@ Options:
   --skip-cli-schema             Do not pass CLI schema flags.
   --skip-git-repo-check         Pass Codex --skip-git-repo-check.
   --codex-sandbox <mode>        Override Codex sandbox mode. Windows defaults to workspace-write.
+  --provider-timeout-minutes <n> Override spec/implementation/review provider timeout.
+  --provider-timeout-ms <n>     Override provider timeout in milliseconds.
   --dry-run                     Create run files and prompts without calling providers.
   --preflight-only              Create run files and only run local preflight checks.
 `);
