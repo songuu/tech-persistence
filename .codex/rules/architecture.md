@@ -17,6 +17,14 @@
 
 ## 决策列表
 
+### ADR-005: Agent Loop 恢复流必须由 Normalizer 与 Continuation 状态驱动 (2026-04-29)
+- **状态**：已采纳
+- **上下文**：实际使用中出现 `plan.tasks` 无法解析、`summary: "APPROVED"` 被判为 `needs-followup`、`blocked` 无法 resume、Windows Codex sandbox 写入失败、provider 日志覆盖等问题；共同根因是状态机过早依赖 provider 原始字段和一次性执行假设。
+- **决策**：Spec / handoff / review 输出先进入 codec + normalizer，再驱动状态机；`blocked` 与 `needs-followup` 视为同一 run 的 continuation，可重新进入 implementation；Windows 未显式指定时 Codex sandbox 默认 `workspace-write`；provider 日志使用时间戳并由 `state.providerRuns[]` 追溯。
+- **原因**：这能消除手动修改 `state.json` 的恢复路径，让 provider 输出变体、Windows sandbox 差异和多次 resume 都成为 orchestrator 的确定性职责。
+- **备选**：继续要求用户手动传 `--codex-sandbox workspace-write`、手动改 `blocked` 为 `frozen`、在 prompt 中强约束 provider 只输出单一 schema。备选方案脆弱且会在不同 provider 版本中反复失效。
+- **影响**：第一次 `frozen` 实现仍要求 clean worktree；`needs-followup` / `blocked` continuation 允许在已有实现 diff 上继续；后续还需补 `status --verbose`、`retry` 和更细的 review prompt 预算。
+
 ### ADR-004: Agent Loop v6 Provider 适配层必须内建在 Orchestrator 中 (2026-04-28)
 - **状态**：已采纳
 - **上下文**：Windows 上 `claude` / `codex` 常解析到 npm shim，且 Claude Code 与 Codex 对 stdin、structured output、JSON wrapper、schema 严格度的行为不同；把这些差异交给用户手动传参会导致 `/agent-loop` 与 `$agent-loop` 行为分叉。

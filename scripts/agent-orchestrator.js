@@ -54,6 +54,14 @@ function dateStamp() {
   return new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
 }
 
+function logStamp() {
+  return new Date().toISOString().replace(/[-:TZ.]/g, '');
+}
+
+function stampedLogPath(runDir, label, suffix, stamp) {
+  return path.join(runDir, 'logs', `${label}.${stamp}.${suffix}`);
+}
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -609,29 +617,50 @@ function stringArray(value) {
 
 function normalizeSpec(rawSpec) {
   const raw = rawSpec && typeof rawSpec === 'object' ? rawSpec : {};
-  const rawRequirement = raw.requirementSpec || raw.requirements || raw.requirement || {};
-  const rawDesign = raw.technicalDesign || raw.design || raw.technical || {};
-  const rawTasks = raw.taskBreakdown || raw.tasks || raw.implementationTasks || [];
+  const rawPlan = raw.plan && typeof raw.plan === 'object' ? raw.plan : {};
+  const rawRequirement = raw.requirementSpec
+    || raw.requirements
+    || raw.requirement
+    || rawPlan.requirementSpec
+    || rawPlan.requirements
+    || rawPlan.requirement
+    || {};
+  const rawDesign = raw.technicalDesign
+    || raw.design
+    || raw.technical
+    || rawPlan.technicalDesign
+    || rawPlan.design
+    || rawPlan.technical
+    || {};
+  const rawTasks = raw.taskBreakdown
+    || raw.tasks
+    || raw.implementationTasks
+    || rawPlan.taskBreakdown
+    || rawPlan.tasks
+    || rawPlan.implementationTasks
+    || [];
 
   const requirementSpec = {
-    summary: String(rawRequirement.summary || raw.summary || ''),
-    userValue: String(rawRequirement.userValue || rawRequirement.value || raw.userValue || ''),
-    scope: stringArray(rawRequirement.scope || raw.scope),
+    summary: String(rawRequirement.summary || raw.summary || rawPlan.summary || ''),
+    userValue: String(rawRequirement.userValue || rawRequirement.value || raw.userValue || rawPlan.userValue || ''),
+    scope: stringArray(rawRequirement.scope || raw.scope || rawPlan.scope),
     acceptanceCriteria: stringArray(
       rawRequirement.acceptanceCriteria
       || rawRequirement.acceptance
       || raw.acceptanceCriteria
       || raw.acceptance
+      || rawPlan.acceptanceCriteria
+      || rawPlan.acceptance
     ),
   };
 
   const technicalDesign = {
-    approach: String(rawDesign.approach || rawDesign.summary || raw.approach || ''),
-    files: stringArray(rawDesign.files || rawDesign.changedFiles || raw.files),
-    interfaces: stringArray(rawDesign.interfaces || raw.interfaces),
-    dataAndState: String(rawDesign.dataAndState || rawDesign.state || raw.dataAndState || ''),
-    risks: stringArray(rawDesign.risks || raw.risks),
-    testStrategy: rawDesign.testStrategy || raw.testStrategy || '',
+    approach: String(rawDesign.approach || rawDesign.summary || raw.approach || rawPlan.approach || ''),
+    files: stringArray(rawDesign.files || rawDesign.changedFiles || raw.files || rawPlan.files),
+    interfaces: stringArray(rawDesign.interfaces || raw.interfaces || rawPlan.interfaces),
+    dataAndState: String(rawDesign.dataAndState || rawDesign.state || raw.dataAndState || rawPlan.dataAndState || ''),
+    risks: stringArray(rawDesign.risks || raw.risks || rawPlan.risks),
+    testStrategy: rawDesign.testStrategy || raw.testStrategy || rawPlan.testStrategy || '',
   };
 
   const taskBreakdown = toArray(rawTasks).map((task, index) => {
@@ -651,10 +680,10 @@ function normalizeSpec(rawSpec) {
     requirementSpec,
     technicalDesign,
     taskBreakdown,
-    assumptions: stringArray(raw.assumptions),
-    outOfScope: stringArray(raw.outOfScope || raw.nonGoals),
-    questions: stringArray(raw.questions || raw.openQuestions),
-    humanReviewChecklist: stringArray(raw.humanReviewChecklist || raw.reviewChecklist),
+    assumptions: stringArray(raw.assumptions || rawPlan.assumptions),
+    outOfScope: stringArray(raw.outOfScope || raw.nonGoals || rawPlan.outOfScope || rawPlan.nonGoals),
+    questions: stringArray(raw.questions || raw.openQuestions || rawPlan.questions || rawPlan.openQuestions),
+    humanReviewChecklist: stringArray(raw.humanReviewChecklist || raw.reviewChecklist || rawPlan.humanReviewChecklist || rawPlan.reviewChecklist),
   };
 }
 
@@ -683,19 +712,24 @@ function normalizeReview(rawReview) {
   const allFindings = [...findings, ...warningFindings];
   const status = String(raw.status || raw.decision || '').toLowerCase();
   const explicitDecision = String(raw.decision || '').toLowerCase();
+  const summary = String(raw.summary || raw.reviewSummary || raw.message || raw.result || '');
+  const summarySignal = summary.trim().toLowerCase();
+  const hasApprovedSummary = /^(approved|pass|passed)(\b|[\s:._-])/.test(summarySignal);
   const hasBlockingFinding = allFindings.some((finding) => finding.severity === 'P0');
   const issueCount = findings.length;
 
   let decision = 'changes_requested';
-  if (raw.compliant === true || explicitDecision === 'approved') {
-    decision = 'approved';
-  } else if (explicitDecision === 'blocked' || status === 'blocked' || hasBlockingFinding) {
+  if (explicitDecision === 'blocked' || status === 'blocked' || hasBlockingFinding) {
     decision = 'blocked';
+  } else if (raw.compliant === true || explicitDecision === 'approved') {
+    decision = 'approved';
   } else if (
     ['passed', 'pass', 'approved'].includes(status)
     && raw.canMerge !== false
     && issueCount === 0
   ) {
+    decision = 'approved';
+  } else if (hasApprovedSummary && raw.canMerge !== false && issueCount === 0) {
     decision = 'approved';
   } else if (raw.canMerge === true && issueCount === 0) {
     decision = 'approved';
@@ -706,7 +740,7 @@ function normalizeReview(rawReview) {
   return {
     decision,
     compliant: decision === 'approved',
-    summary: String(raw.summary || raw.reviewSummary || raw.message || ''),
+    summary,
     findings: allFindings,
     followUpTasks: stringArray(raw.followUpTasks || raw.followUp || raw.requiredChanges),
   };
@@ -920,10 +954,18 @@ function providerLaunch(options, key) {
   return resolveProviderLaunch(providerCommandSpec(options, key));
 }
 
+function codexSandboxMode(options) {
+  const explicit = optionValue(options, 'codex-sandbox');
+  if (explicit && explicit !== true && explicit !== 'default') return String(explicit);
+  if (isWindows() && explicit !== 'default') return 'workspace-write';
+  return null;
+}
+
 function runSpecProvider(state, statePath, runDir, options) {
   const prompt = readText(path.join(runDir, 'prompts', 'spec.md'));
-  const stdoutFile = path.join(runDir, 'logs', 'spec.stdout.log');
-  const stderrFile = path.join(runDir, 'logs', 'spec.stderr.log');
+  const providerLogStamp = logStamp();
+  const stdoutFile = stampedLogPath(runDir, 'spec', 'stdout.log', providerLogStamp);
+  const stderrFile = stampedLogPath(runDir, 'spec', 'stderr.log', providerLogStamp);
   const args = ['-p', '--input-format', 'text', '--output-format', 'json'];
   if (!boolOption(options, 'skip-cli-schema')) {
     args.push('--json-schema', schemaJson('requirement-spec.schema.json'));
@@ -1022,8 +1064,9 @@ function isManagedArtifact(filePath, workdir, runDir) {
   return DEFAULT_MANAGED_PREFIXES.some((prefix) => normalized === prefix.slice(0, -1) || normalized.startsWith(prefix));
 }
 
-function ensureCleanWorktree(workdir, options, runDir) {
+function ensureCleanWorktree(workdir, options, runDir, state) {
   if (boolOption(options, 'allow-dirty')) return;
+  if (state && ['needs-followup', 'blocked'].includes(state.status)) return;
   const changedFiles = listChangedFiles(workdir, runDir);
   if (changedFiles.length > 0) {
     const preview = changedFiles.slice(0, 12).map((entry) => `${entry.status} ${entry.path}`).join('\n');
@@ -1035,16 +1078,18 @@ function ensureCleanWorktree(workdir, options, runDir) {
 
 function runImplementationProvider(state, statePath, runDir, options) {
   if (!state.specFrozenAt) throw new Error('Spec is not frozen. Run freeze first.');
-  ensureCleanWorktree(state.workdir, options, runDir);
+  ensureCleanWorktree(state.workdir, options, runDir, state);
 
   const prompt = buildImplementationPrompt(state, runDir);
   writeText(path.join(runDir, 'prompts', 'implement.md'), prompt);
-  const stdoutFile = path.join(runDir, 'logs', 'implementation.stdout.log');
-  const stderrFile = path.join(runDir, 'logs', 'implementation.stderr.log');
-  const lastMessageFile = path.join(runDir, 'logs', 'implementation.last-message.json');
+  const providerLogStamp = logStamp();
+  const stdoutFile = stampedLogPath(runDir, 'implementation', 'stdout.log', providerLogStamp);
+  const stderrFile = stampedLogPath(runDir, 'implementation', 'stderr.log', providerLogStamp);
+  const lastMessageFile = stampedLogPath(runDir, 'implementation', 'last-message.json', providerLogStamp);
   const args = ['exec', '-C', state.workdir, '--json'];
   args.push('--output-last-message', lastMessageFile);
-  if (optionValue(options, 'codex-sandbox')) args.push('--sandbox', optionValue(options, 'codex-sandbox'));
+  const sandboxMode = codexSandboxMode(options);
+  if (sandboxMode) args.push('--sandbox', sandboxMode);
   if (!isGitRepository(state.workdir) || boolOption(options, 'skip-git-repo-check')) {
     args.push('--skip-git-repo-check');
   }
@@ -1243,8 +1288,9 @@ function writeValidation(workdir, runDir, options) {
 function runReviewProvider(state, statePath, runDir, options) {
   const prompt = buildReviewPrompt(state, runDir);
   writeText(path.join(runDir, 'prompts', 'review.md'), prompt);
-  const stdoutFile = path.join(runDir, 'logs', 'review.stdout.log');
-  const stderrFile = path.join(runDir, 'logs', 'review.stderr.log');
+  const providerLogStamp = logStamp();
+  const stdoutFile = stampedLogPath(runDir, 'review', 'stdout.log', providerLogStamp);
+  const stderrFile = stampedLogPath(runDir, 'review', 'stderr.log', providerLogStamp);
   const args = ['-p', '--input-format', 'text', '--output-format', 'json'];
   if (!boolOption(options, 'skip-cli-schema')) {
     args.push('--json-schema', schemaJson('review-result.schema.json'));
@@ -1357,6 +1403,13 @@ function buildPreflightReport(workdir, options, runDir) {
   }
 
   add('codexHandoffSchemaStrict', schemaHasStrictObjects(readJson(schemaPath('agent-handoff.schema.json'))), 'agent-handoff.schema.json');
+  add('codexSandbox', true, isWindows()
+    ? {
+      effective: codexSandboxMode(options) || 'codex-default',
+      defaulted: optionValue(options, 'codex-sandbox') === undefined,
+      reason: 'Windows defaults to workspace-write to avoid elevated sandbox process and write-policy failures.',
+    }
+    : 'not required on non-Windows platforms');
 
   return {
     version: VERSION,
@@ -1492,7 +1545,7 @@ function runResume(options, positionals) {
   saveState(statePath, state);
   assertPreflight(preflight);
 
-  if (state.status === 'frozen' || state.status === 'needs-followup') {
+  if (state.status === 'frozen' || state.status === 'needs-followup' || state.status === 'blocked') {
     runImplementationProvider(state, statePath, runDir, options);
   }
   if (state.status === 'implemented') {
@@ -1531,6 +1584,18 @@ function runSelfTest() {
   const normalizedReview = normalizeReview(wrappedReview);
   assertSelfTest('review passed alias normalizes to approved', normalizedReview.decision, 'approved');
   assertSelfTest('approved review maps to completed', statusFromReview(normalizedReview), 'completed');
+
+  const summaryApprovedReview = normalizeReview({ summary: 'APPROVED', findings: [] });
+  assertSelfTest('summary APPROVED normalizes to approved', summaryApprovedReview.decision, 'approved');
+
+  const nestedPlanSpec = normalizeSpec({
+    plan: {
+      requirements: { summary: 'Nested plan', acceptance: ['works'] },
+      design: { approach: 'Use normalized aliases' },
+      tasks: [{ title: 'Implement nested plan support' }],
+    },
+  });
+  assertSelfTest('plan.tasks alias normalizes', nestedPlanSpec.taskBreakdown.length, 1);
 
   const directBusinessJson = extractJsonValue(JSON.stringify({
     result: 'Implementation completed without structured wrapper.',
@@ -1586,6 +1651,7 @@ Options:
   --review-command <cmd>        Override review provider command.
   --skip-cli-schema             Do not pass CLI schema flags.
   --skip-git-repo-check         Pass Codex --skip-git-repo-check.
+  --codex-sandbox <mode>        Override Codex sandbox mode. Windows defaults to workspace-write.
   --dry-run                     Create run files and prompts without calling providers.
   --preflight-only              Create run files and only run local preflight checks.
 `);
