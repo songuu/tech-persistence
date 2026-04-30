@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const VERSION = 'v6';
+const VERSION = 'v7';
 const DEFAULT_RUNS_DIR = '.agent-runs';
 const MAX_BUFFER = 64 * 1024 * 1024;
 const REVIEW_CONTEXT_MAX_BYTES = 200 * 1024;

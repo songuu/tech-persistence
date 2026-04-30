@@ -1,7 +1,7 @@
 # Claude Code / Codex 自进化工程系统
 
 > 融合 gstack 角色分工 + Compound Engineering 复利循环 + ECC/Claude-Mem 自学习本能 + Skill 自迭代 + 风险自适应测试 + 上下文交接 + Obsidian 知识图谱。
-> 21 个用户命令 · 3 个项目命令 · 5 个按需技能 · 4 个 Hook · Memory v5 · 5 层知识存储。
+> 21 个用户命令 · 3 个项目命令 · 10 个按需技能 · 4 个 Hook · Memory v5 · Caveman 压缩层 · 5 层知识存储。
 > 支持 Claude Code 原生目录和 Codex 原生插件两种运行时；每一次工作都让下一次更容易。
 
 ---
@@ -16,7 +16,7 @@
 | 如何适应 | Skill 自迭代 | 使用信号 → 诊断 → 改进提案 → eval 验证 → 发布新版 |
 | 如何测试 | 风险自适应 | 评估变更风险等级(L0-L4)，自动匹配测试深度 |
 | 如何持续 | 上下文交接 | 长任务 checkpoint + 交接文件 + 自动恢复 |
-| 如何跨 Agent 协作 | Agent Loop v6 | 外部 orchestrator 调用 `claude -p` 产出冻结 spec，调用 `codex exec` 实现，再调用 `claude -p` 复审 |
+| 如何跨 Agent 协作 | Agent Loop v7 | v6 external orchestrator 继续负责冻结 spec / 实现 / 复审；v7 增加 caveman 输出与 memory 压缩能力 |
 | 如何可视化 | Obsidian | 所有产出 Obsidian 兼容，Graph View 展示知识关联 |
 
 ---
@@ -197,7 +197,7 @@ node scripts/preflight.js && bash install.sh --all
 
 Codex 使用原生插件包 `plugins/tech-persistence/`，用户级安装会复制到 `~/plugins/tech-persistence` 并更新 `~/.agents/plugins/marketplace.json`。Codex 知识库默认写入 `~/.codex/homunculus`，可用 `TECH_PERSISTENCE_HOME` 临时覆盖，也可用 `~/.tech-persistence/config.json` 配置持续共享目录。
 
-当前 Codex CLI 的 TUI slash commands 只注册内置命令；插件工作流通过 skills 调用。Claude Code 中仍使用 `/sprint`、`/prototype`，Codex 中使用 `$sprint <需求>`、`$prototype <需求>`、`$plan <需求>`，也可以用 `@` picker 选择同名 skill。
+当前 Codex CLI 的 TUI slash commands 只注册内置命令；插件工作流通过 skills 调用。Claude Code 中仍使用 `/sprint`、`/prototype`，Codex 中使用 `$sprint <需求>`、`$prototype <需求>`、`$plan <需求>`、`$caveman`，也可以用 `@` picker 选择同名 skill。
 
 Windows:
 ```powershell
@@ -242,9 +242,9 @@ node plugins/tech-persistence/scripts/build-codex-plugin.js
 node scripts/validate-codex-plugin.js
 ```
 
-### Agent Loop v6（跨 Agent 编排）
+### Agent Loop v7（跨 Agent 编排 + Caveman 压缩）
 
-当任务需要“需求分析/设计”和“实现/验收”分离时，使用 v6 外部 orchestrator，而不是让两个 Agent 在各自上下文里互相模拟：
+当任务需要“需求分析/设计”和“实现/验收”分离时，继续使用 v6 外部 orchestrator，而不是让两个 Agent 在各自上下文里互相模拟。v7 在此基础上增加 caveman 输出压缩和 memory 文件压缩 skill：
 
 ```powershell
 node scripts\agent-orchestrator.js run --requirement "原始需求"
@@ -260,6 +260,17 @@ $agent-loop <原始需求>     # Codex
 ```
 
 运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review 和 follow-up task。`.agent-runs/` 是运行态目录，不进入 Git。
+
+Caveman 入口：
+
+```text
+$caveman                    # 启用精简表达模式
+$caveman-commit             # 生成 Conventional Commit 消息
+$caveman-review             # 生成一行式 review comment
+$caveman-compress <file>    # 压缩自然语言 memory 文件
+```
+
+SessionStart hook 会注入 caveman 规则；如需关闭自动激活，设置 `CAVEMAN_DEFAULT_MODE=off`。
 
 ### Obsidian 集成（可选）
 ```powershell
@@ -283,7 +294,7 @@ $agent-loop <原始需求>     # Codex
 | `/review` | 审查团队 | 5 视角审查（含测试覆盖 vs 风险匹配） |
 | `/compound` | 知识管理 | 经验+本能+方案+skill 信号+Obsidian 输出 |
 | `/sprint` | 指挥官 | 全链路编排 + 自动 checkpoint + resume |
-| `/agent-loop` | 外部编排器 | v6 跨 Agent：冻结 spec → codex 实现 → spec review |
+| `/agent-loop` | 外部编排器 | v7 跨 Agent：冻结 spec → codex 实现 → spec review；caveman 压缩输出 |
 
 ### 需求收敛（1 个）
 | 命令 | 作用 |

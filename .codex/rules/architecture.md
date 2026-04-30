@@ -17,6 +17,14 @@
 
 ## 决策列表
 
+### ADR-007: Tech Persistence v7 将 Caveman 作为压缩能力层接入而非替换 Agent Loop (2026-04-30)
+- **状态**：已采纳
+- **上下文**：需要在当前架构上接入 `JuliusBrussee/caveman` 并形成 v7，同时保持功能和效果一致。现有 v6 external orchestrator 已承担跨 Agent 的 spec/freeze/implementation/review 状态机职责。
+- **决策**：v7 保留 v6 orchestrator 的 provider adapter、normalizer、artifact、validation 和 state machine，只新增 Caveman 压缩能力层：`caveman`、`caveman-commit`、`caveman-review`、`caveman-help`、`caveman-compress`、SessionStart 自动激活 hook，以及递归 skill 分发。
+- **原因**：Caveman 解决的是输出/输入 token 压缩，不是跨 Agent 编排。把它作为并列能力层接入，可以保持上游效果，又不破坏 agent-loop 当前正确的执行边界。
+- **备选**：用 Caveman/Cavekit 替换 agent-loop，或只把上游 prompt 手动塞进 README。前者会丢失项目现有 provider/state 契约，后者无法保证安装和运行时效果一致。
+- **影响**：skill 复制必须支持完整目录，不能只复制 `SKILL.md`；安装和验证脚本必须检查 `caveman-compress/scripts`；Caveman 中对 Claude API/CLI 的引用属于有意保留的上游依赖，不应被 Codex 文本替换器误改。
+
 ### ADR-006: Agent Loop Preflight 区分硬失败、显式跳过与 Provider 环境修复 (2026-04-29)
 - **状态**：已采纳
 - **上下文**：第二轮真实运行中，非 Git 仓库 preflight 直接失败、Claude Code Windows 缺少 Git Bash 环境变量、Spec provider 输出 `taskBreakdown.tasks` 嵌套结构、长耗时 provider run 触发等待超时。它们都不是业务实现问题，而是编排器运行时适配不足。

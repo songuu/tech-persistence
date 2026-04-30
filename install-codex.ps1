@@ -166,8 +166,11 @@ function Copy-CodexSkillDir($sourceDir, $targetDir) {
     Get-ChildItem $sourceDir -Directory | ForEach-Object {
         $skillSource = Join-Path $_.FullName "SKILL.md"
         if (Test-Path $skillSource) {
-            $skillTarget = Join-Path $targetDir "$($_.Name)\SKILL.md"
-            Copy-CodexText $skillSource $skillTarget -BackupExisting
+            $skillTargetDir = Join-Path $targetDir $_.Name
+            Ensure-Dir $skillTargetDir
+            Get-ChildItem $_.FullName -Force | ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination $skillTargetDir -Recurse -Force
+            }
             $count++
         }
     }

@@ -28,6 +28,11 @@ const expectedCommands = [
   'work.md',
 ];
 const expectedSkills = [
+  'caveman',
+  'caveman-commit',
+  'caveman-compress',
+  'caveman-help',
+  'caveman-review',
   'memory',
   'continuous-learning',
   'prototype-workflow',
@@ -120,9 +125,11 @@ function listMarkdownFiles(dir) {
 function validateNoClaudeOnlyText(dir, label) {
   const forbidden = /Claude Code|Claude|CLAUDE|~\/\.claude|\.claude\//;
   listMarkdownFiles(dir).forEach((file) => {
+    const relativePath = path.relative(pluginRoot, file).replace(/\\/g, '/');
+    if (relativePath.startsWith('skills/caveman')) return;
     const content = fs.readFileSync(file, 'utf-8');
     if (forbidden.test(content)) {
-      fail(`${label} contains Claude-only text: ${path.relative(pluginRoot, file)}`);
+      fail(`${label} contains Claude-only text: ${relativePath}`);
     }
   });
 }
@@ -193,7 +200,7 @@ if (isFile(hooksPath, 'hooks.json')) {
   }
 }
 
-['inject-context.js', 'observe.js', 'evaluate-session.js'].forEach((script) => {
+['caveman-activate.js', 'inject-context.js', 'observe.js', 'evaluate-session.js'].forEach((script) => {
   isFile(path.join(pluginRoot, 'hooks', script), `hook script ${script}`);
 });
 
@@ -240,7 +247,7 @@ if (fs.existsSync(runtimePathsPath)) {
   }
 }
 
-['inject-context.js', 'observe.js', 'evaluate-session.js'].forEach((script) => {
+['caveman-activate.js', 'inject-context.js', 'observe.js', 'evaluate-session.js'].forEach((script) => {
   const scriptPath = path.join(pluginRoot, 'hooks', script);
   if (!fs.existsSync(scriptPath)) return;
   const content = fs.readFileSync(scriptPath, 'utf-8');
@@ -251,6 +258,11 @@ if (fs.existsSync(runtimePathsPath)) {
     fail(`hook script ${script} hard-codes .claude homunculus`);
   }
 });
+
+isFile(
+  path.join(pluginRoot, 'skills', 'caveman-compress', 'scripts', '__main__.py'),
+  'caveman-compress script __main__.py'
+);
 
 if (process.exitCode) process.exit(process.exitCode);
 console.log('[OK] Codex plugin validation passed');

@@ -7,14 +7,15 @@ It includes:
 - Claude-compatible command workflow files for planning, work, review, testing, learning, instincts, sprinting, and handoff.
 - Codex skills for memory, continuous learning, prototype workflow, test strategy, context handoff, and one skill wrapper per command.
 - Runtime-aware hooks for context injection, observation capture, and session evaluation.
-- Agent Loop v6 assets: an external orchestrator, JSON schemas, and `$agent-loop` command wrapper for frozen-spec multi-agent work.
+- Agent Loop v7 assets: the v6 external orchestrator, JSON schemas, `$agent-loop` wrapper, and the Caveman compression skill family.
+- Caveman skills for terse output, commit messages, review comments, help, and memory-file compression.
 - Obsidian-compatible knowledge storage under `~/.codex/homunculus`, or a shared `homunculusHome` configured in `~/.tech-persistence/config.json`.
 
 ## Codex invocation
 
 Codex CLI currently exposes custom plugin workflows through skills, not through TUI slash commands. Use `$sprint <request>`, `$agent-loop <request>`, `$prototype <request>`, `$plan <request>`, or pick the skill with `@`.
 
-## Agent Loop v6
+## Agent Loop v7
 
 For multi-agent work, run the neutral orchestrator instead of relying on either agent to understand the other:
 
@@ -25,6 +26,8 @@ node scripts/agent-orchestrator.js resume --run <runId> --validation-command "np
 ```
 
 The orchestrator stores each run in `.agent-runs/<runId>/` with spec, design, tasks, diff, validation, handoff, review, and follow-up task files.
+
+Use `$caveman`, `$caveman-commit`, `$caveman-review`, `$caveman-help`, and `$caveman-compress <file>` for v7 compression features. SessionStart hooks inject caveman mode unless `CAVEMAN_DEFAULT_MODE=off`.
 
 The `commands/` directory remains packaged for Claude compatibility and future Codex command support, but current Codex CLI sessions will reject `/sprint` and `/tech-persistence:sprint` as unknown slash commands.
 

@@ -164,6 +164,15 @@ function validateCodexCommandSkills(dir, label) {
   });
 }
 
+function validateCavemanCompressSkill(dir, label) {
+  const scriptPath = path.join(dir, 'caveman-compress', 'scripts', '__main__.py');
+  if (!fs.existsSync(scriptPath)) {
+    fail(`${label} missing caveman-compress scripts`);
+    return;
+  }
+  ok(`${label} has caveman-compress scripts`);
+}
+
 function validateSharedHomunculusConfig() {
   console.log('\nShared homunculus config:');
   const configPath = process.env.TECH_PERSISTENCE_CONFIG
@@ -209,6 +218,8 @@ function validateCodexText(dir, label, options = {}) {
     ? /Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/
     : /CLAUDE\.md|Claude Code|~\/\.claude|\.claude\/|Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/;
   walkMarkdownFiles(dir).forEach((file) => {
+    const relativePath = path.relative(dir, file).replace(/\\/g, '/');
+    if (relativePath.startsWith('caveman')) return;
     const content = fs.readFileSync(file, 'utf8');
     if (forbidden.test(content)) {
       fail(`${label} contains unconverted or mojibake text: ${path.relative(projectRoot, file)}`);
@@ -231,6 +242,7 @@ function validateUserInstall() {
   validateInventory(path.join(userCodexRoot, 'commands'), expectedUserCommands(), '~/.codex/commands');
   validateInventory(path.join(userCodexRoot, 'rules'), expectedUserRules(), '~/.codex/rules');
   validateSkills(path.join(userCodexRoot, 'skills'), expectedCodexSkills(), '~/.codex/skills');
+  validateCavemanCompressSkill(path.join(userCodexRoot, 'skills'), '~/.codex/skills');
   validateCodexCommandSkills(path.join(userCodexRoot, 'skills'), '~/.codex/skills');
   validateCodexText(path.join(userCodexRoot, 'commands'), '~/.codex/commands');
   validateCodexText(path.join(userCodexRoot, 'rules'), '~/.codex/rules');
@@ -247,6 +259,7 @@ function validateProjectInstall() {
   );
   validateInventory(path.join(projectCodexRoot, 'rules'), expectedProjectRuleUnion(), '.codex/rules');
   validateSkills(path.join(projectCodexRoot, 'skills'), expectedCodexSkills(), '.codex/skills');
+  validateCavemanCompressSkill(path.join(projectCodexRoot, 'skills'), '.codex/skills');
   validateCodexCommandSkills(path.join(projectCodexRoot, 'skills'), '.codex/skills');
   isDirectory(path.join(projectCodexRoot, 'plans'), '.codex/plans');
   validateCodexText(path.join(projectCodexRoot, 'commands'), '.codex/commands');
@@ -284,7 +297,7 @@ function validateRepoMarketplace() {
 }
 
 function validateAgentLoopAssets() {
-  console.log('\nAgent loop v6 assets:');
+  console.log('\nAgent loop v7 assets:');
   isFile(path.join(repoRoot, 'scripts', 'agent-orchestrator.js'), 'scripts/agent-orchestrator.js');
   [
     'requirement-spec.schema.json',
