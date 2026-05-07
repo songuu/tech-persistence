@@ -17,6 +17,14 @@
 
 ## 决策列表
 
+### ADR-008: Memory v5 启动注入必须合并兼容运行时索引 (2026-05-07)
+- **状态**：已采纳
+- **上下文**：Claude Code 默认写 `~/.claude/homunculus`，Codex 默认写 `~/.codex/homunculus`。即使推荐共享 `homunculusHome`，未配置共享目录时两个运行时仍可能各自产生 durable Memory v5 topic notes；旧的 SessionStart first-hit fallback 会让一个 `MEMORY.md` 遮蔽另一个。
+- **决策**：项目身份识别、Memory v5 topic entry 解析、去重、排序和 index 格式化统一放入 `scripts/lib/memory-v5.js`；`inject-context.js` 对 `resolveCompatReadDirs()` 返回的所有兼容 memory 目录做合并注入，不再第一个命中就停止。
+- **原因**：一致性应该由当前 runtime helper 保证，而不是靠用户记住每次都配置共享目录；同一个 helper 还能避免 observe/inject/evaluate 三个 hook 的 project id 漂移。
+- **备选**：强制所有用户配置共享 vault；把 Codex memory 复制进 Claude memory；继续 first-hit fallback。前者破坏默认安装可用性，复制会制造写入副作用，first-hit fallback 已证明会造成上下文漂移。
+- **影响**：共享 vault 仍是文件级持续同步的推荐方案；默认分离目录下，启动上下文读取保持一致，但各 runtime 的 topic 文件写入位置仍保持独立。新增 memory helper 时必须同步 root hooks、Codex plugin hooks 和 parity smoke。
+
 ### ADR-004: Agent Loop v6 Provider 适配层必须内建在 Orchestrator 中 (2026-04-28)
 - **状态**：已采纳
 - **上下文**：Windows 上 `claude` / `codex` 常解析到 npm shim，且 Claude Code 与 Codex 对 stdin、structured output、JSON wrapper、schema 严格度的行为不同；把这些差异交给用户手动传参会导致 `/agent-loop` 与 `$agent-loop` 行为分叉。

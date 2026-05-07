@@ -56,3 +56,5 @@ node scripts/configure-shared-homunculus.js --path ~/Documents/TechPersistence
 ```
 
 Use that directory as your Obsidian vault. `--import-claude` is still available for one-time migration, but the shared config is the recommended ongoing sync mode.
+
+When no shared directory is configured, SessionStart still merges Memory v5 topic notes from both default stores (`~/.claude/homunculus` and `~/.codex/homunculus`) before injecting context. That keeps Claude Code and Codex startup memory consistent while preserving their separate default write locations.

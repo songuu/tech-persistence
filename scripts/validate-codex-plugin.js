@@ -247,6 +247,22 @@ if (fs.existsSync(runtimePathsPath)) {
   }
 }
 
+const memoryV5Path = path.join(pluginRoot, 'hooks', 'lib', 'memory-v5.js');
+if (fs.existsSync(memoryV5Path)) {
+  const content = fs.readFileSync(memoryV5Path, 'utf-8');
+  if (!content.includes('detectProjectIdentity') || !content.includes('loadUnifiedMemoryIndex')) {
+    fail('hook memory-v5.js must include shared project identity and unified memory index helpers');
+  }
+}
+
+const injectContextPath = path.join(pluginRoot, 'hooks', 'inject-context.js');
+if (fs.existsSync(injectContextPath)) {
+  const content = fs.readFileSync(injectContextPath, 'utf-8');
+  if (!content.includes('loadUnifiedMemoryIndex')) {
+    fail('hook inject-context.js must merge compatible Claude/Codex Memory v5 stores');
+  }
+}
+
 ['caveman-activate.js', 'inject-context.js', 'observe.js', 'evaluate-session.js'].forEach((script) => {
   const scriptPath = path.join(pluginRoot, 'hooks', script);
   if (!fs.existsSync(scriptPath)) return;

@@ -12,40 +12,17 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const {
   resolveCompatReadDirs,
   resolveProjectPlansDir,
 } = require('./lib/runtime-paths');
 const {
   DEFAULT_MEMORY_CONFIG,
-  boundText,
-  parseFrontmatter,
+  detectProjectIdentity,
+  loadUnifiedMemoryIndex,
 } = require('./lib/memory-v5');
 
 const CONTEXT_BUDGET_CHARS = 12000;
-
-function detectProject() {
-  const { execSync } = require('child_process');
-  const execOpts = { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] };
-  try {
-    const remote = execSync('git remote get-url origin', execOpts).trim();
-    if (remote) {
-      const hash = crypto.createHash('sha256').update(remote).digest('hex').slice(0, 12);
-      return { id: hash, name: path.basename(remote, '.git') };
-    }
-  } catch {}
-  try {
-    const root = execSync('git rev-parse --show-toplevel', execOpts).trim();
-    if (root) {
-      const hash = crypto.createHash('sha256').update(root).digest('hex').slice(0, 12);
-      return { id: hash, name: path.basename(root) };
-    }
-  } catch {}
-  const cwd = process.cwd();
-  const hash = crypto.createHash('sha256').update(cwd).digest('hex').slice(0, 12);
-  return { id: hash, name: path.basename(cwd) };
-}
 
 function loadInstincts(dir, minConfidence) {
   if (!fs.existsSync(dir)) return [];
@@ -91,26 +68,6 @@ function loadInstinctsWithFallback(baseDirs, relativeParts, minConfidence) {
     if (instincts.length > 0) return instincts;
   }
   return [];
-}
-
-function loadMemoryIndex(memoryDir) {
-  const memoryPath = path.join(memoryDir, 'MEMORY.md');
-  if (!fs.existsSync(memoryPath)) return '';
-  const content = fs.readFileSync(memoryPath, 'utf-8');
-  const { body } = parseFrontmatter(content);
-  return boundText(
-    body,
-    DEFAULT_MEMORY_CONFIG.indexMaxLines,
-    DEFAULT_MEMORY_CONFIG.indexMaxBytes
-  );
-}
-
-function loadMemoryIndexWithFallback(baseDirs, relativeParts) {
-  for (const baseDir of baseDirs) {
-    const content = loadMemoryIndex(path.join(baseDir, ...relativeParts));
-    if (content) return content;
-  }
-  return '';
 }
 
 function addSection(sections, title, body, maxChars) {
@@ -200,7 +157,7 @@ function detectPendingPrototype() {
 }
 
 function main() {
-  const project = detectProject();
+  const project = detectProjectIdentity();
   const compatReadDirs = resolveCompatReadDirs();
 
   const sections = [];
@@ -227,10 +184,10 @@ function main() {
     );
   }
 
-  // 0c. Codex memory v5: Codex auto memory style concise index
-  const memoryIndex = loadMemoryIndexWithFallback(
-    compatReadDirs,
-    ['projects', project.id, 'memory']
+  // 0c. Memory v5: merge compatible runtime stores instead of shadowing by first hit
+  const memoryIndex = loadUnifiedMemoryIndex(
+    compatReadDirs.map(baseDir => path.join(baseDir, 'projects', project.id, 'memory')),
+    DEFAULT_MEMORY_CONFIG
   );
   if (memoryIndex) {
     addSection(
