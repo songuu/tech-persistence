@@ -23,11 +23,20 @@ For multi-agent work, run the neutral orchestrator instead of relying on either 
 node scripts/agent-orchestrator.js run --requirement "request"
 node scripts/agent-orchestrator.js freeze --run <runId>
 node scripts/agent-orchestrator.js resume --run <runId> --validation-command "npm test"
+
+# Split the implementation/review gate when you want to inspect the diff before review
+node scripts/agent-orchestrator.js resume --run <runId> --no-review
+node scripts/agent-orchestrator.js resume --run <runId> --review-only
+
+# Local checks
+node scripts/agent-orchestrator.js doctor
+node scripts/agent-orchestrator.js self-test
+node scripts/agent-orchestrator.js status --run latest
 ```
 
-The orchestrator stores each run in `.agent-runs/<runId>/` with spec, design, tasks, diff, validation, handoff, review, and follow-up task files.
+The orchestrator stores each run in `.agent-runs/<runId>/` with `spec.json`/`spec.raw.json`, `requirement-spec.md`, `technical-design.md`, `task-breakdown.json`, `changed-files.json`, `diff.patch`, `review-context.md`, `validation.json`, `handoff.{md,json}`, `review.{json,raw.json}`, `preflight.json`, `follow-up-task.md`, plus per-provider `prompts/*.md` and timestamped `logs/*.<stamp>.{stdout,stderr}.log`. JSON parse failures are captured as `*.parse-error.json` instead of being silently dropped.
 
-Use `$caveman`, `$caveman-commit`, `$caveman-review`, `$caveman-help`, and `$caveman-compress <file>` for v7 compression features. SessionStart hooks inject caveman mode unless `CAVEMAN_DEFAULT_MODE=off`.
+Use `$caveman`, `$caveman-commit`, `$caveman-review`, `$caveman-help`, and `$caveman-compress <file>` for v7 compression features. The `$caveman` skill supports intensities `lite|full|ultra|wenyan|wenyan-lite|wenyan-ultra` (bare `wenyan` is alias for `wenyan-full`). SessionStart hooks inject caveman mode unless `CAVEMAN_DEFAULT_MODE=off`; the env var or `~/.config/caveman/config.json` `defaultMode` controls cross-session behavior. Hook failures are written to stderr but never abort the session.
 
 The `commands/` directory remains packaged for Claude compatibility and future Codex command support, but current Codex CLI sessions will reject `/sprint` and `/tech-persistence:sprint` as unknown slash commands.
 

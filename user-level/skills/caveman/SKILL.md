@@ -14,9 +14,11 @@ Keep user's language. If user writes Chinese, answer Chinese first; compress wor
 
 ## Persistence
 
-ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift. Still active if unsure. Off only: "stop caveman" / "normal mode".
+ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift. Still active if unsure. Off this session only: "stop caveman" / "normal mode".
 
-Default: **full**. Switch: `/caveman lite|full|ultra` or Codex `$caveman lite|full|ultra`.
+Default: **full**. Switch: `/caveman lite|full|ultra|wenyan|wenyan-lite|wenyan-ultra` or Codex `$caveman <mode>`. Bare `wenyan` is alias for `wenyan-full`.
+
+Cross-session config: set env `CAVEMAN_DEFAULT_MODE=<mode>` (use `off` to disable auto-activation on session start) or `~/.config/caveman/config.json`. See `/caveman-help` for full reference.
 
 ## Rules
 

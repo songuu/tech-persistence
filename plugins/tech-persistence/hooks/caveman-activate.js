@@ -67,6 +67,9 @@ Manual off: user says "stop caveman" or "normal mode".
 
 try {
   main();
-} catch {
+} catch (error) {
+  try {
+    process.stderr.write(`[caveman-activate] hook failed: ${error && error.message ? error.message : error}\n`);
+  } catch {}
   process.exit(0);
 }

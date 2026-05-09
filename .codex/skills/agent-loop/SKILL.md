@@ -49,7 +49,7 @@ $agent-loop self-test
 
 ## 一致性保障
 
-- Codex 的 `/agent-loop` 与 Codex 的 `$agent-loop` 必须调用同一个 orchestrator。
+- Claude Code 的 `/agent-loop` 与 Codex 的 `$agent-loop` 必须调用同一个 orchestrator。
 - orchestrator 会自动解析 Windows npm shim，例如 `claude.cmd` 和 `codex.cmd`，不要求用户手动传真实 `.exe`。
 - spec、implementation、review prompt 都通过 stdin 或 artifact 文件传输，避免 Windows argv 过长。
 - provider 原始输出必须先归一化为 canonical spec / handoff / review，再驱动状态机。
@@ -58,9 +58,25 @@ $agent-loop self-test
 
 ## 执行规则
 
+### Doctor
+
+当参数为 `doctor` 时运行：
+
+```bash
+node scripts/agent-orchestrator.js doctor
+```
+
+### Self-Test
+
+当参数为 `self-test` 时运行：
+
+```bash
+node scripts/agent-orchestrator.js self-test
+```
+
 ### 新需求
 
-当参数不是 `freeze`、`resume`、`status` 时：
+当参数不是 `freeze`、`resume`、`status`、`doctor`、`self-test` 时：
 
 1. 优先使用当前项目的 `scripts/agent-orchestrator.js`。
 2. 如果当前项目没有该脚本，查找 `~/plugins/tech-persistence/scripts/agent-orchestrator.js`。
@@ -103,6 +119,13 @@ node scripts/agent-orchestrator.js resume --run <runId>
 
 验证命令可以重复传入多次。validation 由 orchestrator 执行并写入 `validation.json`，provider handoff 里的 validation 只作为说明。
 
+可选拆分人工 gate 的开关：
+
+- `--no-review`（同义 `--implementation-only`）：只跑实现，停在 `implemented`，让用户手动检查后再次 `resume`。
+- `--review-only`：跳过实现 provider，只对当前 handoff 跑复审。常用于已有 `implemented` 状态、想重跑复审的场景。
+
+恢复时若状态为 `completed`/`failed`/`dry-run`，orchestrator 会打印状态并直接返回；不要重复触发 provider。
+
 ### Status
 
 当参数形如 `status` 或 `status <runId>` 时运行：
@@ -115,22 +138,28 @@ node scripts/agent-orchestrator.js status --run <runId|latest>
 
 每次运行写入 `.agent-runs/<runId>/`：
 
-- `state.json`: orchestrator 状态机。
+- `state.json`: orchestrator 状态机（`status`、`specFrozenAt`、`providerRuns[]`、`files`）。
 - `requirement.md`: 用户原始需求。
-- `spec.json`: 冻结前的结构化需求契约。
+- `commands.json`: 本次 run 解析出的 provider 启动命令快照。
+- `spec.json`: 冻结前的结构化需求契约（normalized）。
+- `spec.raw.json`: spec provider 原始未归一化输出，用于排查归一化差异。
 - `requirement-spec.md`: 给人 review 的 spec。
 - `technical-design.md`: 技术设计。
 - `task-breakdown.json`: 实现任务。
 - `changed-files.json`: 过滤 managed artifacts 后的变更清单。
-- `diff.patch`: codex 实现后的 diff。
+- `diff.patch`: codex 实现后的 diff（含 untracked synthetic diff）。
 - `review-context.md`: review provider 使用的截断安全上下文。
-- `validation.json`: 验证结果。
-- `handoff.md`: 实现交接。
-- `handoff.json`: canonical 实现交接。
-- `review.json`: 验收复审。
+- `validation.json`: 验证结果（`status`/`commands[]`，包含每条命令 stdoutFile/stderrFile）。
+- `handoff.md`: 实现交接（人类可读）。
+- `handoff.json`: canonical 实现交接（normalized）。
+- `handoff.parse-error.json`: handoff JSON 解析失败时记录原始 stdout/last-message 文件位置。
+- `review.json`: 验收复审（normalized）。
 - `review.raw.json`: provider 原始 review 输出。
+- `review.parse-error.json`: review JSON 解析失败时记录原始 stdout/stderr 文件位置。
 - `preflight.json`: 本机 provider/schema/workdir 预检。
-- `follow-up-task.md`: 复审不通过时生成。
+- `follow-up-task.md`: 复审不通过时生成（含 findings 行式格式：`[severity] file:Lline: message — fix: ...`）。
+- `prompts/{spec,implement,review}.md`: 发给各 provider 的最终 prompt 文本。
+- `logs/{spec,implementation,review,validation-N}.<timestamp>.{stdout,stderr}.log`: 带时间戳的 provider 与 validation 日志，多次 resume 不互相覆盖。
 
 ## 核心原则
 

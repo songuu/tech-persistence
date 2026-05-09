@@ -246,16 +246,30 @@ node scripts/validate-codex-plugin.js
 node scripts\agent-orchestrator.js run --requirement "原始需求"
 node scripts\agent-orchestrator.js freeze --run <runId>
 node scripts\agent-orchestrator.js resume --run <runId> --validation-command "npm test"
+
+# 可选：拆分 implementation 与 review 的人工 gate
+node scripts\agent-orchestrator.js resume --run <runId> --no-review     # 只跑实现，停在 implemented
+node scripts\agent-orchestrator.js resume --run <runId> --review-only   # 跳过实现，只跑复审
+
+# 环境与脚本预检
+node scripts\agent-orchestrator.js doctor
+node scripts\agent-orchestrator.js self-test
+node scripts\agent-orchestrator.js status --run latest
 ```
 
-命令入口：
+命令入口（参数与 CLI 对齐）：
 
 ```text
-/agent-loop <原始需求>     # Claude Code
-$agent-loop <原始需求>     # Codex
+/agent-loop <原始需求>             # Claude Code 入口
+/agent-loop freeze <runId>
+/agent-loop resume <runId>
+/agent-loop status [runId|latest]
+/agent-loop doctor
+/agent-loop self-test
+$agent-loop <原始需求>             # Codex 入口（同名 skill）
 ```
 
-运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review 和 follow-up task。`.agent-runs/` 是运行态目录，不进入 Git。
+运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review、follow-up task，以及带时间戳的 provider 日志和 prompt 文件。`.agent-runs/` 是运行态目录，不进入 Git。
 
 Caveman 入口：
 
