@@ -164,3 +164,4 @@
 ### 解决方案索引
 <!-- 由 /compound 写入，格式: [日期] [标签] 问题→方案 的一行摘要 + 详情链接 -->
 - [2026-04-27] [architecture/agent-loop/v6] 外部 orchestrator 统一调 `claude -p` 和 `codex exec`，用冻结 spec + handoff + review loop 取代命令内互相模拟 → `docs/solutions/2026-04-27-agent-orchestrator-v6.md`
+- [2026-05-09] [audit/agent-loop/caveman/auto-mode] 修复 9 个 agent-loop / caveman 漏洞（CLI 分派缺、state 向后兼容、静默吞错、多副本漂移），新增全局 `--auto` 协议（单 rule + 三档决策矩阵 + orchestrator 双层 freeze），propagation 脚本机械同步 4 副本 × N 命令 → `docs/solutions/2026-05-09-agent-loop-caveman-audit.md`
