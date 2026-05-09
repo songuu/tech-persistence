@@ -282,6 +282,21 @@ $caveman-compress <file>    # 压缩自然语言 memory 文件
 
 SessionStart hook 会注入 caveman 规则；如需关闭自动激活，设置 `CAVEMAN_DEFAULT_MODE=off`。
 
+### 自动审查模式（--auto）
+
+所有工作流命令支持 `--auto` 可选参数。模型基于风险等级 / destructive 标志 / 用户行为 / 置信度，自主判断每个本应人工 gate 的环节是否仍需用户确认：
+
+```text
+/sprint --auto <需求>          # 全流程冲刺，phase 间 gate 智能跳过
+/work --auto                   # 按计划执行，L4/destructive 仍强制问
+/agent-loop --auto <需求>      # spec 通过自校验则自动 freeze
+/review --auto                 # obvious P0 自动修，语义级 P0 仍问
+```
+
+口语触发同样有效："自动跑完"、"yolo"、"auto mode"。强制人工边界（无视 `--auto`）：destructive 不可逆、L4 风险、安全/认证、scope creep、测试失败。完整决策矩阵见 `~/.claude/rules/auto-mode.md`（Codex 下为 `~/.codex/rules/auto-mode.md`）。
+
+`--auto` 与 `--caveman` 正交，可组合：`/sprint --auto --caveman <需求>`。
+
 ### Obsidian 集成（可选）
 ```powershell
 .\install.ps1 -Obsidian     # 初始化 Obsidian vault

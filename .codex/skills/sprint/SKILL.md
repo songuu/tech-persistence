@@ -24,17 +24,28 @@ When the command instructions below mention `/sprint`, interpret that as this `$
 ```
 /sprint <需求描述>       ← 新 sprint
 /sprint --caveman <需求> ← 新 sprint，启用 token 压缩模式
+/sprint --auto <需求>    ← 新 sprint，启用自动审查模式
 /sprint resume           ← 从最近的 checkpoint 恢复
 /sprint resume --caveman ← 从 compact handoff 优先恢复
+/sprint resume --auto    ← 恢复并启用自动审查
 ```
+
+`--caveman` 与 `--auto` 可组合：`/sprint --caveman --auto <需求>`。
 
 Codex 中同义：
 
 ```text
 $sprint <需求描述>
 $sprint --caveman <需求描述>
+$sprint --auto <需求描述>
 $sprint resume --caveman
+$sprint resume --auto
 ```
+
+## 可选参数
+
+- `--caveman`：输出 token 压缩，详见下方 Caveman Token Budget Mode。
+- `--auto`：自动审查模式。Phase 1-4 间的 'go' gate 由模型按风险等级 / 用户行为 / 置信度自主判断；强制人工的边界（destructive、L4、scope creep、P0 不平凡修复）仍保留。详见 `~/.codex/rules/auto-mode.md`。
 
 ## 项目文档贯穿全流程
 
@@ -125,6 +136,8 @@ Phase 1/5: Think
 → 'go' 进入 Plan | 修改意见调整 | 'skip' 跳过
 ```
 
+Auto mode：scope 明确、无开放问题且与原始需求无 scope creep 时直接进入 Plan，并打印 `✓ auto: phase 1 → 2`；否则保留人工 gate。
+
 Caveman mode 输出：
 
 ```text
@@ -143,6 +156,8 @@ Phase 2/5: Plan
 [如果 Task > 5 个，预告：将在 Task 5 后自动 checkpoint]
 → 'go' 进入 Work | 修改意见调整
 ```
+
+Auto mode：任务数 ≤ 8 且无 L3/L4 task、无明显 scope 不一致时直接进入 Work；否则保留人工 gate。打印 `✓ auto: phase 2 → 3` 或 `⚠ manual gate kept: phase 2 — <原因>`。
 
 Caveman mode 输出只展示任务表和验证策略；完整方案写入 sprint 文档，不在对话中重复。
 
@@ -206,6 +221,8 @@ Phase 4/5: Review
 → P0 自动修复 → P1 确认 → 'go' 进入 Compound
 ```
 
+Auto mode：obvious P0（typo / 缺 import / null check）自动修复并继续；语义级 P0、destructive 改动、L4 任务相关 P0 仍保留人工 gate。P1 默认跳过确认进入 Compound；P0 强制项必须问。
+
 Caveman mode review 展示：
 
 ```text
@@ -228,6 +245,7 @@ Phase 5/5: Compound
   文档: docs/plans/2026-06-20-xxx.md
   Checkpoints: N 次
   知识: M 条经验, K 个本能, J 个 skill 信号
+  Auto mode: A gates 自动通过 / M gates 强制人工（仅当启用 --auto 时显示）
 ```
 
 Caveman mode 收尾：

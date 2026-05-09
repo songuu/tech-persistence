@@ -22,6 +22,11 @@ When the command instructions below mention `/review`, interpret that as this `$
 ## 输入
 - 无参数：审查 `git diff` 全部变更
 - `$ARGUMENTS` 指定文件或目录：只审查指定范围
+- `--auto`：自动审查 P0 修复（见下方"可选参数"）
+
+## 可选参数
+
+- `--auto`：自动审查模式。obvious P0（typo / 缺 import / null check / 类型不匹配 / 简单重命名）直接修复并继续；语义级 P0、destructive 改动相关 P0、auth/数据迁移相关 P0 仍保留人工 gate；P1 默认跳过确认。详见 `~/.codex/rules/auto-mode.md`。
 
 ## 5 个审查视角
 

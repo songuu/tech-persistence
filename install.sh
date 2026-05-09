@@ -147,6 +147,7 @@ install_user() {
 
   # Rules
   safe_copy_no_overwrite "${SCRIPT_DIR}/user-level/rules/general-standards.md" "${CLAUDE_HOME}/rules/general-standards.md"
+  safe_copy_no_overwrite "${SCRIPT_DIR}/user-level/rules/auto-mode.md" "${CLAUDE_HOME}/rules/auto-mode.md"
 
   # Skills
   for skill in memory continuous-learning prototype-workflow test-strategy context-handoff; do

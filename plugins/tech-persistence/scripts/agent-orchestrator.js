@@ -235,8 +235,6 @@ function loadRun(options, positionals) {
   const runDir = resolveRunDir(options, positionals);
   const statePath = path.join(runDir, 'state.json');
   const state = readJson(statePath);
-  if (!Array.isArray(state.providerRuns)) state.providerRuns = [];
-  if (!state.files || typeof state.files !== 'object') state.files = {};
   return { runDir, statePath, state };
 }
 
@@ -1304,21 +1302,8 @@ function buildUntrackedDiff(workdir, filePath) {
   const buffer = fs.readFileSync(absolutePath);
   if (buffer.includes(0)) return `Diff omitted for binary new file: ${filePath}\n`;
   const text = buffer.toString('utf8');
-  if (text.length === 0) {
-    return [
-      `diff --git a/${filePath} b/${filePath}`,
-      'new file mode 100644',
-      '',
-    ].join('\n');
-  }
-  const rawLines = text.split(/\r?\n/);
-  const endsWithNewline = text.endsWith('\n');
-  const lines = endsWithNewline && rawLines[rawLines.length - 1] === ''
-    ? rawLines.slice(0, -1)
-    : rawLines;
-  const bodyParts = lines.map((line) => `+${line}`);
-  if (!endsWithNewline) bodyParts.push('\\ No newline at end of file');
-  const body = bodyParts.join('\n');
+  const lines = text.split(/\r?\n/);
+  const body = lines.map((line) => `+${line}`).join('\n');
   return [
     `diff --git a/${filePath} b/${filePath}`,
     'new file mode 100644',
@@ -1374,11 +1359,10 @@ function writeValidation(workdir, runDir, options) {
     return;
   }
 
-  const validationStamp = logStamp();
   const results = commands.map((command, index) => {
     const label = `validation-${index + 1}`;
-    const stdoutFile = stampedLogPath(runDir, label, 'stdout.log', validationStamp);
-    const stderrFile = stampedLogPath(runDir, label, 'stderr.log', validationStamp);
+    const stdoutFile = path.join(runDir, 'logs', `${label}.stdout.log`);
+    const stderrFile = path.join(runDir, 'logs', `${label}.stderr.log`);
     const result = runShell(label, command, { cwd: workdir, stdoutFile, stderrFile });
     return {
       command: result.command,
@@ -1449,7 +1433,6 @@ function runReviewProvider(state, statePath, runDir, options) {
 
 function writeFollowUpTask(runDir, review) {
   const tasks = Array.isArray(review.followUpTasks) ? review.followUpTasks : [];
-  const findings = Array.isArray(review.findings) ? review.findings : [];
   writeText(path.join(runDir, 'follow-up-task.md'), [
     '# Follow-up Task',
     '',
@@ -1459,21 +1442,9 @@ function writeFollowUpTask(runDir, review) {
     arrayLines(tasks),
     '',
     '## Findings',
-    findings.length === 0 ? '' : findings.map((finding) => `- ${formatFindingLine(finding)}`).join('\n'),
+    arrayLines(review.findings),
     '',
   ].join('\n'));
-}
-
-function formatFindingLine(finding) {
-  if (!finding || typeof finding !== 'object') return String(finding || '');
-  const severity = finding.severity || 'P1';
-  const location = [finding.file, finding.line != null ? `L${finding.line}` : '']
-    .filter(Boolean)
-    .join(':');
-  const head = location ? `[${severity}] ${location}` : `[${severity}]`;
-  const message = String(finding.message || '').trim();
-  const fix = finding.requiredFix ? ` — fix: ${String(finding.requiredFix).trim()}` : '';
-  return `${head}: ${message}${fix}`;
 }
 
 function newState(workdir, runDir, runId, requirement) {
@@ -1681,15 +1652,6 @@ function runResume(options, positionals) {
     console.log(`[INFO] ${state.runId} is a dry-run. No provider calls to resume.`);
     return;
   }
-  if (state.status === 'completed') {
-    console.log(`[INFO] ${state.runId} is already completed. Nothing to resume.`);
-    printRunSummary(state);
-    return;
-  }
-  if (state.status === 'failed') {
-    console.log(`[INFO] ${state.runId} is in failed state. Inspect logs in ${runDir} or start a new run.`);
-    return;
-  }
   if (state.status === 'spec-ready' && !state.specFrozenAt) {
     console.log(`[INFO] ${state.runId} is waiting for human freeze.`);
     console.log(`Freeze: node scripts/agent-orchestrator.js freeze --run ${state.runId}`);
@@ -1701,18 +1663,11 @@ function runResume(options, positionals) {
   saveState(statePath, state);
   assertPreflight(preflight);
 
-  const skipImplementation = boolOption(options, 'review-only');
-  const skipReview = boolOption(options, 'no-review') || boolOption(options, 'implementation-only');
-
-  if (!skipImplementation
-      && (state.status === 'frozen' || state.status === 'needs-followup' || state.status === 'blocked')) {
+  if (state.status === 'frozen' || state.status === 'needs-followup' || state.status === 'blocked') {
     runImplementationProvider(state, statePath, runDir, options);
   }
-  if (!skipReview && state.status === 'implemented') {
+  if (state.status === 'implemented') {
     runReviewProvider(state, statePath, runDir, options);
-  }
-  if (skipReview && state.status === 'implemented') {
-    console.log(`[INFO] Implementation complete. Skipping review (--no-review). Run resume again to trigger review.`);
   }
   printRunSummary(state);
 }
@@ -1814,8 +1769,6 @@ Options:
   --run-id <id>                 Stable run id.
   --auto-freeze                 Explicitly skip human freeze and continue.
   --allow-dirty                 Allow implementation in a dirty git worktree.
-  --no-review                   Resume only runs implementation; stops before review provider.
-  --review-only                 Resume skips implementation and only runs review on existing handoff.
   --validation-command <cmd>    Shell command to run after implementation. Repeatable.
   --claude-command <cmd>        Override spec/review provider command.
   --codex-command <cmd>         Override implementation provider command.

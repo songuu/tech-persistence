@@ -25,7 +25,12 @@ When the command instructions below mention `/test`, interpret that as this `$te
 /test L3              ← 强制使用指定等级（覆盖自动评估）
 /test --dry           ← 只输出评估结果和测试计划，不写测试
 /test --coverage      ← 执行测试并输出覆盖率报告
+/test --auto          ← 自动审查模式（与上面任何模式可组合）
 ```
+
+## 可选参数
+
+- `--auto`：自动审查模式。L0-L2 自动写测并执行；L3 在置觉度高且 diff 不含密钥/迁移/认证时自动；L4 或 diff 触及支付/认证/数据迁移时强制问。详见 `~/.codex/rules/auto-mode.md`。
 
 ## 执行流程
 
