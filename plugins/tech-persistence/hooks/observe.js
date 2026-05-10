@@ -19,33 +19,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const { resolveBaseDir, resolveSessionId } = require('./lib/runtime-paths');
-const { MEMORY_VERSION, normalizeHookPayload } = require('./lib/memory-v5');
-
-// ─── 项目检测 ───
-function detectProject() {
-  const { execSync } = require('child_process');
-  const execOpts = { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] };
-  try {
-    const remote = execSync('git remote get-url origin', execOpts).trim();
-    if (remote) {
-      const hash = crypto.createHash('sha256').update(remote).digest('hex').slice(0, 12);
-      const name = path.basename(remote, '.git');
-      return { id: hash, name, source: 'git-remote' };
-    }
-  } catch {}
-  try {
-    const root = execSync('git rev-parse --show-toplevel', execOpts).trim();
-    if (root) {
-      const hash = crypto.createHash('sha256').update(root).digest('hex').slice(0, 12);
-      return { id: hash, name: path.basename(root), source: 'git-root' };
-    }
-  } catch {}
-  const cwd = process.cwd();
-  const hash = crypto.createHash('sha256').update(cwd).digest('hex').slice(0, 12);
-  return { id: hash, name: path.basename(cwd), source: 'cwd' };
-}
+const { MEMORY_VERSION, detectProjectIdentity, normalizeHookPayload } = require('./lib/memory-v5');
 
 // ─── 存储路径 ───
 function getObservationPath(project) {
@@ -59,7 +34,7 @@ function getObservationPath(project) {
 // ─── 主逻辑 ───
 function main() {
   const phase = process.argv[2] || 'post'; // pre | post
-  const project = detectProject();
+  const project = detectProjectIdentity();
   const obsPath = getObservationPath(project);
 
   // 从 stdin 读取 hook payload (Codex 通过 stdin 传入 JSON)

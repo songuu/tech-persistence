@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const VERSION = 'v6';
+const VERSION = 'v7';
 const DEFAULT_RUNS_DIR = '.agent-runs';
 const MAX_BUFFER = 64 * 1024 * 1024;
 const REVIEW_CONTEXT_MAX_BYTES = 200 * 1024;
@@ -52,6 +52,34 @@ function nowIso() {
 
 function dateStamp() {
   return new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+}
+
+function logStamp() {
+  return new Date().toISOString().replace(/[-:TZ.]/g, '');
+}
+
+function stampedLogPath(runDir, label, suffix, stamp) {
+  return path.join(runDir, 'logs', `${label}.${stamp}.${suffix}`);
+}
+
+function coalesce(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== '');
+}
+
+function providerTimeoutMs(options) {
+  const explicitMs = optionValue(options, 'provider-timeout-ms') || optionValue(options, 'timeout-ms');
+  if (explicitMs !== undefined && explicitMs !== true) {
+    const parsed = Number(explicitMs);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+
+  const explicitMinutes = optionValue(options, 'provider-timeout-minutes') || optionValue(options, 'timeout-minutes');
+  if (explicitMinutes !== undefined && explicitMinutes !== true) {
+    const parsed = Number(explicitMinutes);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed * 60 * 1000;
+  }
+
+  return undefined;
 }
 
 function ensureDir(dir) {
@@ -401,19 +429,57 @@ function resolveNodeExecutable(shimDir) {
   return candidates.find((candidate) => path.extname(candidate).toLowerCase() === '.exe') || 'node';
 }
 
+function resolveClaudeGitBash() {
+  const fromEnv = process.env.CLAUDE_CODE_GIT_BASH_PATH;
+  if (fromEnv && fs.existsSync(fromEnv)) {
+    return { path: fromEnv, source: 'env' };
+  }
+
+  if (!isWindows()) return { path: null, source: 'not-windows' };
+
+  const candidates = [
+    'C:\\Apps\\Git\\usr\\bin\\bash.exe',
+    'C:\\Apps\\Git\\bin\\bash.exe',
+    'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return { path: candidate, source: 'known-path' };
+  }
+
+  const pathCandidate = findWindowsCommandCandidates('bash')
+    .find((candidate) => /\\Git\\(usr\\bin|bin)\\bash\.exe$/i.test(candidate));
+  if (pathCandidate) return { path: pathCandidate, source: 'path' };
+
+  return { path: null, source: fromEnv ? 'env-missing' : 'missing' };
+}
+
+function claudeProviderEnv() {
+  const resolved = resolveClaudeGitBash();
+  if (resolved.path && !process.env.CLAUDE_CODE_GIT_BASH_PATH) {
+    return { CLAUDE_CODE_GIT_BASH_PATH: resolved.path };
+  }
+  return {};
+}
+
 function runProcess(label, launchOrCommand, args, settings) {
   const launch = typeof launchOrCommand === 'string'
     ? resolveProviderLaunch(launchOrCommand)
     : launchOrCommand;
   const finalArgs = [...(launch.argsPrefix || []), ...args];
+  const timeoutMs = settings.timeoutMs || 30 * 60 * 1000;
   const startedAt = nowIso();
   const result = spawnSync(launch.command, finalArgs, {
     cwd: settings.cwd,
     encoding: 'utf8',
+    env: settings.env ? { ...process.env, ...settings.env } : process.env,
     input: settings.stdin,
     maxBuffer: MAX_BUFFER,
     shell: launch.shell === true,
-    timeout: settings.timeoutMs || 30 * 60 * 1000,
+    timeout: timeoutMs,
   });
   const finishedAt = nowIso();
 
@@ -437,8 +503,13 @@ function runProcess(label, launchOrCommand, args, settings) {
     stdoutFile: settings.stdoutFile || null,
     stderrFile: settings.stderrFile || null,
     stdinBytes: settings.stdin ? Buffer.byteLength(settings.stdin, 'utf8') : 0,
+    timeoutMs,
+    envOverrides: settings.env || null,
   };
 
+  if (result.error && result.error.code === 'ETIMEDOUT') {
+    throw new Error(`${label} timed out after ${timeoutMs}ms; see ${settings.stdoutFile || 'stdout'} and ${settings.stderrFile || 'stderr'}`);
+  }
   if (result.error) {
     throw new Error(`${label} failed to start: ${result.error.message}`);
   }
@@ -607,31 +678,66 @@ function stringArray(value) {
   }).filter(Boolean);
 }
 
+function normalizeTaskContainer(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object') {
+    return coalesce(value.tasks, value.taskBreakdown, value.items, value.steps, value.children, []);
+  }
+  return value;
+}
+
 function normalizeSpec(rawSpec) {
   const raw = rawSpec && typeof rawSpec === 'object' ? rawSpec : {};
-  const rawRequirement = raw.requirementSpec || raw.requirements || raw.requirement || {};
-  const rawDesign = raw.technicalDesign || raw.design || raw.technical || {};
-  const rawTasks = raw.taskBreakdown || raw.tasks || raw.implementationTasks || [];
+  const rawPlan = raw.plan && typeof raw.plan === 'object' ? raw.plan : {};
+  const rawRequirement = coalesce(
+    raw.requirementSpec,
+    raw.requirements,
+    raw.requirement,
+    rawPlan.requirementSpec,
+    rawPlan.requirements,
+    rawPlan.requirement,
+    {}
+  );
+  const rawDesign = coalesce(
+    raw.technicalDesign,
+    raw.design,
+    raw.technical,
+    rawPlan.technicalDesign,
+    rawPlan.design,
+    rawPlan.technical,
+    {}
+  );
+  const rawTasks = normalizeTaskContainer(coalesce(
+    raw.taskBreakdown,
+    raw.tasks,
+    raw.implementationTasks,
+    rawPlan.taskBreakdown,
+    rawPlan.tasks,
+    rawPlan.implementationTasks,
+    []
+  ));
 
   const requirementSpec = {
-    summary: String(rawRequirement.summary || raw.summary || ''),
-    userValue: String(rawRequirement.userValue || rawRequirement.value || raw.userValue || ''),
-    scope: stringArray(rawRequirement.scope || raw.scope),
+    summary: String(rawRequirement.summary || raw.summary || rawPlan.summary || ''),
+    userValue: String(rawRequirement.userValue || rawRequirement.value || raw.userValue || rawPlan.userValue || ''),
+    scope: stringArray(rawRequirement.scope || raw.scope || rawPlan.scope),
     acceptanceCriteria: stringArray(
       rawRequirement.acceptanceCriteria
       || rawRequirement.acceptance
       || raw.acceptanceCriteria
       || raw.acceptance
+      || rawPlan.acceptanceCriteria
+      || rawPlan.acceptance
     ),
   };
 
   const technicalDesign = {
-    approach: String(rawDesign.approach || rawDesign.summary || raw.approach || ''),
-    files: stringArray(rawDesign.files || rawDesign.changedFiles || raw.files),
-    interfaces: stringArray(rawDesign.interfaces || raw.interfaces),
-    dataAndState: String(rawDesign.dataAndState || rawDesign.state || raw.dataAndState || ''),
-    risks: stringArray(rawDesign.risks || raw.risks),
-    testStrategy: rawDesign.testStrategy || raw.testStrategy || '',
+    approach: String(rawDesign.approach || rawDesign.summary || raw.approach || rawPlan.approach || ''),
+    files: stringArray(rawDesign.files || rawDesign.changedFiles || raw.files || rawPlan.files),
+    interfaces: stringArray(rawDesign.interfaces || raw.interfaces || rawPlan.interfaces),
+    dataAndState: String(rawDesign.dataAndState || rawDesign.state || raw.dataAndState || rawPlan.dataAndState || ''),
+    risks: stringArray(rawDesign.risks || raw.risks || rawPlan.risks),
+    testStrategy: rawDesign.testStrategy || raw.testStrategy || rawPlan.testStrategy || '',
   };
 
   const taskBreakdown = toArray(rawTasks).map((task, index) => {
@@ -651,10 +757,10 @@ function normalizeSpec(rawSpec) {
     requirementSpec,
     technicalDesign,
     taskBreakdown,
-    assumptions: stringArray(raw.assumptions),
-    outOfScope: stringArray(raw.outOfScope || raw.nonGoals),
-    questions: stringArray(raw.questions || raw.openQuestions),
-    humanReviewChecklist: stringArray(raw.humanReviewChecklist || raw.reviewChecklist),
+    assumptions: stringArray(raw.assumptions || rawPlan.assumptions),
+    outOfScope: stringArray(raw.outOfScope || raw.nonGoals || rawPlan.outOfScope || rawPlan.nonGoals),
+    questions: stringArray(raw.questions || raw.openQuestions || rawPlan.questions || rawPlan.openQuestions),
+    humanReviewChecklist: stringArray(raw.humanReviewChecklist || raw.reviewChecklist || rawPlan.humanReviewChecklist || rawPlan.reviewChecklist),
   };
 }
 
@@ -683,19 +789,24 @@ function normalizeReview(rawReview) {
   const allFindings = [...findings, ...warningFindings];
   const status = String(raw.status || raw.decision || '').toLowerCase();
   const explicitDecision = String(raw.decision || '').toLowerCase();
+  const summary = String(raw.summary || raw.reviewSummary || raw.message || raw.result || '');
+  const summarySignal = summary.trim().toLowerCase();
+  const hasApprovedSummary = /^(approved|pass|passed)(\b|[\s:._-])/.test(summarySignal);
   const hasBlockingFinding = allFindings.some((finding) => finding.severity === 'P0');
   const issueCount = findings.length;
 
   let decision = 'changes_requested';
-  if (raw.compliant === true || explicitDecision === 'approved') {
-    decision = 'approved';
-  } else if (explicitDecision === 'blocked' || status === 'blocked' || hasBlockingFinding) {
+  if (explicitDecision === 'blocked' || status === 'blocked' || hasBlockingFinding) {
     decision = 'blocked';
+  } else if (raw.compliant === true || explicitDecision === 'approved') {
+    decision = 'approved';
   } else if (
     ['passed', 'pass', 'approved'].includes(status)
     && raw.canMerge !== false
     && issueCount === 0
   ) {
+    decision = 'approved';
+  } else if (hasApprovedSummary && raw.canMerge !== false && issueCount === 0) {
     decision = 'approved';
   } else if (raw.canMerge === true && issueCount === 0) {
     decision = 'approved';
@@ -706,7 +817,7 @@ function normalizeReview(rawReview) {
   return {
     decision,
     compliant: decision === 'approved',
-    summary: String(raw.summary || raw.reviewSummary || raw.message || ''),
+    summary,
     findings: allFindings,
     followUpTasks: stringArray(raw.followUpTasks || raw.followUp || raw.requiredChanges),
   };
@@ -768,6 +879,12 @@ function buildSpecPrompt(requirement, options) {
     '- The implementation provider must not reinterpret requirements.',
     '- Human review freezes the spec before implementation.',
     '- The review provider checks implementation against the frozen spec.',
+    '',
+    'Output contract:',
+    '- Return one top-level JSON object only; do not wrap it in Markdown.',
+    '- taskBreakdown must be a top-level Task[] array, not { "tasks": [...] }.',
+    '- Each task must include id, title, description, dependencies, risk, doneCriteria, and suggestedValidation.',
+    '- Use this exact top-level shape: { "requirementSpec": {...}, "technicalDesign": {...}, "taskBreakdown": [...], "assumptions": [...], "outOfScope": [...], "questions": [...], "humanReviewChecklist": [...] }.',
     '',
     `Repository root: ${options.workdir}`,
     '',
@@ -920,10 +1037,18 @@ function providerLaunch(options, key) {
   return resolveProviderLaunch(providerCommandSpec(options, key));
 }
 
+function codexSandboxMode(options) {
+  const explicit = optionValue(options, 'codex-sandbox');
+  if (explicit && explicit !== true && explicit !== 'default') return String(explicit);
+  if (isWindows() && explicit !== 'default') return 'workspace-write';
+  return null;
+}
+
 function runSpecProvider(state, statePath, runDir, options) {
   const prompt = readText(path.join(runDir, 'prompts', 'spec.md'));
-  const stdoutFile = path.join(runDir, 'logs', 'spec.stdout.log');
-  const stderrFile = path.join(runDir, 'logs', 'spec.stderr.log');
+  const providerLogStamp = logStamp();
+  const stdoutFile = stampedLogPath(runDir, 'spec', 'stdout.log', providerLogStamp);
+  const stderrFile = stampedLogPath(runDir, 'spec', 'stderr.log', providerLogStamp);
   const args = ['-p', '--input-format', 'text', '--output-format', 'json'];
   if (!boolOption(options, 'skip-cli-schema')) {
     args.push('--json-schema', schemaJson('requirement-spec.schema.json'));
@@ -933,7 +1058,14 @@ function runSpecProvider(state, statePath, runDir, options) {
     'spec provider',
     providerLaunch(options, 'spec'),
     args,
-    { cwd: state.workdir, stdoutFile, stderrFile, stdin: prompt }
+    {
+      cwd: state.workdir,
+      stdoutFile,
+      stderrFile,
+      stdin: prompt,
+      env: claudeProviderEnv(),
+      timeoutMs: providerTimeoutMs(options),
+    }
   );
   state.providerRuns.push(record);
 
@@ -1022,8 +1154,9 @@ function isManagedArtifact(filePath, workdir, runDir) {
   return DEFAULT_MANAGED_PREFIXES.some((prefix) => normalized === prefix.slice(0, -1) || normalized.startsWith(prefix));
 }
 
-function ensureCleanWorktree(workdir, options, runDir) {
+function ensureCleanWorktree(workdir, options, runDir, state) {
   if (boolOption(options, 'allow-dirty')) return;
+  if (state && ['needs-followup', 'blocked'].includes(state.status)) return;
   const changedFiles = listChangedFiles(workdir, runDir);
   if (changedFiles.length > 0) {
     const preview = changedFiles.slice(0, 12).map((entry) => `${entry.status} ${entry.path}`).join('\n');
@@ -1035,16 +1168,18 @@ function ensureCleanWorktree(workdir, options, runDir) {
 
 function runImplementationProvider(state, statePath, runDir, options) {
   if (!state.specFrozenAt) throw new Error('Spec is not frozen. Run freeze first.');
-  ensureCleanWorktree(state.workdir, options, runDir);
+  ensureCleanWorktree(state.workdir, options, runDir, state);
 
   const prompt = buildImplementationPrompt(state, runDir);
   writeText(path.join(runDir, 'prompts', 'implement.md'), prompt);
-  const stdoutFile = path.join(runDir, 'logs', 'implementation.stdout.log');
-  const stderrFile = path.join(runDir, 'logs', 'implementation.stderr.log');
-  const lastMessageFile = path.join(runDir, 'logs', 'implementation.last-message.json');
+  const providerLogStamp = logStamp();
+  const stdoutFile = stampedLogPath(runDir, 'implementation', 'stdout.log', providerLogStamp);
+  const stderrFile = stampedLogPath(runDir, 'implementation', 'stderr.log', providerLogStamp);
+  const lastMessageFile = stampedLogPath(runDir, 'implementation', 'last-message.json', providerLogStamp);
   const args = ['exec', '-C', state.workdir, '--json'];
   args.push('--output-last-message', lastMessageFile);
-  if (optionValue(options, 'codex-sandbox')) args.push('--sandbox', optionValue(options, 'codex-sandbox'));
+  const sandboxMode = codexSandboxMode(options);
+  if (sandboxMode) args.push('--sandbox', sandboxMode);
   if (!isGitRepository(state.workdir) || boolOption(options, 'skip-git-repo-check')) {
     args.push('--skip-git-repo-check');
   }
@@ -1057,7 +1192,13 @@ function runImplementationProvider(state, statePath, runDir, options) {
     'implementation provider',
     providerLaunch(options, 'implementation'),
     args,
-    { cwd: state.workdir, stdoutFile, stderrFile, stdin: prompt }
+    {
+      cwd: state.workdir,
+      stdoutFile,
+      stderrFile,
+      stdin: prompt,
+      timeoutMs: providerTimeoutMs(options),
+    }
   );
   state.providerRuns.push(record);
 
@@ -1243,8 +1384,9 @@ function writeValidation(workdir, runDir, options) {
 function runReviewProvider(state, statePath, runDir, options) {
   const prompt = buildReviewPrompt(state, runDir);
   writeText(path.join(runDir, 'prompts', 'review.md'), prompt);
-  const stdoutFile = path.join(runDir, 'logs', 'review.stdout.log');
-  const stderrFile = path.join(runDir, 'logs', 'review.stderr.log');
+  const providerLogStamp = logStamp();
+  const stdoutFile = stampedLogPath(runDir, 'review', 'stdout.log', providerLogStamp);
+  const stderrFile = stampedLogPath(runDir, 'review', 'stderr.log', providerLogStamp);
   const args = ['-p', '--input-format', 'text', '--output-format', 'json'];
   if (!boolOption(options, 'skip-cli-schema')) {
     args.push('--json-schema', schemaJson('review-result.schema.json'));
@@ -1254,7 +1396,14 @@ function runReviewProvider(state, statePath, runDir, options) {
     'review provider',
     providerLaunch(options, 'review'),
     args,
-    { cwd: state.workdir, stdoutFile, stderrFile, stdin: prompt }
+    {
+      cwd: state.workdir,
+      stdoutFile,
+      stderrFile,
+      stdin: prompt,
+      env: claudeProviderEnv(),
+      timeoutMs: providerTimeoutMs(options),
+    }
   );
   state.providerRuns.push(record);
 
@@ -1338,7 +1487,22 @@ function buildPreflightReport(workdir, options, runDir) {
   add('node', true, process.version);
   add('workdir', fs.existsSync(workdir), workdir);
   add('runDirWritable', canWriteDirectory(runDir), runDir);
-  add('gitRepository', isGitRepository(workdir), gitRoot(workdir) || 'not a git repository; codex will use --skip-git-repo-check');
+  const gitRepository = isGitRepository(workdir);
+  add('gitRepository', gitRepository || boolOption(options, 'skip-git-repo-check'), gitRepository
+    ? gitRoot(workdir)
+    : {
+      skipped: boolOption(options, 'skip-git-repo-check'),
+      detail: boolOption(options, 'skip-git-repo-check')
+        ? 'not a git repository; allowed by --skip-git-repo-check as a no-diff run'
+        : 'not a git repository; pass --skip-git-repo-check to allow a no-diff run',
+    });
+
+  if (isWindows()) {
+    const gitBash = resolveClaudeGitBash();
+    add('claudeGitBash', Boolean(gitBash.path), gitBash.path
+      ? { path: gitBash.path, source: gitBash.source }
+      : 'Claude Code on Windows requires Git Bash; install Git or set CLAUDE_CODE_GIT_BASH_PATH');
+  }
 
   for (const key of ['spec', 'implementation', 'review']) {
     try {
@@ -1357,6 +1521,13 @@ function buildPreflightReport(workdir, options, runDir) {
   }
 
   add('codexHandoffSchemaStrict', schemaHasStrictObjects(readJson(schemaPath('agent-handoff.schema.json'))), 'agent-handoff.schema.json');
+  add('codexSandbox', true, isWindows()
+    ? {
+      effective: codexSandboxMode(options) || 'codex-default',
+      defaulted: optionValue(options, 'codex-sandbox') === undefined,
+      reason: 'Windows defaults to workspace-write to avoid elevated sandbox process and write-policy failures.',
+    }
+    : 'not required on non-Windows platforms');
 
   return {
     version: VERSION,
@@ -1492,7 +1663,7 @@ function runResume(options, positionals) {
   saveState(statePath, state);
   assertPreflight(preflight);
 
-  if (state.status === 'frozen' || state.status === 'needs-followup') {
+  if (state.status === 'frozen' || state.status === 'needs-followup' || state.status === 'blocked') {
     runImplementationProvider(state, statePath, runDir, options);
   }
   if (state.status === 'implemented') {
@@ -1531,6 +1702,26 @@ function runSelfTest() {
   const normalizedReview = normalizeReview(wrappedReview);
   assertSelfTest('review passed alias normalizes to approved', normalizedReview.decision, 'approved');
   assertSelfTest('approved review maps to completed', statusFromReview(normalizedReview), 'completed');
+
+  const summaryApprovedReview = normalizeReview({ summary: 'APPROVED', findings: [] });
+  assertSelfTest('summary APPROVED normalizes to approved', summaryApprovedReview.decision, 'approved');
+
+  const nestedPlanSpec = normalizeSpec({
+    plan: {
+      requirements: { summary: 'Nested plan', acceptance: ['works'] },
+      design: { approach: 'Use normalized aliases' },
+      tasks: [{ title: 'Implement nested plan support' }],
+    },
+  });
+  assertSelfTest('plan.tasks alias normalizes', nestedPlanSpec.taskBreakdown.length, 1);
+
+  const nestedTaskBreakdownSpec = normalizeSpec({
+    requirementSpec: { summary: 'Nested taskBreakdown', acceptanceCriteria: ['works'] },
+    technicalDesign: { approach: 'Use nested taskBreakdown compatibility' },
+    taskBreakdown: { tasks: [{ title: 'Flatten taskBreakdown.tasks' }] },
+  });
+  assertSelfTest('taskBreakdown.tasks normalizes', nestedTaskBreakdownSpec.taskBreakdown.length, 1);
+  assertSelfTest('provider timeout minutes parses', providerTimeoutMs({ 'provider-timeout-minutes': '2' }), 120000);
 
   const directBusinessJson = extractJsonValue(JSON.stringify({
     result: 'Implementation completed without structured wrapper.',
@@ -1586,6 +1777,9 @@ Options:
   --review-command <cmd>        Override review provider command.
   --skip-cli-schema             Do not pass CLI schema flags.
   --skip-git-repo-check         Pass Codex --skip-git-repo-check.
+  --codex-sandbox <mode>        Override Codex sandbox mode. Windows defaults to workspace-write.
+  --provider-timeout-minutes <n> Override spec/implementation/review provider timeout.
+  --provider-timeout-ms <n>     Override provider timeout in milliseconds.
   --dry-run                     Create run files and prompts without calling providers.
   --preflight-only              Create run files and only run local preflight checks.
 `);

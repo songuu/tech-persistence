@@ -147,7 +147,8 @@ copy_codex_skills() {
   mkdir -p "$target_dir"
   for skill_dir in "$source_dir"/*; do
     [[ -f "${skill_dir}/SKILL.md" ]] || continue
-    copy_codex_text "${skill_dir}/SKILL.md" "${target_dir}/$(basename "$skill_dir")/SKILL.md" "backup"
+    mkdir -p "${target_dir}/$(basename "$skill_dir")"
+    cp -R "${skill_dir}/." "${target_dir}/$(basename "$skill_dir")/"
     count=$((count + 1))
   done
   echo "$count"

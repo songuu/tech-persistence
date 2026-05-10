@@ -85,6 +85,7 @@ function Install-User {
 
     # Rules
     Safe-CopyNew (Join-Path $ScriptDir "user-level/rules/general-standards.md") (Join-Path $ClaudeHome "rules/general-standards.md")
+    Safe-CopyNew (Join-Path $ScriptDir "user-level/rules/auto-mode.md") (Join-Path $ClaudeHome "rules/auto-mode.md")
 
     # Skills
     @("memory","continuous-learning","prototype-workflow","test-strategy","context-handoff") | ForEach-Object {

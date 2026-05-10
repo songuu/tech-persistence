@@ -19,6 +19,17 @@ When the command instructions below mention `/think`, interpret that as this `$t
 
 切换到 CEO/产品经理视角。在写任何代码之前，先回答这些问题。
 
+## 用法
+
+```
+/think <需求>          ← 生成范围定义，结尾询问是否进入 /plan
+/think --auto <需求>   ← 自动模式：scope 明确且无开放问题时直接进入 /plan
+```
+
+## 可选参数
+
+- `--auto`：自动审查模式。scope 中无未解的开放问题、与原始需求无明显 scope creep 时直接 handoff 给 /plan；含开放问题、范围模糊或涉及战略决策时仍保留人工 gate。详见 `~/.codex/rules/auto-mode.md`。
+
 ## 角色约束
 
 你现在是产品负责人，不是工程师。

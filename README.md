@@ -1,7 +1,7 @@
 # Claude Code / Codex 自进化工程系统
 
 > 融合 gstack 角色分工 + Compound Engineering 复利循环 + ECC/Claude-Mem 自学习本能 + Skill 自迭代 + 风险自适应测试 + 上下文交接 + Obsidian 知识图谱。
-> 21 个用户命令 · 3 个项目命令 · 5 个按需技能 · 4 个 Hook · Memory v5 · 5 层知识存储。
+> 21 个用户命令 · 3 个项目命令 · 10 个按需技能 · 4 个 Hook · Memory v5 · Caveman 压缩层 · 5 层知识存储。
 > 支持 Claude Code 原生目录和 Codex 原生插件两种运行时；每一次工作都让下一次更容易。
 
 ---
@@ -16,7 +16,7 @@
 | 如何适应 | Skill 自迭代 | 使用信号 → 诊断 → 改进提案 → eval 验证 → 发布新版 |
 | 如何测试 | 风险自适应 | 评估变更风险等级(L0-L4)，自动匹配测试深度 |
 | 如何持续 | 上下文交接 | 长任务 checkpoint + 交接文件 + 自动恢复 |
-| 如何跨 Agent 协作 | Agent Loop v6 | 外部 orchestrator 调用 `claude -p` 产出冻结 spec，调用 `codex exec` 实现，再调用 `claude -p` 复审 |
+| 如何跨 Agent 协作 | Agent Loop v7 | v6 external orchestrator 继续负责冻结 spec / 实现 / 复审；v7 增加 caveman 输出与 memory 压缩能力 |
 | 如何可视化 | Obsidian | 所有产出 Obsidian 兼容，Graph View 展示知识关联 |
 
 ---
@@ -24,51 +24,45 @@
 ## 架构总览
 
 ```mermaid
-block-beta
-  columns 1
+flowchart TD
+    subgraph EXEC["Execution layer: /sprint chains 6 phases"]
+        direction LR
+        PROTOTYPE["/prototype<br/>Converge"]
+        THINK["/think<br/>CEO"]
+        PLAN["/plan<br/>Architect"]
+        WORK["/work + /test<br/>Engineer"]
+        REVIEW["/review<br/>5 views"]
+        COMPOUND["/compound<br/>Money step"]
+    end
 
-  block:exec["执行层 — /sprint chains 6 phases"]
-    columns 6
-    proto["/prototype\nConverge"]
-    think["/think\nCEO"]
-    plan["/plan\nArchitect"]
-    work["/work + /test\nEngineer"]
-    review["/review\n5 views"]
-    compound["/compound\nMoney step"]
-  end
+    subgraph KNOW["Knowledge layer: hooks, Memory v5, instincts, skills"]
+        direction LR
+        SESSION_START["SessionStart<br/>inject + handoff"]
+        TOOL_HOOKS["PreToolUse + PostToolUse<br/>observe"]
+        STOP_HOOK["Stop<br/>evaluate"]
+        SKILL_SIGNALS["skill-signals<br/>diagnose to improve to eval"]
+    end
 
-  space
+    subgraph STORE["Storage layer: 5 tiers + Obsidian"]
+        direction LR
+        TIER_0["Tier 0<br/>observations"]
+        TIER_1["Tier 1<br/>instincts"]
+        TIER_2["Tier 2<br/>evolved"]
+        TIER_3["Tier 3<br/>rules + solutions"]
+        TIER_4["Tier 4<br/>CLAUDE.md + AGENTS.md"]
+        OBSIDIAN["Obsidian<br/>Graph View"]
+    end
 
-  block:know["知识层 — 4 hooks + Memory v5 + instinct lifecycle + skill self-iteration"]
-    columns 4
-    h1["SessionStart\ninject + handoff"]
-    h2["Pre/PostToolUse\nobserve"]
-    h4["Stop\nevaluate"]
-    h5["skill-signals/\ndiagnose→improve→eval"]
-  end
+    EXEC --> KNOW
+    KNOW --> STORE
+    STORE -->|"SessionStart injects Memory v5, Tier 1-4, handoff"| EXEC
 
-  space
-
-  block:store["存储层 — 5 tiers + Obsidian"]
-    columns 6
-    t0["Tier 0\nobservations"]
-    t1["Tier 1\ninstincts"]
-    t2["Tier 2\nevolved"]
-    t3["Tier 3\nrules+solutions"]
-    t4["Tier 4\nCLAUDE.md"]
-    obs["Obsidian\nGraph View"]
-  end
-
-  exec --> know
-  know --> store
-  store -- "SessionStart injects Memory v5 + Tier 1-4 + handoff" --> exec
-
-  style exec fill:#EEEDFE,stroke:#534AB7,color:#26215C
-  style know fill:#E1F5EE,stroke:#0F6E56,color:#04342C
-  style store fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A
-  style compound fill:#EAF3DE,stroke:#3B6D11,color:#173404
-  style h5 fill:#FAECE7,stroke:#993C1D,color:#4A1B0C
-  style obs fill:#E6F1FB,stroke:#185FA5,color:#042C53
+    style EXEC fill:#EEEDFE,stroke:#534AB7,color:#26215C
+    style KNOW fill:#E1F5EE,stroke:#0F6E56,color:#04342C
+    style STORE fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A
+    style COMPOUND fill:#EAF3DE,stroke:#3B6D11,color:#173404
+    style SKILL_SIGNALS fill:#FAECE7,stroke:#993C1D,color:#4A1B0C
+    style OBSIDIAN fill:#E6F1FB,stroke:#185FA5,color:#042C53
 ```
 
 ---
@@ -77,27 +71,27 @@ block-beta
 
 ```mermaid
 flowchart TD
-    START(["🚀 /sprint requirement"])
+    START(["/sprint requirement"])
     START --> PROTO
 
-    PROTO{{"Has prototype screenshots?"}}
-    PROTO -->|yes| PROTOTYPE["/prototype\nAssumption-driven convergence\nOutput full plan, user corrects"]
-    PROTO -->|no| THINK
+    PROTO{"Prototype screenshots?"}
+    PROTO -->|"yes"| PROTOTYPE["/prototype<br/>Assumption-driven convergence<br/>User corrects wrong assumptions"]
+    PROTO -->|"no"| THINK
 
-    PROTOTYPE -->|converged| THINK
-    THINK["/think — CEO\nScope, criteria, risks"] --> C1{{"confirm"}}
-    C1 --> PLAN["/plan — Architect\nTasks, tests, risks\nReads: rules + solutions + instincts"]
-    PLAN --> C2{{"confirm"}}
-    C2 --> WORK["/work + /test — Engineer\nImplement → risk assess → test by level"]
+    PROTOTYPE -->|"converged"| THINK
+    THINK["/think: CEO<br/>Scope, criteria, risks"] --> C1{"Confirm?"}
+    C1 --> PLAN["/plan: Architect<br/>Tasks, tests, risks<br/>Reads rules, solutions, instincts"]
+    PLAN --> C2{"Confirm?"}
+    C2 --> WORK["/work + /test: Engineer<br/>Implement, assess risk, test by level"]
 
-    WORK --> CPCHECK{{"Context pressure?"}}
-    CPCHECK -->|"退化/5+ tasks"| CHECKPOINT["/checkpoint\nSave handoff → /compact → resume"]
+    WORK --> CPCHECK{"Context pressure?"}
+    CPCHECK -->|"degraded or 5+ tasks"| CHECKPOINT["/checkpoint<br/>Save handoff, compact, resume"]
     CHECKPOINT --> WORK
-    CPCHECK -->|ok| REVIEW
+    CPCHECK -->|"ok"| REVIEW
 
-    REVIEW["/review — 5 perspectives\nSec · Perf · Arch · Quality · Test coverage vs risk"]
-    REVIEW --> C3{{"fix P0/P1"}}
-    C3 --> COMPOUND["/compound — Money step\nrules + solutions + instincts\n+ skill signals + Obsidian output"]
+    REVIEW["/review: 5 perspectives<br/>Security, performance, architecture, quality, tests"]
+    REVIEW --> C3{"P0 or P1 fixes?"}
+    C3 --> COMPOUND["/compound: Money step<br/>rules, solutions, instincts<br/>skill signals, Obsidian output"]
     COMPOUND -->|"compound loop"| PLAN
 
     style PROTOTYPE fill:#FAEEDA,stroke:#854F0B,color:#412402
@@ -111,13 +105,13 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    T0["Tier 0: observations.jsonl\nHook auto-capture"]
-    M0["Memory v5: memory/MEMORY.md\nConcise index + topic files"]
-    T1["Tier 1: instincts/*.md\nConfidence 0.3→0.9, auto-decay"]
-    T2["Tier 2: evolved/\n/evolve clusters 3+ instincts"]
-    T3["Tier 3: rules/ + solutions/\nMature experience"]
-    T4["Tier 4: CLAUDE.md\nCore < 200 lines"]
-    OBS["Obsidian Graph View\nAll .md files visualized"]
+    T0["Tier 0: observations.jsonl<br/>Hook auto-capture"]
+    M0["Memory v5: memory/MEMORY.md<br/>Concise index + topic files"]
+    T1["Tier 1: instincts/*.md<br/>Confidence 0.3 to 0.9, auto decay"]
+    T2["Tier 2: evolved/<br/>/evolve clusters 3+ instincts"]
+    T3["Tier 3: rules/ + solutions/<br/>Mature experience"]
+    T4["Tier 4: CLAUDE.md + AGENTS.md<br/>Core under 200 lines"]
+    OBS["Obsidian Graph View<br/>All Markdown files visualized"]
 
     T0 -->|"quality gate"| M0
     M0 -->|"pattern detect"| T1
@@ -138,18 +132,18 @@ flowchart TD
 ```mermaid
 flowchart TD
     USE["Skill used (/prototype /review ...)"]
-    SIG["Signal collection\nsteps skipped, corrections, duration"]
-    DIAG["/skill-diagnose\nHeatmap + correction patterns"]
-    IMP["/skill-improve\nMerge steps, absorb instincts"]
-    EVAL["/skill-eval\nA/B: v1 vs v2 pass rate"]
-    PUB["/skill-publish\nBackup → deploy → changelog"]
+    SIG["Signal collection<br/>steps skipped, corrections, duration"]
+    DIAG["/skill-diagnose<br/>Heatmap + correction patterns"]
+    IMP["/skill-improve<br/>Merge steps, absorb instincts"]
+    EVAL["/skill-eval<br/>A/B pass rate"]
+    PUB["/skill-publish<br/>Backup, deploy, changelog"]
 
     USE -->|"every use"| SIG
     SIG -->|"threshold"| DIAG
     DIAG --> IMP
     IMP --> EVAL
-    EVAL -->|"v2 >= v1"| PUB
-    EVAL -->|"v2 < v1"| ROLL["Rollback"]
+    EVAL -->|"pass rate ok"| PUB
+    EVAL -->|"regression"| ROLL["Rollback"]
     PUB --> USE
 
     style SIG fill:#FAEEDA,stroke:#854F0B,color:#412402
@@ -162,12 +156,12 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    DIFF["git diff"] --> ASSESS["Risk assess\n3 dimensions"]
-    ASSESS --> L0["L0 免测\nCSS/文案"]
-    ASSESS --> L1["L1 冒烟\n1-3 cases"]
-    ASSESS --> L2["L2 标准\n5-10 cases"]
-    ASSESS --> L3["L3 严格\n10-20 cases"]
-    ASSESS --> L4["L4 全面\n20+ cases\n+ integration"]
+    DIFF["git diff"] --> ASSESS["Risk assess<br/>3 dimensions"]
+    ASSESS --> L0["L0 no tests<br/>copy, comments, style"]
+    ASSESS --> L1["L1 smoke<br/>1-3 cases"]
+    ASSESS --> L2["L2 standard<br/>5-10 cases"]
+    ASSESS --> L3["L3 strict<br/>10-20 cases"]
+    ASSESS --> L4["L4 comprehensive<br/>20+ cases<br/>plus integration"]
 
     style L0 fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A
     style L4 fill:#FCEBEB,stroke:#A32D2D,color:#501313
@@ -197,7 +191,7 @@ node scripts/preflight.js && bash install.sh --all
 
 Codex 使用原生插件包 `plugins/tech-persistence/`，用户级安装会复制到 `~/plugins/tech-persistence` 并更新 `~/.agents/plugins/marketplace.json`。Codex 知识库默认写入 `~/.codex/homunculus`，可用 `TECH_PERSISTENCE_HOME` 临时覆盖，也可用 `~/.tech-persistence/config.json` 配置持续共享目录。
 
-当前 Codex CLI 的 TUI slash commands 只注册内置命令；插件工作流通过 skills 调用。Claude Code 中仍使用 `/sprint`、`/prototype`，Codex 中使用 `$sprint <需求>`、`$prototype <需求>`、`$plan <需求>`，也可以用 `@` picker 选择同名 skill。
+当前 Codex CLI 的 TUI slash commands 只注册内置命令；插件工作流通过 skills 调用。Claude Code 中仍使用 `/sprint`、`/prototype`，Codex 中使用 `$sprint <需求>`、`$prototype <需求>`、`$plan <需求>`、`$caveman`，也可以用 `@` picker 选择同名 skill。
 
 Windows:
 ```powershell
@@ -236,30 +230,72 @@ bash install-codex.sh --all --shared-homunculus ~/Documents/TechPersistence
 
 这会写入 `~/.tech-persistence/config.json`，两边 Hook 会自动解析同一个 `homunculusHome`。`--import-claude` 是一次性复制历史数据；`--shared-homunculus` 才是持续同步模式。
 
+未配置共享目录时，Claude Code 默认写 `~/.claude/homunculus`，Codex 默认写 `~/.codex/homunculus`。SessionStart 会合并两个默认目录中的 Memory v5 topic notes 后再注入，避免某一边的 `MEMORY.md` 遮蔽另一边；但文件级写入仍各自保留在默认目录里。
+
 插件构建与验证：
 ```powershell
 node plugins/tech-persistence/scripts/build-codex-plugin.js
 node scripts/validate-codex-plugin.js
 ```
 
-### Agent Loop v6（跨 Agent 编排）
+### Agent Loop v7（跨 Agent 编排 + Caveman 压缩）
 
-当任务需要“需求分析/设计”和“实现/验收”分离时，使用 v6 外部 orchestrator，而不是让两个 Agent 在各自上下文里互相模拟：
+当任务需要“需求分析/设计”和“实现/验收”分离时，继续使用 v6 外部 orchestrator，而不是让两个 Agent 在各自上下文里互相模拟。v7 在此基础上增加 caveman 输出压缩和 memory 文件压缩 skill：
 
 ```powershell
 node scripts\agent-orchestrator.js run --requirement "原始需求"
 node scripts\agent-orchestrator.js freeze --run <runId>
 node scripts\agent-orchestrator.js resume --run <runId> --validation-command "npm test"
+
+# 可选：拆分 implementation 与 review 的人工 gate
+node scripts\agent-orchestrator.js resume --run <runId> --no-review     # 只跑实现，停在 implemented
+node scripts\agent-orchestrator.js resume --run <runId> --review-only   # 跳过实现，只跑复审
+
+# 环境与脚本预检
+node scripts\agent-orchestrator.js doctor
+node scripts\agent-orchestrator.js self-test
+node scripts\agent-orchestrator.js status --run latest
 ```
 
-命令入口：
+命令入口（参数与 CLI 对齐）：
 
 ```text
-/agent-loop <原始需求>     # Claude Code
-$agent-loop <原始需求>     # Codex
+/agent-loop <原始需求>             # Claude Code 入口
+/agent-loop freeze <runId>
+/agent-loop resume <runId>
+/agent-loop status [runId|latest]
+/agent-loop doctor
+/agent-loop self-test
+$agent-loop <原始需求>             # Codex 入口（同名 skill）
 ```
 
-运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review 和 follow-up task。`.agent-runs/` 是运行态目录，不进入 Git。
+运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review、follow-up task，以及带时间戳的 provider 日志和 prompt 文件。`.agent-runs/` 是运行态目录，不进入 Git。
+
+Caveman 入口：
+
+```text
+$caveman                    # 启用精简表达模式
+$caveman-commit             # 生成 Conventional Commit 消息
+$caveman-review             # 生成一行式 review comment
+$caveman-compress <file>    # 压缩自然语言 memory 文件
+```
+
+SessionStart hook 会注入 caveman 规则；如需关闭自动激活，设置 `CAVEMAN_DEFAULT_MODE=off`。
+
+### 自动审查模式（--auto）
+
+所有工作流命令支持 `--auto` 可选参数。模型基于风险等级 / destructive 标志 / 用户行为 / 置信度，自主判断每个本应人工 gate 的环节是否仍需用户确认：
+
+```text
+/sprint --auto <需求>          # 全流程冲刺，phase 间 gate 智能跳过
+/work --auto                   # 按计划执行，L4/destructive 仍强制问
+/agent-loop --auto <需求>      # spec 通过自校验则自动 freeze
+/review --auto                 # obvious P0 自动修，语义级 P0 仍问
+```
+
+口语触发同样有效："自动跑完"、"yolo"、"auto mode"。强制人工边界（无视 `--auto`）：destructive 不可逆、L4 风险、安全/认证、scope creep、测试失败。完整决策矩阵见 `~/.claude/rules/auto-mode.md`（Codex 下为 `~/.codex/rules/auto-mode.md`）。
+
+`--auto` 与 `--caveman` 正交，可组合：`/sprint --auto --caveman <需求>`。
 
 ### Obsidian 集成（可选）
 ```powershell
@@ -283,7 +319,7 @@ $agent-loop <原始需求>     # Codex
 | `/review` | 审查团队 | 5 视角审查（含测试覆盖 vs 风险匹配） |
 | `/compound` | 知识管理 | 经验+本能+方案+skill 信号+Obsidian 输出 |
 | `/sprint` | 指挥官 | 全链路编排 + 自动 checkpoint + resume |
-| `/agent-loop` | 外部编排器 | v6 跨 Agent：冻结 spec → codex 实现 → spec review |
+| `/agent-loop` | 外部编排器 | v7 跨 Agent：冻结 spec → codex 实现 → spec review；caveman 压缩输出 |
 
 ### 需求收敛（1 个）
 | 命令 | 作用 |
@@ -526,18 +562,22 @@ your-project/                           ← Codex 项目级 (提交 Git)
 ## 版本演进
 
 ```mermaid
-timeline
-    title System evolution
-    section v1 — Manual
-      /learn + rules/ : /compact management
-    section v2 — Auto-learning
-      4 Hooks : Instincts (confidence/decay) : /evolve : Project isolation
-    section v3 — Workflow
-      Role switching : Compound loop : /sprint : /prototype convergence
-    section v4 — Self-iteration
-      Skill signals+diagnose+eval : Risk-adaptive testing : Context checkpoint+resume : Obsidian deep integration
-    section v5 — Codex Memory
-      Codex payload normalization : MEMORY.md index under 200 lines/25KB : topic files : confidence-gated writes
-    section v6 — Agent Loop
-      External orchestrator : Frozen spec contract : codex implementation handoff : claude spec review loop
+flowchart LR
+    V1["v1 Manual<br/>/learn + rules<br/>/compact management"]
+    V2["v2 Auto-learning<br/>4 hooks<br/>instinct confidence and decay<br/>project isolation"]
+    V3["v3 Workflow<br/>role switching<br/>compound loop<br/>/sprint + /prototype"]
+    V4["v4 Self-iteration<br/>skill signals<br/>risk-adaptive testing<br/>checkpoint + resume<br/>Obsidian integration"]
+    V5["v5 Codex Memory<br/>payload normalization<br/>MEMORY.md compact index<br/>topic files<br/>confidence-gated writes"]
+    V6["v6 Agent Loop<br/>external orchestrator<br/>frozen spec contract<br/>Codex handoff<br/>Claude review loop"]
+    V7["v7 Compression Layer<br/>caveman output mode<br/>memory file compression<br/>Claude and Codex parity hardening"]
+
+    V1 --> V2 --> V3 --> V4 --> V5 --> V6 --> V7
+
+    style V1 fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A
+    style V4 fill:#E1F5EE,stroke:#0F6E56,color:#04342C
+    style V5 fill:#E6F1FB,stroke:#185FA5,color:#042C53
+    style V6 fill:#EEEDFE,stroke:#534AB7,color:#26215C
+    style V7 fill:#FAEEDA,stroke:#854F0B,color:#412402
 ```
+
+v7 保留 v6 的外部 orchestrator 边界：冻结 spec、Codex 实现、Claude 复审仍由同一条编排链路完成。新增能力集中在压缩层，包括 `$caveman` 精简输出模式、`$caveman-compress` 压缩自然语言 memory 文件，以及围绕 Claude Code / Codex 双运行时的一致性加固。

@@ -23,8 +23,29 @@ When the command instructions below mention `/sprint`, interpret that as this `$
 ## 用法
 ```
 /sprint <需求描述>       ← 新 sprint
+/sprint --caveman <需求> ← 新 sprint，启用 token 压缩模式
+/sprint --auto <需求>    ← 新 sprint，启用自动审查模式
 /sprint resume           ← 从最近的 checkpoint 恢复
+/sprint resume --caveman ← 从 compact handoff 优先恢复
+/sprint resume --auto    ← 恢复并启用自动审查
 ```
+
+`--caveman` 与 `--auto` 可组合：`/sprint --caveman --auto <需求>`。
+
+Codex 中同义：
+
+```text
+$sprint <需求描述>
+$sprint --caveman <需求描述>
+$sprint --auto <需求描述>
+$sprint resume --caveman
+$sprint resume --auto
+```
+
+## 可选参数
+
+- `--caveman`：输出 token 压缩，详见下方 Caveman Token Budget Mode。
+- `--auto`：自动审查模式。Phase 1-4 间的 'go' gate 由模型按风险等级 / 用户行为 / 置信度自主判断；强制人工的边界（destructive、L4、scope creep、P0 不平凡修复）仍保留。详见 `~/.codex/rules/auto-mode.md`。
 
 ## 项目文档贯穿全流程
 
@@ -40,6 +61,71 @@ Phase 4 → 填写「审查结果」               → status: reviewing
 Phase 5 → 填写「复利记录」               → status: completed
 ```
 
+## Caveman Token Budget Mode
+
+触发方式：
+- 用户显式写 `$sprint --caveman ...`
+- 用户在 sprint 请求中说“压缩 token / less tokens / caveman / 简短”
+- 当前会话已启用 `$caveman`，且用户没有要求完整展开
+
+核心原则：
+
+| 层 | 策略 |
+|---|---|
+| 对话输出 | `caveman-lite` 或 `caveman-full`，只报决策、风险、下一步 |
+| sprint 主文档 | `artifactMode=complete`，完整保留 scope、验收、任务、测试、审查 |
+| checkpoint | 同时生成完整 handoff 和 compact handoff |
+| resume | `compact-first`：先读 compact handoff，不足时再读完整 sprint 文档 |
+| review | findings 用一行式格式：`文件:行: severity: 问题。修复。` |
+| compound | 对话只报数量和路径，完整经验写入 rules/solutions |
+
+禁止压缩：
+- `docs/plans/*.md` 主 sprint 文档
+- 架构决策、验收标准、测试策略、P0/P1 审查依据
+- 安全警告、不可逆操作确认、复杂迁移步骤
+- 代码块、命令、文件路径、错误原文
+
+允许压缩：
+- 阶段汇报
+- 中间状态
+- checkpoint/resume 摘要
+- review finding 展示
+- compound 收尾报告
+
+compact handoff 文件：
+
+```text
+docs/plans/YYYY-MM-DD-xxx-handoff-N.md          # 完整交接
+docs/plans/YYYY-MM-DD-xxx-handoff-N-compact.md  # 压缩恢复摘要
+```
+
+compact handoff 必须包含：
+
+```markdown
+# Compact Handoff
+
+Sprint: <名称>
+Progress: <完成数>/<总数>
+Next: <下一步>
+Changed: <文件列表>
+Decisions: <关键决策，最多 5 条>
+Validation: <命令 + 结果>
+Risks: <未关闭风险>
+Need full doc if: <何时必须回读完整 sprint 文档>
+```
+
+阶段输出预算：
+
+```text
+Think: scope / non-scope / success / risks，各 1-3 条
+Plan: 任务表 + 验证策略，不展开实现细节
+Work: 只报 Task delta、测试结果、阻塞项
+Review: 只报 P0/P1；P2 写入文档，不默认展开
+Compound: 只报沉淀数量、路径、是否建议 compact
+```
+
+如果用户要求“完整版本 / 完整架构 / 从源头看”，临时退出 caveman 输出压缩；完整说明后再恢复 compact mode。
+
 ## 执行流程
 
 ### Phase 1: Think (暂停确认)
@@ -50,6 +136,18 @@ Phase 1/5: Think
 → 'go' 进入 Plan | 修改意见调整 | 'skip' 跳过
 ```
 
+Auto mode：scope 明确、无开放问题且与原始需求无 scope creep 时直接进入 Plan，并打印 `✓ auto: phase 1 → 2`；否则保留人工 gate。
+
+Caveman mode 输出：
+
+```text
+Scope: ...
+Non-scope: ...
+Success: ...
+Risks: ...
+Next: go -> Plan
+```
+
 ### Phase 2: Plan (暂停确认)
 ```
 Phase 2/5: Plan
@@ -58,6 +156,10 @@ Phase 2/5: Plan
 [如果 Task > 5 个，预告：将在 Task 5 后自动 checkpoint]
 → 'go' 进入 Work | 修改意见调整
 ```
+
+Auto mode：任务数 ≤ 8 且无 L3/L4 task、无明显 scope 不一致时直接进入 Work；否则保留人工 gate。打印 `✓ auto: phase 2 → 3` 或 `⚠ manual gate kept: phase 2 — <原因>`。
+
+Caveman mode 输出只展示任务表和验证策略；完整方案写入 sprint 文档，不在对话中重复。
 
 ### Phase 3: Work (含自动 checkpoint)
 ```
@@ -79,6 +181,18 @@ Phase 3/5: Work
   - 会话轮次 > 30
 ```
 
+Caveman mode 中，每个 Task 完成只输出：
+
+```text
+Done: Task N
+Changed: <files>
+Risk: Lx
+Test: <command> -> pass/fail/skipped
+Next: Task N+1
+```
+
+达到 checkpoint 条件时必须生成 compact handoff，并提示先 `/compound` 再 `/compact`。
+
 ### Phase 3 恢复（从 checkpoint）
 ```
 /sprint resume
@@ -94,8 +208,8 @@ Phase 3/5: Work
 ```
 
 恢复时做的事：
-1. 读取 handoff 文件 → 加载进度、决策、文件列表
-2. 读取 sprint 主文档 → 加载方案和 Task 列表
+1. 如果是 caveman mode，先读取最新 `*-handoff-*-compact.md`
+2. compact 信息不足时，读取完整 handoff 和 sprint 主文档
 3. 读取相关测试文件 → 确认测试状态
 4. 从下一个未完成 Task 继续
 
@@ -106,6 +220,19 @@ Phase 4/5: Review
 [审查报告写入文档]
 → P0 自动修复 → P1 确认 → 'go' 进入 Compound
 ```
+
+Auto mode：obvious P0（typo / 缺 import / null check）自动修复并继续；语义级 P0、destructive 改动、L4 任务相关 P0 仍保留人工 gate。P1 默认跳过确认进入 Compound；P0 强制项必须问。
+
+Caveman mode review 展示：
+
+```text
+P0:
+- path:line: bug/risk: problem. fix.
+P1:
+- path:line: risk/nit: problem. fix.
+```
+
+完整审查表仍写入 sprint 文档。
 
 ### Phase 5: Compound (自动执行)
 ```
@@ -118,6 +245,16 @@ Phase 5/5: Compound
   文档: docs/plans/2026-06-20-xxx.md
   Checkpoints: N 次
   知识: M 条经验, K 个本能, J 个 skill 信号
+  Auto mode: A gates 自动通过 / M gates 强制人工（仅当启用 --auto 时显示）
+```
+
+Caveman mode 收尾：
+
+```text
+Done: sprint completed
+Doc: <path>
+Knowledge: <N rules>, <M instincts>, <K signals>
+Compact: yes/no + reason
 ```
 
 ## Sprint 文档 frontmatter（Obsidian 兼容）

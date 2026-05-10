@@ -9,6 +9,13 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" inject-context.js",
             "async": false,
             "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" caveman-activate.js",
+            "async": false,
+            "timeout": 2000,
+            "statusMessage": "Loading caveman mode"
           }
         ]
       }

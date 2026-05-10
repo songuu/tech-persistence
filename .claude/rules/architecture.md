@@ -17,6 +17,22 @@
 
 ## 决策列表
 
+### ADR-009: 全局 `--auto` 决策协议放在单一 rule 文件，命令通过引用获得行为 (2026-05-09)
+- **状态**：已采纳
+- **上下文**：每个工作流命令都有自己的人工 gate（`/sprint` phase 间 'go'、`/agent-loop` freeze、`/work` task 完成确认、`/review` P0 修复确认），各自硬编码"必问"。新增 `--auto` 参数若每个命令各自实现行为定义，会立刻分叉；同时缺少跨命令一致的"什么时候必须问、什么时候可以自动"边界。
+- **决策**：建立 `~/.claude/rules/auto-mode.md` 作为单一决策协议中心。三档矩阵（强制人工 / 自动通过 / 灰区智能判断）+ 各命令的具体集成表都在这一份规则里。每个命令文件只在"可选参数"段引用 `详见 ~/.claude/rules/auto-mode.md`，不复制规则正文。orchestrator 增加 `--auto-evaluate`（条件 freeze）与原有 `--auto-freeze`（永远 freeze）形成两档。
+- **原因**：单 source of truth 防止规则分叉。命令文件只声明"接受 --auto"，行为定义集中在规则。强制人工边界（destructive、L4、scope creep、安全相关、测试失败）在规则里写清楚一次胜过 21 个命令各自重复。Orchestrator 双层 freeze 区分"全自动"（已存在用法）和"智能审查"（新增），不破坏旧行为。
+- **备选**：每个命令各自定义 `--auto` 行为；只在 `/sprint` 实现 `--auto`；用 hook 拦截。前者会立刻分叉，第二个不通用，第三个让 hook 介入业务决策不合适。
+- **影响**：新增工作流命令只需在"可选参数"段加一行引用即可获得 `--auto` 支持；规则更新一次所有命令一致。要求 install 脚本同步复制 `auto-mode.md`（已加入 install.sh / install.ps1）。
+
+### ADR-008: Memory v5 启动注入必须合并兼容运行时索引 (2026-05-07)
+- **状态**：已采纳
+- **上下文**：Claude Code 默认写 `~/.claude/homunculus`，Codex 默认写 `~/.codex/homunculus`。即使推荐共享 `homunculusHome`，未配置共享目录时两个运行时仍可能各自产生 durable Memory v5 topic notes；旧的 SessionStart first-hit fallback 会让一个 `MEMORY.md` 遮蔽另一个。
+- **决策**：项目身份识别、Memory v5 topic entry 解析、去重、排序和 index 格式化统一放入 `scripts/lib/memory-v5.js`；`inject-context.js` 对 `resolveCompatReadDirs()` 返回的所有兼容 memory 目录做合并注入，不再第一个命中就停止。
+- **原因**：一致性应该由当前 runtime helper 保证，而不是靠用户记住每次都配置共享目录；同一个 helper 还能避免 observe/inject/evaluate 三个 hook 的 project id 漂移。
+- **备选**：强制所有用户配置共享 vault；把 Codex memory 复制进 Claude memory；继续 first-hit fallback。前者破坏默认安装可用性，复制会制造写入副作用，first-hit fallback 已证明会造成上下文漂移。
+- **影响**：共享 vault 仍是文件级持续同步的推荐方案；默认分离目录下，启动上下文读取保持一致，但各 runtime 的 topic 文件写入位置仍保持独立。新增 memory helper 时必须同步 root hooks、Codex plugin hooks 和 parity smoke。
+
 ### ADR-004: Agent Loop v6 Provider 适配层必须内建在 Orchestrator 中 (2026-04-28)
 - **状态**：已采纳
 - **上下文**：Windows 上 `claude` / `codex` 常解析到 npm shim，且 Claude Code 与 Codex 对 stdin、structured output、JSON wrapper、schema 严格度的行为不同；把这些差异交给用户手动传参会导致 `/agent-loop` 与 `$agent-loop` 行为分叉。

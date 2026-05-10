@@ -12,7 +12,10 @@
       "Bash(xxd)",
       "Bash(printf '\\\\xef\\\\xbb\\\\xbf')",
       "Bash(cat update.ps1)",
-      "Bash(mv update.ps1.new update.ps1)"
+      "Bash(mv update.ps1.new update.ps1)",
+      "Bash(node *)",
+      "Bash([ -f \"$prefix/$cmd.md\" ])",
+      "Bash([ -f \"$prefix/$cmd/SKILL.md\" ])"
     ]
   }
 }

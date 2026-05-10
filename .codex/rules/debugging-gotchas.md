@@ -8,6 +8,7 @@
 ## HIGH — 容易踩到
 
 - Hook 脚本一旦新增 `scripts/lib/*` 依赖，必须同步更新安装脚本和 Codex plugin 构建脚本；否则用户环境中的 hook 会因 `Cannot find module './lib/...'` 静默失效。验证时至少跑 `node plugins/tech-persistence/scripts/build-codex-plugin.js`、`node scripts/validate-codex-plugin.js` 和临时 `TECH_PERSISTENCE_HOME` smoke test。
+- Memory v5 不能用 first-hit fallback 读取 `MEMORY.md`；Claude Code 和 Codex 默认目录都可能有 durable topic notes。SessionStart 应合并 `resolveCompatReadDirs()` 下的 topic entries，并用 `node scripts/smoke-memory-parity.js` 验证双向可见。
 
 ## MEDIUM — 偶尔遇到
 

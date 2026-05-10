@@ -19,6 +19,10 @@ When the command instructions below mention `/prototype`, interpret that as this
 
 将原型截图转化为可执行的实现需求。
 
+## 可选参数
+
+- `--auto`：本命令的本质是"假设驱动 + 用户纠偏"。即使传入 `--auto`，**假设确认 gate 仍强制保留**——否则收敛会失去校正机会。`--auto` 仅省略最终方案的"是否进入 /plan"确认。详见 `~/.codex/rules/auto-mode.md`。
+
 ## 核心原则：假设驱动，不是问题驱动
 
 ```

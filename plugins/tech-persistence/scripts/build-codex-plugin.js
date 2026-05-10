@@ -31,6 +31,11 @@ const expectedCommands = [
 ];
 
 const expectedSkills = [
+  'caveman',
+  'caveman-commit',
+  'caveman-compress',
+  'caveman-help',
+  'caveman-review',
   'memory',
   'continuous-learning',
   'prototype-workflow',
@@ -84,8 +89,10 @@ function ensureDir(dir) {
 }
 
 function emptyDir(dir) {
-  fs.rmSync(dir, { recursive: true, force: true });
   ensureDir(dir);
+  fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
+    fs.rmSync(path.join(dir, entry.name), { recursive: true, force: true });
+  });
 }
 
 function transform(content) {
@@ -108,6 +115,30 @@ function copyTextFile(source, target, shouldTransform = true) {
 function writeTextFile(target, content) {
   ensureDir(path.dirname(target));
   fs.writeFileSync(target, content);
+}
+
+function copyFilePreservingType(source, target, shouldTransformText = true) {
+  const extension = path.extname(source).toLowerCase();
+  const shouldTransform = shouldTransformText && ['.md', '.txt', '.json', '.toml'].includes(extension);
+  if (shouldTransform) {
+    copyTextFile(source, target, true);
+    return;
+  }
+  ensureDir(path.dirname(target));
+  fs.copyFileSync(source, target);
+}
+
+function copyDirectoryRecursive(sourceDir, targetDir, options = {}) {
+  ensureDir(targetDir);
+  fs.readdirSync(sourceDir, { withFileTypes: true }).forEach((entry) => {
+    const source = path.join(sourceDir, entry.name);
+    const target = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDirectoryRecursive(source, target, options);
+      return;
+    }
+    if (entry.isFile()) copyFilePreservingType(source, target, options.transformText !== false);
+  });
 }
 
 function assertInventory(label, actual, expected) {
@@ -188,10 +219,27 @@ function copyCommands() {
     .sort();
 
   assertInventory('commands', commandFiles, expectedCommands);
-  emptyDir(targetDir);
+  ensureDir(targetDir);
+  fs.readdirSync(targetDir)
+    .filter((name) => name.endsWith('.md') && !commandFiles.includes(name))
+    .forEach((name) => fs.rmSync(path.join(targetDir, name), { force: true }));
   commandFiles.forEach((name) => {
     copyTextFile(path.join(sourceDir, name), path.join(targetDir, name));
   });
+  const copied = fs.readdirSync(targetDir)
+    .filter((name) => name.endsWith('.md'))
+    .sort();
+  const copiedSet = new Set(copied);
+  commandFiles
+    .filter((name) => !copiedSet.has(name))
+    .forEach((name) => {
+      copyTextFile(path.join(sourceDir, name), path.join(targetDir, name));
+    });
+  assertInventory(
+    'generated commands',
+    fs.readdirSync(targetDir).filter((name) => name.endsWith('.md')).sort(),
+    expectedCommands
+  );
   return commandFiles.length;
 }
 
@@ -209,9 +257,10 @@ function copySkills() {
   assertInventory('skills', skillDirs, expectedSkills);
   emptyDir(targetDir);
   skillDirs.forEach((name) => {
-    copyTextFile(
-      path.join(sourceDir, name, 'SKILL.md'),
-      path.join(targetDir, name, 'SKILL.md')
+    copyDirectoryRecursive(
+      path.join(sourceDir, name),
+      path.join(targetDir, name),
+      { transformText: !name.startsWith('caveman') }
     );
   });
   expectedCommands.forEach((name) => {
@@ -227,6 +276,7 @@ function copyHooks() {
   const targetDir = path.join(pluginRoot, 'hooks');
   emptyDir(targetDir);
   [
+    'caveman-activate.js',
     'inject-context.js',
     'observe.js',
     'evaluate-session.js',
@@ -243,7 +293,7 @@ function copyHooks() {
   );
   writeTextFile(path.join(targetDir, 'run-hook.js'), runHookJs);
   writeTextFile(path.join(targetDir, 'run-hook.cmd'), runHookCmd);
-  return 7;
+  return 8;
 }
 
 function copyHomunculusTemplate() {
