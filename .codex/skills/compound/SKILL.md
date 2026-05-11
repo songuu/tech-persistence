@@ -121,3 +121,18 @@ aliases: ["触发描述"]
    打开 Obsidian Graph View 查看新增节点和关联
 ```
 
+## Phase 间预热钩子
+
+完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「收尾预热」段（无下一 phase，但有清场动作）。协议见 `~/.codex/commands/sprint.md` 的「Phase 间预热协议」。
+
+本命令的典型预热内容：
+
+```text
+## 收尾预热（无下一 Phase）
+关键文件: sprint 文档 frontmatter
+执行命令: 确认 status: completed、检查是否需 /compact
+风险预判: 上下文压力、未处理的 P2 backlog、未关闭的 follow-up
+```
+
+单独使用本命令（不在 sprint 内）时，预热段建议但非必须。
+

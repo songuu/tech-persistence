@@ -1,6 +1,6 @@
 ---
 name: agent-loop
-description: Codex-compatible entry point for the former /agent-loop command. v6 外部编排器：claude 产出冻结 spec，codex 按 spec 执行，claude 复审
+description: Codex-compatible entry point for the former /agent-loop command. v6 外部编排器：claude 产出冻结 spec，codex 按 spec 执行，claude 复审；可选 --pipeline 启用分片流水线
 ---
 
 # Agent Loop

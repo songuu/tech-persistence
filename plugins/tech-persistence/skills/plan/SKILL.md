@@ -113,3 +113,18 @@ When the command instructions below mention `/plan`, interpret that as this `$pl
 - 优先做最高风险的部分（fail fast）
 - 如果发现需求不清楚，回退建议 `/think`，不要自己猜测需求
 
+## Phase 间预热钩子
+
+完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「下一 Phase 预热」段。协议见 `~/.codex commands via Tech Persistence plugin/sprint.md` 的「Phase 间预热协议」。
+
+本命令的典型预热内容：
+
+```text
+## 下一 Phase 预热（Phase 3: Work）
+关键文件: 任务清单中最高风险 task 涉及的文件
+执行命令: 跑当前测试基线（确认绿）、读关键模块入口
+风险预判: fail-fast 路径上的最高风险 task、依赖链中的脆弱点
+```
+
+单独使用本命令（不在 sprint 内）时，预热段建议但非必须。
+

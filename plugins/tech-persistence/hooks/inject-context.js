@@ -129,6 +129,60 @@ function detectPendingHandoff() {
 }
 
 /**
+ * 探测当前活跃 sprint 文档的 tags，用于按相关性排序 MEMORY.md entries。
+ *
+ * 行为：扫描 plansDir 下 status: planning / in-progress / reviewing / active 的最新文档，
+ * 解析 frontmatter 的 tags 数组返回。
+ *
+ * 注意：返回的 tags 用作 selectMemoryIndexEntries 的 prioritizeTopics — 此处是
+ * **近似匹配**（sprint tags 与 memory topic 名按字符串相等比较，大小写不敏感）。
+ * Memory entry 本身没有显式 tag 字段，topic 来自文件名（debugging / performance / ...）。
+ * 仅当 sprint tag 字面命中 memory topic name 才生效，未命中时不影响原排序。
+ *
+ * @param {string} [plansDir] - plans 目录路径（测试用，默认 cwd/docs/plans）
+ * @returns {string[]} tags 数组，无 active sprint 或无 tags 时返回 []
+ */
+function detectActiveSprintTags(plansDir = path.join(process.cwd(), 'docs', 'plans')) {
+  if (!fs.existsSync(plansDir)) return [];
+
+  let planFiles;
+  try {
+    planFiles = fs.readdirSync(plansDir)
+      .filter((f) => f.endsWith('.md') && !f.includes('-handoff-') && f !== 'TEMPLATE.md')
+      .sort()
+      .reverse();
+  } catch {
+    return [];
+  }
+
+  const activeStatuses = new Set(['planning', 'in-progress', 'in_progress', 'reviewing', 'active']);
+
+  for (const file of planFiles) {
+    let content;
+    try {
+      content = fs.readFileSync(path.join(plansDir, file), 'utf-8');
+    } catch {
+      continue;
+    }
+    const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) continue;
+    const fm = fmMatch[1];
+
+    const statusMatch = fm.match(/^status:\s*"?([^"\n]+)"?/m);
+    if (!statusMatch || !activeStatuses.has(statusMatch[1].trim())) continue;
+
+    const tagsMatch = fm.match(/^tags:\s*\[([^\]]+)\]/m);
+    if (!tagsMatch) return [];
+
+    return tagsMatch[1]
+      .split(',')
+      .map((tag) => tag.trim().replace(/^["']|["']$/g, ''))
+      .filter(Boolean);
+  }
+  return [];
+}
+
+/**
  * 检测未完成的 prototype 收敛状态
  */
 function detectPendingPrototype() {
@@ -185,9 +239,12 @@ function main() {
   }
 
   // 0c. Memory v5: merge compatible runtime stores instead of shadowing by first hit
+  // 按当前活跃 sprint 的 tags 重排 entries — 命中条目排前，与 sprint 主题更相关的经验先进入上下文
+  const sprintTags = detectActiveSprintTags();
   const memoryIndex = loadUnifiedMemoryIndex(
     compatReadDirs.map(baseDir => path.join(baseDir, 'projects', project.id, 'memory')),
-    DEFAULT_MEMORY_CONFIG
+    DEFAULT_MEMORY_CONFIG,
+    { prioritizeTopics: sprintTags }
   );
   if (memoryIndex) {
     addSection(
@@ -253,4 +310,9 @@ ${renderSections(sections)}
   console.log(output);
 }
 
-try { main(); } catch { process.exit(0); }
+// 只在直接作为脚本运行时跑 main；被 require 时仅 export 函数供测试。
+if (require.main === module) {
+  try { main(); } catch { process.exit(0); }
+}
+
+module.exports = { detectActiveSprintTags };

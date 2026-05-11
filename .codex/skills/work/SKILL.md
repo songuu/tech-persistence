@@ -87,3 +87,18 @@ When the command instructions below mention `/work`, interpret that as this `$wo
    建议执行 /review
 ```
 
+## Phase 间预热钩子
+
+完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「下一 Phase 预热」段。协议见 `~/.codex/commands/sprint.md` 的「Phase 间预热协议」。
+
+本命令的典型预热内容：
+
+```text
+## 下一 Phase 预热（Phase 4: Review）
+关键文件: 本次 diff 涉及的核心文件、新增/修改的测试文件
+执行命令: git diff <base>...HEAD（看完整 diff）、跑完整 test suite
+风险预判: 漏改的相邻代码、风险等级与测试深度不匹配、未覆盖的 edge case
+```
+
+单独使用本命令（不在 sprint 内）时，预热段建议但非必须。
+

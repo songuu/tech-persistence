@@ -22,7 +22,7 @@ When the command instructions below mention `/evolve`, interpret that as this `$
 
 ## 可选参数
 
-- `--auto`：自动审查模式。聚类置信度 ≥ 0.85 且产物为 skill / command（不涉及修改全局 rules、AGENTS.md、agents）时自动落地；改写 AGENTS.md / 全局 rules / `~/.claude/agents/` 仍保留人工 gate。详见 `~/.codex/rules/auto-mode.md`。
+- `--auto`：自动审查模式。聚类置信度 ≥ 0.85 且产物为 skill / command（不涉及修改全局 rules、AGENTS.md、agents）时自动落地；改写 AGENTS.md / 全局 rules / `~/.codex/agents/` 仍保留人工 gate。详见 `~/.codex/rules/auto-mode.md`。
 
 ## 执行步骤
 

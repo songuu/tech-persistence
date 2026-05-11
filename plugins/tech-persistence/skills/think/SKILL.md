@@ -95,3 +95,18 @@ When the command instructions below mention `/think`, interpret that as this `$t
 - 对于 < 30 分钟的小任务，跳过这个命令直接 `/plan`
 - 读取已有的本能和 rules，确保不重复之前的决策
 
+## Phase 间预热钩子
+
+完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「下一 Phase 预热」段。协议见 `~/.codex commands via Tech Persistence plugin/sprint.md` 的「Phase 间预热协议」。
+
+本命令的典型预热内容：
+
+```text
+## 下一 Phase 预热（Phase 2: Plan）
+关键文件: docs/plans/TEMPLATE.md、.codex/rules/architecture.md（相关 ADR）
+执行命令: Glob 待改模块路径、Grep 类似需求的已有实现
+风险预判: 方案的实现性 / 依赖完整性 / 已知踩坑记录
+```
+
+单独使用本命令（不在 sprint 内）时，预热段建议但非必须。
+

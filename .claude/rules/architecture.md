@@ -17,6 +17,24 @@
 
 ## 决策列表
 
+### ADR-012: Plan 阶段必须勘察被改文件，不能纯靠假设 (2026-05-11)
+- **状态**：已采纳
+- **上下文**：`docs/plans/2026-05-11-sprint-speed-layer1.md` Phase 2 plan 阶段连续两次基于错误假设拍 plan，到 Phase 3 work 阶段才发现：(1) 假设 `CONTEXT_BUDGET_CHARS = 25KB`，实际 `inject-context.js:25` 是 12KB — T3 价值定位需重写为"提升相关性"而非"减小体积"；(2) 假设要改 `scripts/agent-orchestrator/pipeline.js` 实现 Phase 间预热，实际该文件是 agent-loop v7 pipeline mode 的代码，跟 `/sprint` 完全不是同一回事，T4 改动对象错了 → 必须停下来重新设计为修订版 A 方案（改 sprint.md 协议 + 5 phase 钩子）。两次错误都导致 work 阶段停顿、重新与用户对齐、调整 plan。
+- **决策**：Plan 阶段必须读取被改文件的关键代码段验证关键假设（"我以为这文件是干嘛的"、"我以为这个常量是多少"、"我以为这个目录在哪"）。具体规则：(a) plan 列出的"涉及文件"清单中每个文件至少有一次 Read（哪怕只读 frontmatter / module.exports / 关键常量）；(b) plan 中所有"假设 X"必须标记可信度 — 不能纯凭模型记忆下决定。Plan 阶段比 work 阶段慢 10-20 分钟换 work 阶段不返工，性价比正。
+- **原因**：(1) work 阶段才发现 plan 错 = 需要停下来重新设计，浪费已实施的部分；(2) 用户会感知到"为什么你 plan 说要改 A 现在又改 B" — 信任成本；(3) plan 错的根因是"模型基于过往记忆 / 文件名猜测内容"，而记忆和文件名都会过期 / 误导；(4) 本 sprint 两次 plan-error 都是 30 分钟内能避免的（读 25 行 + 读 1 个 module.exports）。
+- **备选**：(a) plan 阶段不勘察，work 阶段发现再返工 — 已踩坑，本 sprint 复发两次；(b) plan 之前先全文 explore — 太重，1 个文件就够；(c) 只在 L3+ task 勘察 — 本 sprint T3/T4 都是 L3 但仍踩坑，证明 L2 也需要勘察。
+- **影响**：sprint plan 阶段输出必须包含「关键假设验证」短段（哪些假设、验证了哪些文件、可信度）；planner agent / `/plan` 命令文档应加入此要求；review 阶段对 plan 文档审查"假设是否被验证"作为审查点。
+- **来源**：`docs/plans/2026-05-11-sprint-speed-layer1.md` Phase 2→3 转换时的两次 plan 修正。
+
+### ADR-011: 评估外部架构思想时遵循 identity-question-first 原则 (2026-05-11)
+- **状态**：已采纳
+- **上下文**：评估 `garrytan/gbrain`（同作者 Garry Tan 同生态、公开质量极高的项目）的 12 个架构思想是否融入本项目时，Phase 1-3 直接进入"按 ROI 排序选 top-3"。Phase 4 product-lens reviewer 指出真问题不是"挑哪几个"而是"本项目还是 gstack-aligned 吗，还是已演化为不同物种"。Identity question 没回答时，研究会**"导入表面 / 拒绝脊椎"**（例如 C8 thin/fat 反向哲学是 positioning signal 不是 candidate）。同时 ROI 在身份不明时偏 speed-wins，但 solo-maintainer 的成本曲线与团队反向（speed wins 在 solo 场景累积负利息）。
+- **决策**：评估外部架构思想（gbrain / 未来其他 sibling 项目 / 大幅 refactor 提议）必须先回答 identity question："本项目是 X / Y / Z 中的哪一个？" 答案明示后，多数候选变 trivially decidable。具体到本项目：**tech-persistence = developer-toolchain self-evolution sibling**（不是 gstack / gbrain 替代）；4 条不可妥协原则 — 多运行时 parity / 确定性优先 / 轻量优先 / Obsidian 兼容。ROI 评估默认按 "5 年杠杆 / 维护表面增量" 而非 "人天 / 速胜"。
+- **原因**：(1) Cherry-picking 思想会 import surface / reject spine，结果不连贯（C8 反向哲学 = positioning signal 不是候选）；(2) ROI top-3 在身份不明时容易偏 speed-wins，但 solo 用户的成本曲线与团队反向；(3) reviewer 反馈系统证明这是 **product-lens 才能抓到的问题**，coherence + feasibility 抓不到 — 多视角并行 review 在研究文档上不可省略。
+- **备选**：(a) 不写 ADR，靠下次评估时凭感觉 — 会忘；(b) 把身份陈述放 CLAUDE.md 顶部"关于我"段 — 把身份和个人偏好混淆，未来其他评估 sprint 不会读到。
+- **影响**：未来任何"是否融入外部思想 / 大幅 refactor"的 sprint 必须有 Phase 0 / 前置「项目身份界定」段，明示 4 条不可妥协原则与候选评级的对应关系；ROI 评估默认按"5 年杠杆 / 维护表面增量"；评估流程**必须 spawn 至少 1 个 product-lens reviewer**（不能只 coherence + feasibility）。
+- **来源**：`docs/plans/2026-05-11-gbrain-gstack-analysis.md` Phase 4 product-lens reviewer 反馈。
+
 ### ADR-009: 全局 `--auto` 决策协议放在单一 rule 文件，命令通过引用获得行为 (2026-05-09)
 - **状态**：已采纳
 - **上下文**：每个工作流命令都有自己的人工 gate（`/sprint` phase 间 'go'、`/agent-loop` freeze、`/work` task 完成确认、`/review` P0 修复确认），各自硬编码"必问"。新增 `--auto` 参数若每个命令各自实现行为定义，会立刻分叉；同时缺少跨命令一致的"什么时候必须问、什么时候可以自动"边界。
