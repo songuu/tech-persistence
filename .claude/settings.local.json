@@ -15,7 +15,8 @@
       "Bash(mv update.ps1.new update.ps1)",
       "Bash(node *)",
       "Bash([ -f \"$prefix/$cmd.md\" ])",
-      "Bash([ -f \"$prefix/$cmd/SKILL.md\" ])"
+      "Bash([ -f \"$prefix/$cmd/SKILL.md\" ])",
+      "Bash(AGENT_LOOP_DEBUG=1 node scripts/agent-orchestrator.js self-test)"
     ]
   }
 }

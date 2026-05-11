@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/contract-revision.schema.json",
+  "title": "Agent Loop Contract Revision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "revisionId",
+    "source",
+    "createdAt",
+    "fields",
+    "rationale"
+  ],
+  "properties": {
+    "revisionId": {
+      "type": "string",
+      "pattern": "^rev-[a-z0-9-]+$"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["slice-review", "slice-planner-replan"]
+    },
+    "sourceSliceId": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "fields": {
+      "description": "Changed canonical fields. Keys must be a subset of: goal/nonGoals/globalAcceptance/architectureConstraints/runtimeTargets.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "goal": { "type": "string" },
+        "nonGoals": { "type": "array", "items": { "type": "string" } },
+        "globalAcceptance": { "type": "array", "items": { "type": "string" } },
+        "architectureConstraints": { "type": "array", "items": { "type": "string" } },
+        "runtimeTargets": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["claude-code", "codex"] }
+        }
+      }
+    },
+    "rationale": { "type": "string" },
+    "classification": {
+      "type": "string",
+      "enum": ["compatible", "pending-only", "completed-local", "cross-cutting", "breaking", "pending"]
+    },
+    "resolution": {
+      "type": "string",
+      "enum": ["pending", "auto-applied", "reconciled", "accepted", "rejected", "escalated", "superseded"]
+    },
+    "resolvedAt": { "type": "string", "format": "date-time" },
+    "resolvedBy": { "type": "string" }
+  }
+}

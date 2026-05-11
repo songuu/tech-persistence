@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/pipeline-slice.schema.json",
+  "title": "Agent Loop Pipeline Slice Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "dependsOn",
+    "ownedFiles",
+    "readFiles",
+    "risk",
+    "acceptanceCriteria",
+    "doneCriteria",
+    "validationCommands",
+    "questions"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^(slice|reconcile)-[a-z0-9-]+$"
+    },
+    "title": { "type": "string" },
+    "type": {
+      "type": "string",
+      "enum": ["slice", "reconciliation"]
+    },
+    "dependsOn": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ownedFiles": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "readFiles": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "risk": {
+      "type": "string",
+      "enum": ["L0", "L1", "L2", "L3", "L4"]
+    },
+    "acceptanceCriteria": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "doneCriteria": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "validationCommands": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "questions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "sensitiveAreas": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["auth", "secret", "migration", "destructive", "api", "data-schema", "storage-path"]
+      }
+    },
+    "depth": { "type": "integer", "minimum": 0 },
+    "affectedSlices": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "affectedFiles": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "requiredChanges": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "contractHash": { "type": "string" },
+    "canStart": { "type": "boolean" }
+  }
+}

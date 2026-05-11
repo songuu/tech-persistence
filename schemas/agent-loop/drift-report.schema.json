@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/drift-report.schema.json",
+  "title": "Agent Loop Drift Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generatedAt", "revisions"],
+  "properties": {
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "globalContractHash": { "type": "string" },
+    "revisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revisionId", "classification", "reason", "impact"],
+        "properties": {
+          "revisionId": { "type": "string" },
+          "classification": {
+            "type": "string",
+            "enum": ["compatible", "pending-only", "completed-local", "cross-cutting", "breaking"]
+          },
+          "reason": { "type": "string" },
+          "impact": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "pendingSlices": { "type": "array", "items": { "type": "string" } },
+              "completedSlices": { "type": "array", "items": { "type": "string" } },
+              "newReconciliationSliceId": { "type": "string" },
+              "affectedFiles": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "update-future-base",
+              "replan-pending-queue",
+              "create-reconciliation-slice",
+              "enter-contract-conflict",
+              "escalate-recursive-revision"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
