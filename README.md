@@ -271,6 +271,31 @@ $agent-loop <原始需求>             # Codex 入口（同名 skill）
 
 运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review、follow-up task，以及带时间戳的 provider 日志和 prompt 文件。`.agent-runs/` 是运行态目录，不进入 Git。
 
+### Agent Loop pipeline 模式（可选 opt-in，2026-05-11 新增）
+
+当默认串行模式的"一次性 freeze 整个 spec"成为瓶颈时，加 `--pipeline` 进入分片流水线：全局契约先 freeze、再分批生成可执行 slice，每个 slice 独立 freeze、Codex 实现、Claude review，最后做 integration review。
+
+```powershell
+# 默认模式完全不变；只有显式 --pipeline 才进入新状态机
+node scripts\agent-orchestrator.js run --requirement "..." --pipeline
+node scripts\agent-orchestrator.js run --requirement "..." --pipeline --auto
+
+# pipeline 模式 freeze 必须显式 target
+node scripts\agent-orchestrator.js freeze --run <id> --target global-contract
+node scripts\agent-orchestrator.js freeze --run <id> --target slice --slice-id <slice>
+
+# contract-conflict 恢复 / blocked slice 重排 / 主动放弃
+node scripts\agent-orchestrator.js resume --run <id> --resolve accept-revision --revision <id>
+node scripts\agent-orchestrator.js resume --run <id> --resolve reject-revision --revision <id>
+node scripts\agent-orchestrator.js resume --run <id> --unblock <sliceId>
+node scripts\agent-orchestrator.js abandon --run <id>
+
+# 不调用 provider 验证完整 artifact 拓扑
+node scripts\agent-orchestrator.js run --requirement "smoke" --pipeline --dry-run
+```
+
+Pipeline run 额外写入 `global-contract.json` / `global-contract.history.jsonl` / `contract-revisions.jsonl` / `queue.json` / `locks.json` / `drift-report.json` / `slices/<id>/{slice,handoff,review,diff,validation}.*`。详细双层状态机、契约 hash 范围、drift 五级分类、reconciliation 递归终止、`--auto` safe 集合等设计见 `docs/architecture/agent-loop-pipeline-architecture.md`。
+
 Caveman 入口：
 
 ```text
@@ -319,7 +344,7 @@ SessionStart hook 会注入 caveman 规则；如需关闭自动激活，设置 `
 | `/review` | 审查团队 | 5 视角审查（含测试覆盖 vs 风险匹配） |
 | `/compound` | 知识管理 | 经验+本能+方案+skill 信号+Obsidian 输出 |
 | `/sprint` | 指挥官 | 全链路编排 + 自动 checkpoint + resume |
-| `/agent-loop` | 外部编排器 | v7 跨 Agent：冻结 spec → codex 实现 → spec review；caveman 压缩输出 |
+| `/agent-loop` | 外部编排器 | v7 跨 Agent：冻结 spec → codex 实现 → spec review；caveman 压缩输出；可选 `--pipeline` 分片流水线 |
 
 ### 需求收敛（1 个）
 | 命令 | 作用 |

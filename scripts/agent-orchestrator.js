@@ -5,6 +5,17 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+const pipeline = require('./agent-orchestrator/pipeline');
+const pipelineState = require('./agent-orchestrator/pipeline-state');
+const pipelineQueue = require('./agent-orchestrator/queue');
+const pipelineLocks = require('./agent-orchestrator/locks');
+const globalContractModule = require('./agent-orchestrator/global-contract');
+const slicePlannerModule = require('./agent-orchestrator/slice-planner');
+const sliceNormalizerModule = require('./agent-orchestrator/slice-normalizer');
+const driftDetectorModule = require('./agent-orchestrator/drift-detector');
+const reconciliationModule = require('./agent-orchestrator/reconciliation');
+const reviewModule = require('./agent-orchestrator/review');
+
 const VERSION = 'v7';
 const DEFAULT_RUNS_DIR = '.agent-runs';
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -514,9 +525,38 @@ function runProcess(label, launchOrCommand, args, settings) {
     throw new Error(`${label} failed to start: ${result.error.message}`);
   }
   if (!settings.allowFailure && result.status !== 0) {
-    throw new Error(`${label} exited with ${result.status}; see ${settings.stderrFile || 'stderr'}`);
+    const envelopeError = extractProviderEnvelopeError(result.stdout || '');
+    const stderrPath = settings.stderrFile || 'stderr';
+    const stdoutPath = settings.stdoutFile || 'stdout';
+    const where = envelopeError
+      ? `stdout: ${stdoutPath}`
+      : `stderr: ${stderrPath} / stdout: ${stdoutPath}`;
+    const reason = envelopeError ? ` — ${envelopeError}` : '';
+    throw new Error(`${label} exited with ${result.status}${reason}; see ${where}`);
   }
   return { result, record };
+}
+
+function extractProviderEnvelopeError(stdoutText) {
+  if (!stdoutText || typeof stdoutText !== 'string') return null;
+  const trimmed = stdoutText.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object') {
+      if (parsed.is_error === true || typeof parsed.api_error_status !== 'undefined') {
+        const apiStatus = parsed.api_error_status ? `[api ${parsed.api_error_status}] ` : '';
+        const msg = typeof parsed.result === 'string' && parsed.result.trim()
+          ? parsed.result.trim()
+          : (parsed.error && (parsed.error.message || parsed.error)) || 'provider returned error envelope';
+        return `${apiStatus}${msg}`;
+      }
+      if (parsed.error && (parsed.error.message || typeof parsed.error === 'string')) {
+        return typeof parsed.error === 'string' ? parsed.error : parsed.error.message;
+      }
+    }
+  } catch (_) { /* not JSON, fall through */ }
+  return null;
 }
 
 function runShell(label, command, settings) {
@@ -1085,6 +1125,10 @@ function runSpecProvider(state, statePath, runDir, options) {
 
 function freezeRun(options, positionals) {
   const { state, statePath, runDir } = loadRun(options, positionals);
+  if (state.mode === 'pipeline') {
+    pipeline.freezePipelineRun(buildPipelineCtx(), options, positionals);
+    return;
+  }
   if (!fs.existsSync(path.join(runDir, 'spec.json'))) {
     throw new Error('Cannot freeze before spec.json exists');
   }
@@ -1093,6 +1137,15 @@ function freezeRun(options, positionals) {
   state.specFrozenBy = optionValue(options, 'reviewer') || process.env.USER || process.env.USERNAME || 'human';
   saveState(statePath, state);
   console.log(`[OK] frozen ${state.runId}`);
+}
+
+function abandonRun(options, positionals) {
+  const { state } = loadRun(options, positionals);
+  if (state.mode === 'pipeline') {
+    pipeline.abandonPipelineRun(buildPipelineCtx(), options, positionals);
+    return;
+  }
+  throw new Error('abandon is only supported in pipeline mode runs.');
 }
 
 function isGitRepository(workdir) {
@@ -1450,6 +1503,7 @@ function writeFollowUpTask(runDir, review) {
 function newState(workdir, runDir, runId, requirement) {
   return {
     version: VERSION,
+    mode: 'classic',
     runId,
     status: 'draft',
     createdAt: nowIso(),
@@ -1464,6 +1518,49 @@ function newState(workdir, runDir, runId, requirement) {
     specFrozenAt: null,
     specFrozenBy: null,
     providerRuns: [],
+  };
+}
+
+function buildPipelineCtx() {
+  return {
+    log: (message) => console.log(message),
+    warn: (message) => console.warn(message),
+    error: (message) => console.error(message),
+    exitWithFailure: () => { process.exitCode = 1; },
+    optionValue,
+    optionValues,
+    boolOption,
+    resolveWorkdir,
+    resolveRunsDir,
+    readRequirement,
+    dateStamp,
+    slugify,
+    loadRun,
+    buildPreflightReport,
+    writePreflight,
+    assertPreflight,
+    printPreflight,
+    runProcess,
+    runShell,
+    providerLaunch,
+    providerCommandSpec,
+    providerTimeoutMs,
+    codexSandboxMode,
+    claudeProviderEnv,
+    isGitRepository,
+    writeGitDiff,
+    listChangedFiles,
+    ensureCleanWorktree,
+    extractJsonValue,
+    parseJsonFromText,
+    unwrapAgentJson,
+    findFirstJson,
+    tryParseJson,
+    schemaPath,
+    schemaJson,
+    nowIso,
+    logStamp,
+    stampedLogPath,
   };
 }
 
@@ -1591,6 +1688,10 @@ function formatDetail(value) {
 }
 
 function runStart(options, positionals) {
+  if (boolOption(options, 'pipeline')) {
+    pipeline.startPipelineRun(buildPipelineCtx(), options, positionals);
+    return;
+  }
   const workdir = resolveWorkdir(options);
   const runsDir = resolveRunsDir(workdir, options);
   const requirement = readRequirement(options, positionals);
@@ -1648,6 +1749,10 @@ function runStart(options, positionals) {
 
 function runResume(options, positionals) {
   const { runDir, statePath, state } = loadRun(options, positionals);
+  if (state.mode === 'pipeline') {
+    pipeline.resumePipelineRun(buildPipelineCtx(), options, positionals);
+    return;
+  }
   if (state.status === 'dry-run') {
     console.log(`[INFO] ${state.runId} is a dry-run. No provider calls to resume.`);
     return;
@@ -1690,9 +1795,61 @@ function runStatus(options, positionals) {
 function runDoctor(options) {
   const workdir = resolveWorkdir(options);
   const runsDir = resolveRunsDir(workdir, options);
-  const report = buildPreflightReport(workdir, options, path.join(runsDir, '_doctor'));
+  const probeDir = path.join(runsDir, '_doctor');
+  const report = buildPreflightReport(workdir, options, probeDir);
   printPreflight(report);
-  if (!report.ok) process.exitCode = 1;
+  if (!report.ok) { process.exitCode = 1; return; }
+  if (boolOption(options, 'probe')) {
+    const probe = probeProviders(workdir, options, probeDir);
+    printProbe(probe);
+    if (!probe.ok) process.exitCode = 1;
+  }
+}
+
+function probeProviders(workdir, options, runDir) {
+  ensureDir(runDir);
+  const results = [];
+  const stamp = logStamp();
+  const probePrompt = 'ping';
+
+  try {
+    const stdoutFile = stampedLogPath(runDir, 'probe-spec', 'stdout.log', stamp);
+    const stderrFile = stampedLogPath(runDir, 'probe-spec', 'stderr.log', stamp);
+    runProcess(
+      'probe spec/review provider',
+      providerLaunch(options, 'spec'),
+      ['-p', '--input-format', 'text', '--output-format', 'json'],
+      { cwd: workdir, stdoutFile, stderrFile, stdin: probePrompt, timeoutMs: 30000, env: claudeProviderEnv() }
+    );
+    results.push({ name: 'spec/review (claude)', ok: true });
+  } catch (error) {
+    results.push({ name: 'spec/review (claude)', ok: false, reason: error.message });
+  }
+
+  try {
+    const stdoutFile = stampedLogPath(runDir, 'probe-impl', 'stdout.log', stamp);
+    const stderrFile = stampedLogPath(runDir, 'probe-impl', 'stderr.log', stamp);
+    runProcess(
+      'probe implementation provider',
+      providerLaunch(options, 'implementation'),
+      ['--version'],
+      { cwd: workdir, stdoutFile, stderrFile, timeoutMs: 30000 }
+    );
+    results.push({ name: 'implementation (codex)', ok: true });
+  } catch (error) {
+    results.push({ name: 'implementation (codex)', ok: false, reason: error.message });
+  }
+
+  return { ok: results.every((r) => r.ok), results };
+}
+
+function printProbe(probe) {
+  console.log('--- probe ---');
+  for (const r of probe.results) {
+    if (r.ok) console.log(`[OK] ${r.name}`);
+    else console.log(`[FAIL] ${r.name}: ${r.reason}`);
+  }
+  console.log(probe.ok ? '[OK] probe passed' : '[FAIL] probe failed');
 }
 
 function runSelfTest() {
@@ -1723,6 +1880,13 @@ function runSelfTest() {
   assertSelfTest('taskBreakdown.tasks normalizes', nestedTaskBreakdownSpec.taskBreakdown.length, 1);
   assertSelfTest('provider timeout minutes parses', providerTimeoutMs({ 'provider-timeout-minutes': '2' }), 120000);
 
+  const claude401 = extractProviderEnvelopeError('{"is_error":true,"api_error_status":401,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}');
+  assertSelfTest('envelope extractor surfaces claude 401', claude401.includes('401') && claude401.includes('authenticate'), true);
+  const codex402 = extractProviderEnvelopeError('{"is_error":true,"result":"insufficient quota"}');
+  assertSelfTest('envelope extractor surfaces generic is_error', codex402.includes('insufficient quota'), true);
+  assertSelfTest('envelope extractor ignores plain text', extractProviderEnvelopeError('hello world'), null);
+  assertSelfTest('envelope extractor ignores empty', extractProviderEnvelopeError(''), null);
+
   const directBusinessJson = extractJsonValue(JSON.stringify({
     result: 'Implementation completed without structured wrapper.',
     files: ['scripts/example.js'],
@@ -1741,7 +1905,316 @@ function runSelfTest() {
   }));
   assertSelfTest('message.content array unwraps JSON', nestedContent.decision, 'approved');
   assertSelfTest('handoff schema uses strict objects', schemaHasStrictObjects(readJson(schemaPath('agent-handoff.schema.json'))), true);
+
+  runPipelineSelfTests();
+
   console.log('[OK] self-test passed');
+}
+
+function runPipelineSelfTests() {
+  for (const schemaName of [
+    'global-contract.schema.json',
+    'pipeline-slice.schema.json',
+    'contract-revision.schema.json',
+  ]) {
+    assertSelfTest(`pipeline provider schema is strict ${schemaName}`, schemaHasStrictObjects(readJson(schemaPath(schemaName))), true);
+  }
+  for (const schemaName of [
+    'pipeline-queue.schema.json',
+    'pipeline-locks.schema.json',
+    'drift-report.schema.json',
+  ]) {
+    const parsed = readJson(schemaPath(schemaName));
+    assertSelfTest(`internal artifact schema parses ${schemaName}`, parsed.$id.includes('agent-loop'), true);
+  }
+
+  assertSelfTest('pipeline run transitions: draft -> global-contract-ready',
+    pipelineState.isValidRunTransition('draft', 'global-contract-ready'), true);
+  assertSelfTest('pipeline run transitions: executing-slices -> integration-ready',
+    pipelineState.isValidRunTransition('executing-slices', 'integration-ready'), true);
+  assertSelfTest('pipeline run transitions: completed has no successor',
+    pipelineState.isValidRunTransition('completed', 'executing-slices'), false);
+  assertSelfTest('pipeline slice transitions: pending -> ready',
+    pipelineState.isValidSliceTransition('slice-pending', 'slice-ready'), true);
+  assertSelfTest('pipeline slice transitions: frozen -> rejected branch',
+    pipelineState.isValidSliceTransition('slice-frozen', 'slice-rejected'), true);
+  assertSelfTest('pipeline slice transitions: completed has no successor',
+    pipelineState.isValidSliceTransition('slice-completed', 'slice-implementing'), false);
+
+  const contractA = globalContractModule.normalizeGlobalContract({
+    goal: 'g', nonGoals: ['x'], globalAcceptance: ['a'],
+    architectureConstraints: ['c'], runtimeTargets: ['claude-code', 'codex'],
+    riskLevel: 'L2', blockingQuestions: ['q1'],
+  });
+  const contractB = globalContractModule.normalizeGlobalContract({
+    goal: 'g', nonGoals: ['x'], globalAcceptance: ['a'],
+    architectureConstraints: ['c'], runtimeTargets: ['claude-code', 'codex'],
+    riskLevel: 'L2', blockingQuestions: ['totally different'],
+  });
+  assertSelfTest('contractHash excludes blockingQuestions', contractA.contractHash, contractB.contractHash);
+
+  const contractSorted = globalContractModule.normalizeGlobalContract({
+    goal: 'g', nonGoals: ['b', 'a'], globalAcceptance: ['a'],
+    architectureConstraints: ['c'], runtimeTargets: ['codex', 'claude-code'],
+    riskLevel: 'L2', blockingQuestions: [],
+  });
+  const contractSortedFlip = globalContractModule.normalizeGlobalContract({
+    goal: 'g', nonGoals: ['a', 'b'], globalAcceptance: ['a'],
+    architectureConstraints: ['c'], runtimeTargets: ['claude-code', 'codex'],
+    riskLevel: 'L2', blockingQuestions: [],
+  });
+  assertSelfTest('contractHash canonical sorts arrays', contractSorted.contractHash, contractSortedFlip.contractHash);
+
+  const l4Slice = sliceNormalizerModule.rejectIfUnsafe(
+    sliceNormalizerModule.normalizeSlice({
+      id: 'slice-l4', title: 'too risky', risk: 'L4', ownedFiles: ['x.js'],
+      acceptanceCriteria: ['a'], doneCriteria: ['d'],
+    }, { fallbackIndex: 0, globalContractHash: contractA.contractHash }),
+  );
+  assertSelfTest('L4 slice is rejected', l4Slice.rejected, true);
+
+  const sensitiveSlice = sliceNormalizerModule.rejectIfUnsafe(
+    sliceNormalizerModule.normalizeSlice({
+      id: 'slice-auth', title: 'rewrite auth middleware', risk: 'L2', ownedFiles: ['auth.js'],
+      acceptanceCriteria: ['ok'], doneCriteria: ['ok'],
+    }, { fallbackIndex: 0, globalContractHash: contractA.contractHash }),
+  );
+  assertSelfTest('sensitive-area slice flagged auth', sensitiveSlice.sensitiveAreas.includes('auth'), true);
+  assertSelfTest('sensitive-area slice rejected', sensitiveSlice.rejected, true);
+
+  const safeSlice = sliceNormalizerModule.normalizeSlice({
+    id: 'slice-001', title: 'simple', risk: 'L1', ownedFiles: ['a.js', 'b.js'],
+    acceptanceCriteria: ['ok'], doneCriteria: ['ok'],
+  }, { fallbackIndex: 0, globalContractHash: contractA.contractHash });
+  const staticCheck = sliceNormalizerModule.evaluateStaticCanStart(safeSlice);
+  assertSelfTest('safe slice passes static canStart', staticCheck.canStart, true);
+  assertSelfTest('safe slice is auto-eligible', sliceNormalizerModule.isSliceSafeForAuto(safeSlice), true);
+
+  let q = pipelineQueue.emptyQueue();
+  q = pipelineQueue.moveToPending(q, 'slice-001');
+  q = pipelineQueue.moveToReady(q, 'slice-001');
+  q = pipelineQueue.moveToRunning(q, 'slice-001');
+  q = pipelineQueue.moveToCompleted(q, 'slice-001');
+  assertSelfTest('queue ends at completed', q.completed[0], 'slice-001');
+  assertSelfTest('queue running cleared', q.running.length, 0);
+  const qBlocked = pipelineQueue.moveToBlocked(pipelineQueue.emptyQueue(), 'slice-002', 'ownedFiles claimed');
+  assertSelfTest('queue blocked records reason', qBlocked.blocked[0].reason, 'ownedFiles claimed');
+
+  let locksState = pipelineLocks.emptyLocks();
+  locksState = pipelineLocks.claimAll(locksState, { id: 'slice-001', ownedFiles: ['a.js'] });
+  assertSelfTest('locks claimed', locksState.files['a.js'].status, 'claimed');
+  locksState = pipelineLocks.markCompletedOwner(locksState, { id: 'slice-001', ownedFiles: ['a.js'] });
+  assertSelfTest('locks completed-owner', locksState.files['a.js'].status, 'completed-owner');
+  const denyClass = pipelineLocks.classifyClaim(locksState, { id: 'slice-002', ownedFiles: ['a.js'], dependsOn: [] });
+  assertSelfTest('completed-owner blocks without dependsOn', denyClass.blockedBy.length, 1);
+  const allowClass = pipelineLocks.classifyClaim(locksState, { id: 'slice-003', ownedFiles: ['a.js'], dependsOn: ['slice-001'] });
+  assertSelfTest('completed-owner upgradable with dependsOn', allowClass.upgradable.length, 1);
+
+  const driftReview = driftDetectorModule.classify(
+    { source: 'slice-review', fields: { globalAcceptance: ['new'] }, rationale: 'breaking' },
+    { contract: contractA, pendingSlices: [], completedSlices: [], runningSlices: [] },
+  );
+  assertSelfTest('drift breaking detected', driftReview.classification, 'breaking');
+
+  const driftRecon = driftDetectorModule.classify(
+    { source: 'slice-review', fields: { architectureConstraints: ['new'] }, rationale: 'recon attempted' },
+    { contract: contractA, pendingSlices: [], completedSlices: [], runningSlices: [], reconciliationDepthOfSource: 1 },
+  );
+  assertSelfTest('reconciliation drift escalated to cross-cutting', driftRecon.classification, 'cross-cutting');
+
+  const driftPending = driftDetectorModule.classify(
+    { source: 'slice-planner-replan', fields: { runtimeTargets: ['claude-code'] }, rationale: 'pending only' },
+    { contract: contractA, pendingSlices: ['slice-002'], completedSlices: [], runningSlices: [] },
+  );
+  assertSelfTest('drift pending-only', driftPending.classification, 'pending-only');
+
+  const driftLocal = driftDetectorModule.classify(
+    { source: 'slice-review', fields: { architectureConstraints: ['new'] }, rationale: 'local' },
+    { contract: contractA, pendingSlices: [], completedSlices: ['slice-001'], runningSlices: [] },
+  );
+  assertSelfTest('drift completed-local', driftLocal.classification, 'completed-local');
+
+  const reconSlice = reconciliationModule.generateReconciliationSlice({
+    revision: { revisionId: 'rev-001', validationCommands: ['npm test'] },
+    affectedSlices: ['slice-001'],
+    affectedFiles: ['a.js'],
+    fallbackIndex: 0,
+    globalContractHash: contractA.contractHash,
+  });
+  assertSelfTest('reconciliation slice id prefix', reconSlice.id.startsWith('reconcile-'), true);
+  assertSelfTest('reconciliation slice depth 1', reconSlice.depth, 1);
+
+  const deepRecon = reconciliationModule.ensureDepthLimit({ ...reconSlice, depth: 2 });
+  assertSelfTest('reconciliation depth >1 rejected', deepRecon.rejected, true);
+
+  const cleanedRecursive = reconciliationModule.rejectRecursiveRevision({
+    sliceId: 'reconcile-001',
+    contractRevisions: [{ revisionId: 'rev-002', fields: { goal: 'change' } }],
+  });
+  assertSelfTest('reconciliation revisions stripped', cleanedRecursive.contractRevisions.length, 0);
+  assertSelfTest('reconciliation revisions captured for audit', cleanedRecursive.recursiveRevisionsBlocked.length, 1);
+
+  const aggregated = reviewModule.aggregateIntegrationValidationCommands(
+    { integrationValidationCommands: ['npm run lint'] },
+    [{ validationCommands: ['npm test'] }, { validationCommands: ['npm test', 'npm run typecheck'] }],
+  );
+  assertSelfTest('integration validation deduped', aggregated.length, 4);
+  assertSelfTest('integration validation order: global first', aggregated[0], 'npm run lint');
+  assertSelfTest('integration validation builtin tail', aggregated[aggregated.length - 1], 'git diff --check');
+
+  let illegalThrown = false;
+  try {
+    driftDetectorModule.classify({ source: 'user-edit', fields: { goal: 'g' } }, { contract: contractA });
+  } catch (error) {
+    illegalThrown = true;
+  }
+  assertSelfTest('drift source whitelist enforced', illegalThrown, true);
+
+  const planState = pipeline.newPipelineState('/tmp/work', '/tmp/work/.agent-runs/x', 'x', 'requirement');
+  assertSelfTest('newPipelineState mode pipeline', planState.mode, 'pipeline');
+  assertSelfTest('newPipelineState initial status', planState.status, 'draft');
+
+  runProviderIntegrationSelfTests();
+}
+
+function runProviderIntegrationSelfTests() {
+  const providers = require('./agent-orchestrator/pipeline-providers');
+  const tmpBase = path.join(os.tmpdir(), `agent-loop-selftest-${process.pid}-${Date.now()}`);
+  fs.mkdirSync(path.join(tmpBase, 'prompts'), { recursive: true });
+  fs.mkdirSync(path.join(tmpBase, 'logs'), { recursive: true });
+  fs.mkdirSync(path.join(tmpBase, 'slices'), { recursive: true });
+
+  let stateObj = pipeline.newPipelineState(tmpBase, tmpBase, 'selftest', 'a provider integration self-test requirement');
+  const statePath = path.join(tmpBase, 'state.json');
+  writeJson(statePath, stateObj);
+  writeText(
+    path.join(tmpBase, 'prompts', 'global-contract.md'),
+    'mock prompt for global contract',
+  );
+
+  const mockCtx = buildMockCtx(tmpBase);
+  let calls = 0;
+  mockCtx.runProcess = (label, launchOrCommand, args, settings) => {
+    calls += 1;
+    const stdout = mockCtx._stdoutQueue.shift() || '{}';
+    if (settings && settings.stdoutFile) writeText(settings.stdoutFile, stdout);
+    if (settings && settings.stderrFile) writeText(settings.stderrFile, '');
+    return {
+      result: { status: 0, stdout, stderr: '' },
+      record: {
+        label, args, cwd: settings ? settings.cwd : null,
+        stdoutFile: settings && settings.stdoutFile, stderrFile: settings && settings.stderrFile,
+        status: 0, startedAt: 'mock', finishedAt: 'mock',
+      },
+    };
+  };
+  mockCtx._stdoutQueue = [
+    JSON.stringify({
+      version: 'global-v1',
+      goal: 'Mock provider integration goal',
+      nonGoals: ['no implementation in this self-test'],
+      globalAcceptance: ['providers wire through ctx'],
+      architectureConstraints: ['mock only'],
+      runtimeTargets: ['claude-code', 'codex'],
+      riskLevel: 'L1',
+      blockingQuestions: [],
+    }),
+  ];
+
+  stateObj = providers.runGlobalContractProvider(mockCtx, stateObj, statePath, tmpBase, {});
+  assertSelfTest('provider integration: global contract written', fs.existsSync(path.join(tmpBase, 'global-contract.json')), true);
+  assertSelfTest('provider integration: status global-contract-ready', stateObj.status, 'global-contract-ready');
+  assertSelfTest('provider integration: providerRuns appended', Array.isArray(stateObj.providerRuns) && stateObj.providerRuns.length === 1, true);
+
+  stateObj = { ...stateObj, status: 'planning-slices' };
+  writeJson(statePath, stateObj);
+  mockCtx._stdoutQueue.push(
+    JSON.stringify({
+      slices: [{
+        id: 'slice-001',
+        title: 'mock slice',
+        dependsOn: [],
+        ownedFiles: ['mock.txt'],
+        readFiles: [],
+        risk: 'L1',
+        acceptanceCriteria: ['mock ok'],
+        doneCriteria: ['mock done'],
+        validationCommands: [],
+        questions: [],
+      }],
+    }),
+  );
+  stateObj = providers.runSlicePlannerProvider(mockCtx, stateObj, statePath, tmpBase, {});
+  assertSelfTest('provider integration: slice planner wrote slice-001', fs.existsSync(path.join(tmpBase, 'slices', 'slice-001', 'slice.json')), true);
+  assertSelfTest('provider integration: slice state advanced to ready', stateObj.pipeline.sliceStates['slice-001'], 'slice-ready');
+  assertSelfTest('provider integration: status executing-slices', stateObj.status, 'executing-slices');
+
+  const reviewApprovedRaw = JSON.stringify({ decision: 'approved', contractRevisions: [], findings: [] });
+  mockCtx._stdoutQueue.push(reviewApprovedRaw);
+  const slice = require('./agent-orchestrator/slice-planner').loadSlice(tmpBase, 'slice-001');
+  const locksModule = require('./agent-orchestrator/locks');
+  locksModule.saveLocks(tmpBase, locksModule.claimAll(locksModule.loadLocks(tmpBase), slice));
+  fs.writeFileSync(path.join(tmpBase, 'slices', 'slice-001', 'diff.patch'), 'mock diff');
+  fs.writeFileSync(path.join(tmpBase, 'slices', 'slice-001', 'handoff.json'), '{}');
+  const reviewOutcome = providers.runSliceReviewProvider(mockCtx, stateObj, statePath, tmpBase, {}, slice);
+  assertSelfTest('provider integration: approved slice marked completed', reviewOutcome.state.pipeline.sliceStates['slice-001'], 'slice-completed');
+  assertSelfTest('provider integration: completed-owner lock', JSON.parse(fs.readFileSync(path.join(tmpBase, 'locks.json'), 'utf8')).files['mock.txt'].status, 'completed-owner');
+
+  stateObj = reviewOutcome.state;
+  const reviewBreakingRaw = JSON.stringify({
+    decision: 'needs-followup',
+    findings: [],
+    contractRevisions: [{ revisionId: 'rev-001', fields: { goal: 'new goal' }, rationale: 'breaking shift' }],
+  });
+  mockCtx._stdoutQueue.push(reviewBreakingRaw);
+  fs.writeFileSync(path.join(tmpBase, 'slices', 'slice-001', 'diff.patch'), 'mock diff');
+  const breakingOutcome = providers.runSliceReviewProvider(mockCtx, stateObj, statePath, tmpBase, {}, slice);
+  assertSelfTest('provider integration: breaking revision enters contract-conflict', breakingOutcome.state.status, 'contract-conflict');
+  assertSelfTest('provider integration: breaking drift recorded', breakingOutcome.drift[0].classification, 'breaking');
+
+  fs.rmSync(tmpBase, { recursive: true, force: true });
+}
+
+function buildMockCtx(workdir) {
+  return {
+    log: () => {},
+    warn: () => {},
+    error: () => {},
+    optionValue: (options, key) => options ? options[key] : undefined,
+    optionValues: (options, key) => options && Array.isArray(options[key]) ? options[key] : [],
+    boolOption: () => false,
+    resolveWorkdir: () => workdir,
+    resolveRunsDir: () => workdir,
+    readRequirement: () => 'mock requirement',
+    dateStamp,
+    slugify,
+    loadRun: () => ({ runDir: workdir, statePath: path.join(workdir, 'state.json'), state: readJson(path.join(workdir, 'state.json')) }),
+    buildPreflightReport: () => ({ ok: true, checks: [] }),
+    writePreflight: () => {},
+    assertPreflight: () => {},
+    printPreflight: () => {},
+    runProcess: () => { throw new Error('mock runProcess not set'); },
+    runShell: () => ({ status: 0, startedAt: 'mock', finishedAt: 'mock' }),
+    providerLaunch: () => ({ command: 'mock', argsPrefix: [], shell: false }),
+    providerCommandSpec: () => 'mock',
+    providerTimeoutMs: () => 60000,
+    codexSandboxMode: () => null,
+    claudeProviderEnv: () => ({}),
+    isGitRepository: () => false,
+    writeGitDiff: () => '',
+    listChangedFiles: () => [],
+    ensureCleanWorktree: () => {},
+    extractJsonValue: (text) => JSON.parse(text),
+    parseJsonFromText: (text) => JSON.parse(text),
+    unwrapAgentJson: (value) => value,
+    findFirstJson: () => null,
+    tryParseJson: (value) => { try { return { ok: true, value: JSON.parse(value) }; } catch (error) { return { ok: false, error }; } },
+    schemaPath,
+    schemaJson,
+    nowIso,
+    logStamp,
+    stampedLogPath,
+  };
 }
 
 function assertSelfTest(name, actual, expected) {
@@ -1763,11 +2236,27 @@ Usage:
   node scripts/agent-orchestrator.js doctor
   node scripts/agent-orchestrator.js self-test
 
+Pipeline mode (experimental opt-in):
+  node scripts/agent-orchestrator.js run --requirement "..." --pipeline [--auto]
+  node scripts/agent-orchestrator.js freeze --run <id> --target global-contract
+  node scripts/agent-orchestrator.js freeze --run <id> --target slice --slice-id <slice>
+  node scripts/agent-orchestrator.js resume --run <id> --resolve accept-revision --revision <id>
+  node scripts/agent-orchestrator.js resume --run <id> --resolve reject-revision --revision <id>
+  node scripts/agent-orchestrator.js resume --run <id> --unblock <sliceId>
+  node scripts/agent-orchestrator.js abandon --run <id>
+
 Options:
   --workdir <path>              Repository root. Defaults to cwd.
   --runs-dir <path>             Run directory under workdir. Defaults to .agent-runs.
   --run-id <id>                 Stable run id.
   --auto-freeze                 Explicitly skip human freeze and continue.
+  --auto                        Pipeline mode: auto-freeze "safe" objects only (see docs).
+  --pipeline                    Enable pipeline mode (experimental).
+  --target <kind>               Pipeline freeze target: global-contract | slice.
+  --slice-id <id>               Pipeline slice id (with --target slice).
+  --resolve <action>            Pipeline contract-conflict action: accept-revision | reject-revision | abandon.
+  --revision <id>               Revision id for --resolve accept/reject.
+  --unblock <sliceId>           Move a blocked slice back to ready.
   --allow-dirty                 Allow implementation in a dirty git worktree.
   --validation-command <cmd>    Shell command to run after implementation. Repeatable.
   --claude-command <cmd>        Override spec/review provider command.
@@ -1810,6 +2299,9 @@ function main() {
     case 'preflight':
       runDoctor(options);
       break;
+    case 'abandon':
+      abandonRun(options, positionals);
+      break;
     case 'self-test':
       runSelfTest();
       break;
@@ -1823,5 +2315,6 @@ try {
   main();
 } catch (error) {
   console.error(`[FAIL] ${error.message}`);
+  if (process.env.AGENT_LOOP_DEBUG) console.error(error.stack);
   process.exit(1);
 }

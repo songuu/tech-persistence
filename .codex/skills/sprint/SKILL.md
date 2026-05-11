@@ -257,6 +257,40 @@ Knowledge: <N rules>, <M instincts>, <K signals>
 Compact: yes/no + reason
 ```
 
+## Phase 间预热协议
+
+每个 Phase 报告末尾**必须**追加「下一 Phase 预热」段，让用户 'go' 时模型上下文已就绪，节省 N→N+1 切换的探索往返。
+
+### 预热段格式（强制）
+
+```text
+## 下一 Phase 预热（Phase N+1: <名称>）
+关键文件: <1-3 个 N+1 必读路径>
+执行命令: <1-2 个 N+1 起步探索命令>
+风险预判: <1-3 行 N+1 潜在风险或注意点>
+```
+
+### 各 Phase 预热典型内容
+
+| 当前 Phase | 下一 Phase | 典型关键文件 | 典型起步命令 |
+|-----------|-----------|------------|------------|
+| Think → Plan | Plan | `docs/plans/TEMPLATE.md`、相关 `rules/*.md` | `Grep` 相关 ADR、`Glob` 待改文件 |
+| Plan → Work | Work | 计划列出的最高优先级文件 | 跑当前测试基线、读关键模块 |
+| Work → Review | Review | `git diff` 输出、新增测试文件 | `git diff <base>...HEAD`、检查测试通过 |
+| Review → Compound | Compound | sprint 文档的 review 段 | 读 P0/P1 处理记录、扫 rules/ 是否需更新 |
+| Compound → 收尾 | （无下一 phase）| sprint 文档 frontmatter | 检查 status: completed、是否需 /compact |
+
+### 设计原则
+
+- ✅ 仅提示线索，不预先执行下一 phase 的操作
+- ✅ 每段 ≤ 3 行，信息密度优先
+- ✅ Caveman mode 也保留（密度高不浪费 token）
+- ❌ 不复述当前 phase 的结论
+- ❌ 不预先调用 LLM 生成下一 phase 的产物
+- ❌ 不修改任何文件，纯文本提示
+
+预热段失败（如无法确定下一 phase 关键文件）时，输出 `预热: 跳过 — <原因>` 即可，不阻塞流程。
+
 ## Sprint 文档 frontmatter（Obsidian 兼容）
 
 ```yaml

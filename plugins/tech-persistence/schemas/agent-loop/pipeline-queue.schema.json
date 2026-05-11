@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/pipeline-queue.schema.json",
+  "title": "Agent Loop Pipeline Queue",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pending", "ready", "running", "completed", "blocked"],
+  "properties": {
+    "pending": { "type": "array", "items": { "type": "string" } },
+    "ready": { "type": "array", "items": { "type": "string" } },
+    "running": { "type": "array", "items": { "type": "string" } },
+    "completed": { "type": "array", "items": { "type": "string" } },
+    "blocked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sliceId", "reason"],
+        "properties": {
+          "sliceId": { "type": "string" },
+          "reason": { "type": "string" },
+          "blockedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "abandoned": { "type": "array", "items": { "type": "string" } },
+    "rejected": { "type": "array", "items": { "type": "string" } },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}

@@ -56,6 +56,9 @@ const replacements = [
   [/\.claude\/skills/g, '.codex/skills'],
   [/\.claude\/rules/g, '.codex/rules'],
   [/\.claude\/plans/g, '.codex/plans'],
+  [/\.claude\/agents/g, '.codex/agents'],
+  [/\.claude\//g, '.codex/'],
+  [/\.claude\b/g, '.codex'],
 ];
 
 const runHookJs = `#!/usr/bin/env node
@@ -317,7 +320,25 @@ function copyUtilityScripts() {
       false
     );
   });
-  return 2;
+  copyAgentOrchestratorSubmodules();
+  return 3;
+}
+
+function copyAgentOrchestratorSubmodules() {
+  const sourceDir = path.join(repoRoot, 'scripts', 'agent-orchestrator');
+  if (!fs.existsSync(sourceDir)) return;
+  const targetDir = path.join(pluginRoot, 'scripts', 'agent-orchestrator');
+  emptyDir(targetDir);
+  fs.readdirSync(sourceDir)
+    .filter((name) => name.endsWith('.js'))
+    .sort()
+    .forEach((name) => {
+      copyTextFile(
+        path.join(sourceDir, name),
+        path.join(targetDir, name),
+        false
+      );
+    });
 }
 
 function copySchemas() {

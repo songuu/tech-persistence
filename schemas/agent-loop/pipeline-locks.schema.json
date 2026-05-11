@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/pipeline-locks.schema.json",
+  "title": "Agent Loop Pipeline Locks",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["files"],
+  "properties": {
+    "files": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sliceId", "status"],
+        "properties": {
+          "sliceId": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["claimed", "completed-owner", "released"]
+          },
+          "claimedAt": { "type": "string", "format": "date-time" },
+          "completedAt": { "type": "string", "format": "date-time" },
+          "previousOwners": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}

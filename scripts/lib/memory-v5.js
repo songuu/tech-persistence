@@ -407,9 +407,26 @@ function mergeMemoryEntries(entries) {
   return sortMemoryEntries([...byId.values()]);
 }
 
-function selectMemoryIndexEntries(entries, config = DEFAULT_MEMORY_CONFIG) {
-  return sortMemoryEntries(mergeMemoryEntries(entries))
-    .slice(0, config.maxIndexEntries || DEFAULT_MEMORY_CONFIG.maxIndexEntries);
+function selectMemoryIndexEntries(entries, config = DEFAULT_MEMORY_CONFIG, options = {}) {
+  const merged = sortMemoryEntries(mergeMemoryEntries(entries));
+  const limit = config.maxIndexEntries || DEFAULT_MEMORY_CONFIG.maxIndexEntries;
+
+  // 按 topic 优先级重排，命中 prioritizeTopics 的 entry 排前面。
+  // 命中条目少时仍排前，保证"相关性"信号不被埋。
+  const prioritizeTopics = Array.isArray(options.prioritizeTopics) ? options.prioritizeTopics : [];
+  if (prioritizeTopics.length === 0) return merged.slice(0, limit);
+
+  const topicSet = new Set(prioritizeTopics.map((tag) => String(tag).toLowerCase()));
+  const prioritized = [];
+  const rest = [];
+  for (const entry of merged) {
+    if (topicSet.has(String(entry.topic || '').toLowerCase())) {
+      prioritized.push(entry);
+    } else {
+      rest.push(entry);
+    }
+  }
+  return [...prioritized, ...rest].slice(0, limit);
 }
 
 function formatIndexEntryLine(entry) {
@@ -443,7 +460,9 @@ function formatMemoryIndexContent(entries, project, config = DEFAULT_MEMORY_CONF
   const includeFrontmatter = options.includeFrontmatter !== false;
   const dateStr = options.date || new Date().toISOString().split('T')[0];
   const projectName = project && project.name ? project.name : 'unknown';
-  let selected = selectMemoryIndexEntries(entries, memoryConfig);
+  let selected = selectMemoryIndexEntries(entries, memoryConfig, {
+    prioritizeTopics: options.prioritizeTopics,
+  });
 
   const build = () => {
     const body = formatMemoryIndexBody(selected);
@@ -485,7 +504,7 @@ function loadMemoryIndexBody(memoryDir, config = DEFAULT_MEMORY_CONFIG) {
   );
 }
 
-function loadUnifiedMemoryIndex(memoryDirs, config = DEFAULT_MEMORY_CONFIG) {
+function loadUnifiedMemoryIndex(memoryDirs, config = DEFAULT_MEMORY_CONFIG, options = {}) {
   const dirs = uniqueDirs(memoryDirs);
   const entries = mergeMemoryEntries(dirs.flatMap(collectMemoryEntries));
   if (entries.length > 0) {
@@ -493,7 +512,10 @@ function loadUnifiedMemoryIndex(memoryDirs, config = DEFAULT_MEMORY_CONFIG) {
       entries,
       { name: 'unified' },
       config,
-      { includeFrontmatter: false }
+      {
+        includeFrontmatter: false,
+        prioritizeTopics: options.prioritizeTopics,
+      }
     ).content;
   }
 
