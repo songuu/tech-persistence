@@ -525,9 +525,38 @@ function runProcess(label, launchOrCommand, args, settings) {
     throw new Error(`${label} failed to start: ${result.error.message}`);
   }
   if (!settings.allowFailure && result.status !== 0) {
-    throw new Error(`${label} exited with ${result.status}; see ${settings.stderrFile || 'stderr'}`);
+    const envelopeError = extractProviderEnvelopeError(result.stdout || '');
+    const stderrPath = settings.stderrFile || 'stderr';
+    const stdoutPath = settings.stdoutFile || 'stdout';
+    const where = envelopeError
+      ? `stdout: ${stdoutPath}`
+      : `stderr: ${stderrPath} / stdout: ${stdoutPath}`;
+    const reason = envelopeError ? ` — ${envelopeError}` : '';
+    throw new Error(`${label} exited with ${result.status}${reason}; see ${where}`);
   }
   return { result, record };
+}
+
+function extractProviderEnvelopeError(stdoutText) {
+  if (!stdoutText || typeof stdoutText !== 'string') return null;
+  const trimmed = stdoutText.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object') {
+      if (parsed.is_error === true || typeof parsed.api_error_status !== 'undefined') {
+        const apiStatus = parsed.api_error_status ? `[api ${parsed.api_error_status}] ` : '';
+        const msg = typeof parsed.result === 'string' && parsed.result.trim()
+          ? parsed.result.trim()
+          : (parsed.error && (parsed.error.message || parsed.error)) || 'provider returned error envelope';
+        return `${apiStatus}${msg}`;
+      }
+      if (parsed.error && (parsed.error.message || typeof parsed.error === 'string')) {
+        return typeof parsed.error === 'string' ? parsed.error : parsed.error.message;
+      }
+    }
+  } catch (_) { /* not JSON, fall through */ }
+  return null;
 }
 
 function runShell(label, command, settings) {
@@ -1766,9 +1795,61 @@ function runStatus(options, positionals) {
 function runDoctor(options) {
   const workdir = resolveWorkdir(options);
   const runsDir = resolveRunsDir(workdir, options);
-  const report = buildPreflightReport(workdir, options, path.join(runsDir, '_doctor'));
+  const probeDir = path.join(runsDir, '_doctor');
+  const report = buildPreflightReport(workdir, options, probeDir);
   printPreflight(report);
-  if (!report.ok) process.exitCode = 1;
+  if (!report.ok) { process.exitCode = 1; return; }
+  if (boolOption(options, 'probe')) {
+    const probe = probeProviders(workdir, options, probeDir);
+    printProbe(probe);
+    if (!probe.ok) process.exitCode = 1;
+  }
+}
+
+function probeProviders(workdir, options, runDir) {
+  ensureDir(runDir);
+  const results = [];
+  const stamp = logStamp();
+  const probePrompt = 'ping';
+
+  try {
+    const stdoutFile = stampedLogPath(runDir, 'probe-spec', 'stdout.log', stamp);
+    const stderrFile = stampedLogPath(runDir, 'probe-spec', 'stderr.log', stamp);
+    runProcess(
+      'probe spec/review provider',
+      providerLaunch(options, 'spec'),
+      ['-p', '--input-format', 'text', '--output-format', 'json'],
+      { cwd: workdir, stdoutFile, stderrFile, stdin: probePrompt, timeoutMs: 30000, env: claudeProviderEnv() }
+    );
+    results.push({ name: 'spec/review (claude)', ok: true });
+  } catch (error) {
+    results.push({ name: 'spec/review (claude)', ok: false, reason: error.message });
+  }
+
+  try {
+    const stdoutFile = stampedLogPath(runDir, 'probe-impl', 'stdout.log', stamp);
+    const stderrFile = stampedLogPath(runDir, 'probe-impl', 'stderr.log', stamp);
+    runProcess(
+      'probe implementation provider',
+      providerLaunch(options, 'implementation'),
+      ['--version'],
+      { cwd: workdir, stdoutFile, stderrFile, timeoutMs: 30000 }
+    );
+    results.push({ name: 'implementation (codex)', ok: true });
+  } catch (error) {
+    results.push({ name: 'implementation (codex)', ok: false, reason: error.message });
+  }
+
+  return { ok: results.every((r) => r.ok), results };
+}
+
+function printProbe(probe) {
+  console.log('--- probe ---');
+  for (const r of probe.results) {
+    if (r.ok) console.log(`[OK] ${r.name}`);
+    else console.log(`[FAIL] ${r.name}: ${r.reason}`);
+  }
+  console.log(probe.ok ? '[OK] probe passed' : '[FAIL] probe failed');
 }
 
 function runSelfTest() {
@@ -1798,6 +1879,13 @@ function runSelfTest() {
   });
   assertSelfTest('taskBreakdown.tasks normalizes', nestedTaskBreakdownSpec.taskBreakdown.length, 1);
   assertSelfTest('provider timeout minutes parses', providerTimeoutMs({ 'provider-timeout-minutes': '2' }), 120000);
+
+  const claude401 = extractProviderEnvelopeError('{"is_error":true,"api_error_status":401,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}');
+  assertSelfTest('envelope extractor surfaces claude 401', claude401.includes('401') && claude401.includes('authenticate'), true);
+  const codex402 = extractProviderEnvelopeError('{"is_error":true,"result":"insufficient quota"}');
+  assertSelfTest('envelope extractor surfaces generic is_error', codex402.includes('insufficient quota'), true);
+  assertSelfTest('envelope extractor ignores plain text', extractProviderEnvelopeError('hello world'), null);
+  assertSelfTest('envelope extractor ignores empty', extractProviderEnvelopeError(''), null);
 
   const directBusinessJson = extractJsonValue(JSON.stringify({
     result: 'Implementation completed without structured wrapper.',

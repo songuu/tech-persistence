@@ -7,6 +7,7 @@
 
 ## HIGH — 容易踩到
 
+- [2026-05-11] [agent-loop, provider-errors] **`claude -p --output-format json` 的错误内容写在 stdout，不是 stderr**。401 / 429 / quota 等场景 claude CLI 写 `{is_error:true, api_error_status:401, result:"Failed to authenticate. API Error: 401 Invalid bearer token"}` 到 **stdout**，stderr 留空，进程 exit code = 1。当时 orchestrator 报错只指向 stderr（`see stderr.log`），用户打开看到空文件，会以为是代码 bug，根因被掩埋。修复：`runProcess` 在 status≠0 时先尝试解析 stdout 的 envelope（`is_error / api_error_status / result`）并把人类可读的 `result` 字段拼进错误消息；报错路径同时给出 stdout 和 stderr。预防：（1）新增 provider 类调用一律走 `runProcess`（中央化错误处理），不要直接 `spawnSync` 后自己抛 "see stderr"；（2）`doctor --probe` 用最小调用真打一次 claude / codex，提前暴露认证 / token 失效；（3）跨副本同步必须 `node plugins/tech-persistence/scripts/build-codex-plugin.js` + `node scripts/validate-codex-plugin.js`，agent-orchestrator.js 是 git tracked 派生文件。
 - Hook 脚本一旦新增 `scripts/lib/*` 依赖，必须同步更新安装脚本和 Codex plugin 构建脚本；否则用户环境中的 hook 会因 `Cannot find module './lib/...'` 静默失效。验证时至少跑 `node plugins/tech-persistence/scripts/build-codex-plugin.js`、`node scripts/validate-codex-plugin.js` 和临时 `TECH_PERSISTENCE_HOME` smoke test。
 - Memory v5 不能用 first-hit fallback 读取 `MEMORY.md`；Claude Code 和 Codex 默认目录都可能有 durable topic notes。SessionStart 应合并 `resolveCompatReadDirs()` 下的 topic entries，并用 `node scripts/smoke-memory-parity.js` 验证双向可见。
 - [2026-05-09] [docs, dispatch] **CLI 用法 section 列出的子命令必须在执行规则 section 显式分派**。`/agent-loop doctor` 之前被吞进"不是 freeze/resume/status 时 → run --requirement"分支，AI 真把 `doctor` 当成需求字符串创建了新 run。预防：用法表的每行子命令在 dispatch section 都要有对应 case；fallback 条件必须列出全部已知子命令的反集。
