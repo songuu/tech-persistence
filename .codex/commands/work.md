@@ -23,7 +23,7 @@ description: "工程师模式：按计划逐步实现，每步按风险等级自
 
 ## 输入来源
 1. `$ARGUMENTS` 中指定的计划文件或任务
-2. `.codex/plans/plan-*.md` 最新的 plan
+2. `docs/plans/` 下最新的 sprint/plan 文档（由 /think 或 /plan 创建）
 3. 对话上下文
 
 ## 每个 Task 的执行循环
@@ -76,7 +76,7 @@ description: "工程师模式：按计划逐步实现，每步按风险等级自
 
 ## Phase 间预热钩子
 
-完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「下一 Phase 预热」段。协议见 `~/.codex/commands/sprint.md` 的「Phase 间预热协议」。
+完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「下一 Phase 预热」段。协议见当前命令集合中 `sprint.md` 的「Phase 间预热协议」。
 
 本命令的典型预热内容：
 

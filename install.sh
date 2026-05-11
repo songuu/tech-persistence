@@ -60,6 +60,14 @@ configure_shared_homunculus() {
   HOMUNCULUS_DIR="$(resolve_user_path "$SHARED_HOMUNCULUS")"
 }
 
+merge_claude_settings_hooks() {
+  local settings_path="$1"
+  node "${SCRIPT_DIR}/scripts/merge-claude-settings-hooks.js" \
+    "$settings_path" \
+    --hook-root "~/.claude/skills/continuous-learning/hooks" \
+    --shell posix
+}
+
 # ──────────────────────────────────────────────
 # 安装自学习 Hook 脚本
 # ──────────────────────────────────────────────
@@ -166,15 +174,8 @@ install_user() {
   # 用户级 settings.json 中添加 hooks（如果尚未配置）
   local user_settings="${CLAUDE_HOME}/settings.json"
   if [[ -f "$user_settings" ]]; then
-    if grep -q "observe.js" "$user_settings" 2>/dev/null; then
-      log_warn "settings.json 已包含 Hook 配置，跳过"
-    else
-      log_warn "settings.json 已存在但无 Hook 配置"
-      echo ""
-      echo "  请手动将以下 hooks 添加到 ${user_settings}:"
-      echo '  参考: project-level/.claude/settings.json 中的 hooks 配置'
-      echo ""
-    fi
+    merge_claude_settings_hooks "$user_settings"
+    log_ok "settings.json hooks 已合并"
   else
     cp "${SCRIPT_DIR}/project-level/.claude/settings.json" "$user_settings"
     log_ok "settings.json (含 4 Hook 配置)"
@@ -229,12 +230,8 @@ install_project() {
 
   # settings.json
   if [[ -f "${claude_dir}/settings.json" ]]; then
-    if grep -q "observe.js" "${claude_dir}/settings.json" 2>/dev/null; then
-      log_warn ".claude/settings.json 已包含 Hook 配置，跳过"
-    else
-      log_warn ".claude/settings.json 已存在但无 Hook 配置"
-      echo "  请参考 project-level/.claude/settings.json 手动合并 hooks"
-    fi
+    merge_claude_settings_hooks "${claude_dir}/settings.json"
+    log_ok ".claude/settings.json hooks 已合并"
   else
     cp "${SCRIPT_DIR}/project-level/.claude/settings.json" "${claude_dir}/settings.json"
     log_ok ".claude/settings.json (含 4 Hook 配置)"

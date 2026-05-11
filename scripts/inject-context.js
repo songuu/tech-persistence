@@ -20,6 +20,7 @@ const {
   DEFAULT_MEMORY_CONFIG,
   detectProjectIdentity,
   loadUnifiedMemoryIndex,
+  parseFrontmatter,
 } = require('./lib/memory-v5');
 
 const CONTEXT_BUDGET_CHARS = 12000;
@@ -142,6 +143,22 @@ function detectPendingHandoff() {
  * @param {string} [plansDir] - plans 目录路径（测试用，默认 cwd/docs/plans）
  * @returns {string[]} tags 数组，无 active sprint 或无 tags 时返回 []
  */
+function normalizeFrontmatterScalar(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .toLowerCase();
+}
+
+function parseInlineFrontmatterList(value) {
+  const match = String(value || '').match(/^\[([^\]]+)\]$/);
+  if (!match) return [];
+  return match[1]
+    .split(',')
+    .map((tag) => tag.trim().replace(/^["']|["']$/g, ''))
+    .filter(Boolean);
+}
+
 function detectActiveSprintTags(plansDir = path.join(process.cwd(), 'docs', 'plans')) {
   if (!fs.existsSync(plansDir)) return [];
 
@@ -166,18 +183,11 @@ function detectActiveSprintTags(plansDir = path.join(process.cwd(), 'docs', 'pla
     }
     const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
     if (!fmMatch) continue;
-    const fm = fmMatch[1];
+    const { meta } = parseFrontmatter(content);
+    const status = normalizeFrontmatterScalar(meta.status);
+    if (!status || !activeStatuses.has(status)) continue;
 
-    const statusMatch = fm.match(/^status:\s*"?([^"\n]+)"?/m);
-    if (!statusMatch || !activeStatuses.has(statusMatch[1].trim())) continue;
-
-    const tagsMatch = fm.match(/^tags:\s*\[([^\]]+)\]/m);
-    if (!tagsMatch) return [];
-
-    return tagsMatch[1]
-      .split(',')
-      .map((tag) => tag.trim().replace(/^["']|["']$/g, ''))
-      .filter(Boolean);
+    return parseInlineFrontmatterList(meta.tags);
   }
   return [];
 }

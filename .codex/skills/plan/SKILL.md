@@ -115,7 +115,7 @@ When the command instructions below mention `/plan`, interpret that as this `$pl
 
 ## Phase 间预热钩子
 
-完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「下一 Phase 预热」段。协议见 `~/.codex/commands/sprint.md` 的「Phase 间预热协议」。
+完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「下一 Phase 预热」段。协议见当前命令集合中 `sprint.md` 的「Phase 间预热协议」。
 
 本命令的典型预热内容：
 

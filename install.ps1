@@ -66,6 +66,14 @@ function Build-SettingsJson {
     return ($o | ConvertTo-Json -Depth 10)
 }
 
+function Merge-SettingsHooks($settingsPath) {
+    $hp = (Join-Path $ClaudeHome "skills/continuous-learning/hooks") -replace '\\','/'
+    $mergeScript = Join-Path $ScriptDir "scripts/merge-claude-settings-hooks.js"
+    if (-not (Test-Path $mergeScript)) { throw "Missing Claude settings hook merger: $mergeScript" }
+    & node $mergeScript $settingsPath "--hook-root" $hp "--shell" "windows"
+    if ($LASTEXITCODE -ne 0) { throw "Claude settings hook merge failed: $settingsPath" }
+}
+
 function Install-User {
     Write-Section "Installing user-level -> $ClaudeHome"
 
@@ -120,8 +128,9 @@ function Install-User {
     if (-not (Test-Path $us)) {
         Set-Content $us (Build-SettingsJson) -Encoding UTF8
         Write-OK "settings.json (4 hooks)"
-    } elseif ((Get-Content $us -Raw) -notmatch "observe\.js") {
-        Write-Warn "settings.json exists but no hooks - merge manually"
+    } else {
+        Merge-SettingsHooks $us
+        Write-OK "settings.json hooks merged"
     }
 
     Write-Host "`n  [OK] User-level done! ($((Get-ChildItem (Join-Path $ClaudeHome 'commands') -Filter '*.md').Count) commands)" -ForegroundColor Green
@@ -137,7 +146,13 @@ function Install-Project {
 
     Safe-CopyNew (Join-Path $ScriptDir "project-level/CLAUDE.md") (Join-Path $root "CLAUDE.md")
     $ps = Join-Path $cd "settings.json"
-    if (-not (Test-Path $ps)) { Set-Content $ps (Build-SettingsJson) -Encoding UTF8; Write-OK "settings.json" }
+    if (-not (Test-Path $ps)) {
+        Set-Content $ps (Build-SettingsJson) -Encoding UTF8
+        Write-OK "settings.json"
+    } else {
+        Merge-SettingsHooks $ps
+        Write-OK "settings.json hooks merged"
+    }
 
     Get-ChildItem (Join-Path $ScriptDir "project-level/.claude/commands") -Filter "*.md" | ForEach-Object {
         Safe-Copy $_.FullName (Join-Path $cd "commands/$($_.Name)"); Write-OK ("cmd /" + $_.BaseName)

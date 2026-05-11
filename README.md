@@ -180,11 +180,13 @@ Windows:
 ```powershell
 node scripts\preflight.js
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -All
+node scripts\validate-claude-install.js --project
 ```
 
 macOS/Linux:
 ```bash
 node scripts/preflight.js && bash install.sh --all
+node scripts/validate-claude-install.js --project
 ```
 
 ### Codex
@@ -236,6 +238,7 @@ bash install-codex.sh --all --shared-homunculus ~/Documents/TechPersistence
 ```powershell
 node plugins/tech-persistence/scripts/build-codex-plugin.js
 node scripts/validate-codex-plugin.js
+node scripts/validate-codex-install.js --project
 ```
 
 ### Agent Loop v7（跨 Agent 编排 + Caveman 压缩）

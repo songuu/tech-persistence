@@ -6,6 +6,7 @@
 //   2. 空 prioritizeTopics 退化为原行为
 //   3. 重排不丢条目
 //   4. detectActiveSprintTags 能从真实 docs/plans/ 读到 tags
+//   5. duplicate status frontmatter 使用最后一个 status，避免 completed sprint 误判 active
 
 'use strict';
 
@@ -150,6 +151,27 @@ function testDetectActiveSprintTagsSkipsCompleted() {
   }
 }
 
+function testDetectActiveSprintTagsUsesLastDuplicateStatus() {
+  const dir = makeTmpPlansDir();
+  try {
+    const content = `---
+status: planning
+phase: 5-compound
+status: completed
+tags: [sprint, performance]
+---
+
+# duplicate status
+`;
+    fs.writeFileSync(path.join(dir, '2026-05-11-duplicate.md'), content);
+    const tags = detectActiveSprintTags(dir);
+    assert.deepStrictEqual(tags, [], '重复 status 应以后面的 completed 为准并跳过');
+    console.log('[ok] detectActiveSprintTags uses last duplicate status');
+  } finally {
+    cleanupTmp(dir);
+  }
+}
+
 function testDetectActiveSprintTagsHandlesNoFrontmatter() {
   const dir = makeTmpPlansDir();
   try {
@@ -218,6 +240,7 @@ function main() {
   testLimitRespected();
   testDetectActiveSprintTagsParsesTags();
   testDetectActiveSprintTagsSkipsCompleted();
+  testDetectActiveSprintTagsUsesLastDuplicateStatus();
   testDetectActiveSprintTagsHandlesNoFrontmatter();
   testDetectActiveSprintTagsActiveButNoTags();
   testDetectActiveSprintTagsPicksLatestActive();

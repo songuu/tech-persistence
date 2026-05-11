@@ -110,7 +110,7 @@ aliases: ["触发描述"]
 
 ## Phase 间预热钩子
 
-完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「收尾预热」段（无下一 phase，但有清场动作）。协议见 `~/.codex commands via Tech Persistence plugin/sprint.md` 的「Phase 间预热协议」。
+完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「收尾预热」段（无下一 phase，但有清场动作）。协议见当前命令集合中 `sprint.md` 的「Phase 间预热协议」。
 
 本命令的典型预热内容：
 

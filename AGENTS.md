@@ -32,6 +32,10 @@ pnpm lint         # 检查
 
 ## 已知陷阱（高频）
 <!-- 只放最高频的坑，详细在 .codex/rules/debugging-gotchas.md -->
+- Claude-side 已有 `settings.json` 但缺 hook 时不能只警告；必须结构化 merge 并跑 `validate-claude-install.js`，否则学习层静默失效。
+
+## 解决方案索引
+- [2026-05-11] [claude/hooks/installer] 已有 Claude-side settings 缺 hooks 会让学习层静默失效；新增结构化 hook merger + Claude 安装态 validator → `docs/solutions/2026-05-11-claude-settings-hook-merge.md`
 
 ## 当前迭代重点
 - [ ] [当前任务]
