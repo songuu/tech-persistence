@@ -58,6 +58,7 @@ jobs:
           git config user.name "macOS Smoke"
           HOME="$home_dir" bash "$GITHUB_WORKSPACE/install.sh" --project
           test -f ".claude/settings.json"
+          test -d ".claude/plans"
           test -f "CLAUDE.md"
 
       - name: Probe Codex project install

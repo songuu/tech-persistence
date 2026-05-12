@@ -113,11 +113,37 @@ function testProjectPlanDirectoriesAreTracked() {
   assertIncludes(attributes, '/.codex/**/.gitkeep text eol=lf', '.gitattributes');
 }
 
+function testSharedHomunculusNoopDoesNotAbortInstall() {
+  const claudeScript = read('install.sh');
+  assertIncludes(
+    claudeScript,
+    '[[ -n "${SHARED_HOMUNCULUS:-}" ]] || return 0',
+    'install.sh configure_shared_homunculus'
+  );
+
+  const codexScript = read('install-codex.sh');
+  assertIncludes(
+    codexScript,
+    '[[ -n "${SHARED_HOMUNCULUS:-}" ]] || return 0',
+    'install-codex.sh configure_shared_homunculus'
+  );
+}
+
+function testClaudeProjectInstallCreatesPlansDirectory() {
+  const script = read('install.sh');
+  assertIncludes(script, 'mkdir -p "${claude_dir}/plans"', 'install.sh install_project');
+
+  const workflow = read('.github/workflows/macos-cross-platform.yml');
+  assertIncludes(workflow, 'test -d ".claude/plans"', '.github/workflows/macos-cross-platform.yml');
+}
+
 process.stdout.write('\nsmoke: cross-platform install and macOS CI\n');
 run('install.sh fails fast when Node.js is missing or too old', testInstallShNodePreflight);
 run('install-codex.sh keeps Node.js preflight', testCodexInstallStillHasNodePreflight);
 run('macOS workflow covers POSIX install and core smoke checks', testMacosWorkflowExists);
 run('project plans directories survive clean checkouts', testProjectPlanDirectoriesAreTracked);
+run('unset shared homunculus is a successful no-op', testSharedHomunculusNoopDoesNotAbortInstall);
+run('Claude project install creates plans directory', testClaudeProjectInstallCreatesPlansDirectory);
 
 process.stdout.write(`\nresult: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) {

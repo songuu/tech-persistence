@@ -60,7 +60,7 @@ resolve_user_path() {
 }
 
 configure_shared_homunculus() {
-  [[ -n "${SHARED_HOMUNCULUS:-}" ]] || return
+  [[ -n "${SHARED_HOMUNCULUS:-}" ]] || return 0
   local args=("${SCRIPT_DIR}/scripts/configure-shared-homunculus.js" "--path" "$SHARED_HOMUNCULUS" "--force")
   if [[ "${ALLOW_OUTSIDE_HOME:-false}" == true ]]; then
     args+=("--allow-outside-home")
@@ -231,6 +231,7 @@ install_project() {
 
   mkdir -p "${claude_dir}/commands"
   mkdir -p "${claude_dir}/rules"
+  mkdir -p "${claude_dir}/plans"
   mkdir -p "${claude_dir}/skills/session-learning"
   mkdir -p "${project_root}/docs/tech-learnings/sessions"
 

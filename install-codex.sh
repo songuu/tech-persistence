@@ -57,7 +57,7 @@ resolve_user_path() {
 }
 
 configure_shared_homunculus() {
-  [[ -n "${SHARED_HOMUNCULUS:-}" ]] || return
+  [[ -n "${SHARED_HOMUNCULUS:-}" ]] || return 0
   require_node
   local args=("${SCRIPT_DIR}/scripts/configure-shared-homunculus.js" "--path" "$SHARED_HOMUNCULUS" "--force")
   if [[ "${ALLOW_OUTSIDE_HOME:-false}" == true ]]; then
