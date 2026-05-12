@@ -370,9 +370,21 @@ function main() {
   console.log('[OK] generated codex homunculus template');
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`[FAIL] ${error.message}`);
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`[FAIL] ${error.message}`);
+    process.exit(1);
+  }
 }
+
+module.exports = {
+  transform,
+  normalizeLf,
+  commandToSkill,
+  parseFrontmatter,
+  replacements,
+  expectedCommands,
+  expectedSkills,
+};

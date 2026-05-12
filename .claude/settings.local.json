@@ -19,7 +19,13 @@
       "Bash(AGENT_LOOP_DEBUG=1 node scripts/agent-orchestrator.js self-test)",
       "Bash(gh repo *)",
       "WebSearch",
-      "Bash(gh api *)"
+      "Bash(gh api *)",
+      "Bash(git *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(cp docs/plans/2026-05-12-defense-mechanism.md /tmp/plan-backup.md)",
+      "Bash(cp /tmp/plan-backup.md docs/plans/2026-05-12-defense-mechanism.md)",
+      "Bash(rm /tmp/plan-backup.md)",
+      "Bash(echo \"pre-commit exit=$?\")"
     ]
   }
 }

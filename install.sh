@@ -259,6 +259,11 @@ install_project() {
     install_homunculus
   fi
 
+  # 安装项目级 git pre-commit 防御 hook
+  if [[ -f "${SCRIPT_DIR}/scripts/install-git-hooks.js" ]]; then
+    node "${SCRIPT_DIR}/scripts/install-git-hooks.js" || log_warn "git pre-commit hook 安装跳过（非 git 仓库或 node 错误）"
+  fi
+
   echo ""
   log_ok "项目级别安装完成！"
   echo ""

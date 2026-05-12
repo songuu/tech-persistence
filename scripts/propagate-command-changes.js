@@ -162,4 +162,12 @@ function main() {
   for (const rule of rules) propagateRule(rule);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = {
+  applyCodexRegex,
+  injectIntoSkillWrapper,
+  stripFrontmatter,
+  propagateCommand,
+  propagateRule,
+};

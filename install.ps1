@@ -162,6 +162,18 @@ function Install-Project {
     }
     Write-OK "rules ($((@(Get-ChildItem (Join-Path $cd 'rules') -Filter '*.md' -ErrorAction SilentlyContinue)).Count) files)"
 
+    # Install project-local git pre-commit defense hook
+    $ghInstall = Join-Path $ScriptDir "scripts/install-git-hooks.js"
+    if (Test-Path $ghInstall) {
+        try {
+            & node $ghInstall
+            if ($LASTEXITCODE -eq 0) { Write-OK "git pre-commit hook installed" }
+            else { Write-Warn "git pre-commit hook install skipped (non-zero exit)" }
+        } catch {
+            Write-Warn "git pre-commit hook install failed: $_"
+        }
+    }
+
     Write-Host "`n  [OK] Project-level done!" -ForegroundColor Green
     Write-Host "  git add CLAUDE.md .claude/ docs/solutions/" -ForegroundColor Cyan
 }
