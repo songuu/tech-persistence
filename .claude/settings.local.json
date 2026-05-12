@@ -29,7 +29,10 @@
       "Bash(grep -E \"^nul$|nul$\")",
       "Bash(powershell -NoProfile -Command \"Get-Item -Force -LiteralPath '\\\\\\\\?\\\\C:\\\\project\\\\my\\\\tech-persistence\\\\nul' | Format-List Name,Length,CreationTime,LastWriteTime\")",
       "Bash(echo \"EXIT=$?\")",
-      "Bash(echo \"pre-commit EXIT=$?\")"
+      "Bash(echo \"pre-commit EXIT=$?\")",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(sort -t: -k2 -rn)",
+      "Bash(grep -v \":0$\")"
     ]
   }
 }
