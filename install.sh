@@ -28,6 +28,15 @@ log_ok()    { echo -e "${GREEN}✅ $1${NC}"; }
 log_warn()  { echo -e "${YELLOW}⚠️  $1${NC}"; }
 log_section() { echo -e "\n${CYAN}━━━ $1 ━━━${NC}\n"; }
 
+require_node() {
+  local major
+  major="$(node -p "Number(process.versions.node.split('.')[0])" 2>/dev/null || echo 0)"
+  if [[ "$major" -lt 18 ]]; then
+    echo "[FAIL] Node.js >= 18 required" >&2
+    exit 1
+  fi
+}
+
 safe_copy() {
   local src="$1" dst="$2"
   if [[ -f "$dst" ]]; then
@@ -389,6 +398,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+require_node
 configure_shared_homunculus
 
 case "$COMMAND" in

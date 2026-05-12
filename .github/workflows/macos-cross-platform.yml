@@ -1,0 +1,73 @@
+name: macOS cross-platform smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  macos-smoke:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - '18'
+          - '24'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Show environment
+        run: |
+          node --version
+          bash --version
+          git --version
+
+      - name: Check POSIX installer syntax
+        run: |
+          bash -n install.sh
+          bash -n install-codex.sh
+
+      - name: Run core smoke checks
+        run: |
+          node scripts/agent-orchestrator.js self-test
+          node scripts/validate-codex-plugin.js
+          node scripts/validate-codex-install.js --project
+          node scripts/validate-claude-install.js --project
+          node scripts/smoke-memory-parity.js
+          node scripts/smoke-relevance.js
+          node scripts/smoke-pre-commit.js
+          node scripts/smoke-cross-platform.js
+
+      - name: Probe Claude project install
+        run: |
+          probe_dir="$(mktemp -d)"
+          home_dir="$(mktemp -d)"
+          git init -q "$probe_dir"
+          cd "$probe_dir"
+          git config user.email "macos-smoke@example.invalid"
+          git config user.name "macOS Smoke"
+          HOME="$home_dir" bash "$GITHUB_WORKSPACE/install.sh" --project
+          test -f ".claude/settings.json"
+          test -f "CLAUDE.md"
+
+      - name: Probe Codex project install
+        run: |
+          probe_dir="$(mktemp -d)"
+          home_dir="$(mktemp -d)"
+          git init -q "$probe_dir"
+          cd "$probe_dir"
+          git config user.email "macos-smoke@example.invalid"
+          git config user.name "macOS Smoke"
+          HOME="$home_dir" bash "$GITHUB_WORKSPACE/install-codex.sh" --project
+          test -f ".codex/commands/agent-loop.md"
+          test -f ".codex/skills/agent-loop/SKILL.md"

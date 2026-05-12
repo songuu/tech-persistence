@@ -239,7 +239,11 @@ bash install-codex.sh --all --shared-homunculus ~/Documents/TechPersistence
 node plugins/tech-persistence/scripts/build-codex-plugin.js
 node scripts/validate-codex-plugin.js
 node scripts/validate-codex-install.js --project
+node scripts/smoke-cross-platform.js
 ```
+
+跨平台防线：`.github/workflows/macos-cross-platform.yml` 会在 `macos-latest`
+上运行 Bash 安装器语法检查、核心 smoke、Claude/Codex 临时目录安装探针。
 
 ### Agent Loop v7（跨 Agent 编排 + Caveman 压缩）
 
