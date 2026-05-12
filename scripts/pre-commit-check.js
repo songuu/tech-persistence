@@ -23,7 +23,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
+
+const ORCHESTRATOR_PATH_RE = /^(?:scripts|plugins\/tech-persistence\/scripts)\/agent-orchestrator(?:\.js|\/[^/]+\.js)$/;
 
 // Plans whose filename date is strictly < this string skip lint.
 // Adopted 2026-05-11 in ADR-012; 1-day buffer so the commit landing the rule
@@ -56,7 +59,9 @@ function getStagedFiles(repoRoot) {
   // -c core.quotePath=false: emit non-ASCII filenames verbatim, not octal-escaped.
   // Otherwise files like docs/plans/2026-05-12-中文.md become "\"...\"" quoted strings
   // and our regex/path operations silently miss them.
-  const output = execSync('git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR', {
+  // Include deletions (D): deleting a source file should still trigger orphan detection
+  // of the now-stale plugin copy.
+  const output = execSync('git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMRD', {
     cwd: repoRoot,
     encoding: 'utf-8',
   });
@@ -140,6 +145,96 @@ function checkPropagateSync(stagedFiles, repoRoot) {
   return mismatches;
 }
 
+function sha256OfFile(filePath) {
+  // build-codex-plugin.js writes plugin copies via normalizeLf (CRLF → LF). To stay
+  // consistent with that build semantics, hash the LF-normalized bytes. Otherwise a
+  // user who saves the source with CRLF (Windows editors) gets stuck in a loop —
+  // build can't help because it always writes LF, and raw-byte sha mismatches forever.
+  try {
+    const text = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+    return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+function checkOrchestratorSync(stagedFiles, repoRoot) {
+  // Triggered when either source or plugin copy of agent-orchestrator is staged.
+  // Source = scripts/agent-orchestrator{.js,/*.js}; plugin copy under plugins/tech-persistence/scripts/...
+  // build-codex-plugin.js does byte-copy (no transform) for .js, so direct sha256 compare is correct.
+  const trigger = stagedFiles.some((f) => ORCHESTRATOR_PATH_RE.test(f));
+  if (!trigger) return [];
+
+  const mismatches = [];
+
+  // Main file pair
+  const mainPair = ['scripts/agent-orchestrator.js', 'plugins/tech-persistence/scripts/agent-orchestrator.js'];
+  // Dynamic submodule pairs from source side. build-codex-plugin.js's
+  // copyAgentOrchestratorSubmodules() is non-recursive (flat .js files only);
+  // assert that invariant here so adding a subdirectory doesn't silently produce
+  // an incomplete plugin bundle that still passes both build and pre-commit.
+  const submoduleSourceDir = path.join(repoRoot, 'scripts', 'agent-orchestrator');
+  let submoduleNames = [];
+  if (fs.existsSync(submoduleSourceDir)) {
+    for (const entry of fs.readdirSync(submoduleSourceDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        mismatches.push({
+          source: `scripts/agent-orchestrator/${entry.name}/`,
+          derived: '(unsupported by build-codex-plugin)',
+          kind: 'orchestrator',
+          reason: 'nested directory under scripts/agent-orchestrator/ — build is non-recursive; flatten or update build-codex-plugin.copyAgentOrchestratorSubmodules',
+        });
+      } else if (entry.isFile() && entry.name.endsWith('.js')) {
+        submoduleNames.push(entry.name);
+      }
+    }
+    submoduleNames.sort();
+  }
+  const pairs = [mainPair].concat(
+    submoduleNames.map((n) => [
+      `scripts/agent-orchestrator/${n}`,
+      `plugins/tech-persistence/scripts/agent-orchestrator/${n}`,
+    ])
+  );
+
+  for (const [srcRel, dstRel] of pairs) {
+    const srcAbs = path.join(repoRoot, srcRel);
+    const dstAbs = path.join(repoRoot, dstRel);
+    const a = sha256OfFile(srcAbs);
+    const b = sha256OfFile(dstAbs);
+    if (a == null) {
+      mismatches.push({ source: srcRel, derived: dstRel, kind: 'orchestrator', reason: 'source file missing' });
+      continue;
+    }
+    if (b == null) {
+      mismatches.push({ source: srcRel, derived: dstRel, kind: 'orchestrator', reason: 'plugin copy missing — run build-codex-plugin' });
+      continue;
+    }
+    if (a !== b) {
+      mismatches.push({ source: srcRel, derived: dstRel, kind: 'orchestrator', reason: 'sha256 mismatch — plugin copy out of sync' });
+    }
+  }
+
+  // Orphan detection: plugin has .js submodules not in source
+  const pluginSubmoduleDir = path.join(repoRoot, 'plugins', 'tech-persistence', 'scripts', 'agent-orchestrator');
+  if (fs.existsSync(pluginSubmoduleDir)) {
+    const sourceSet = new Set(submoduleNames);
+    const pluginNames = fs.readdirSync(pluginSubmoduleDir).filter((n) => n.endsWith('.js'));
+    for (const name of pluginNames) {
+      if (!sourceSet.has(name)) {
+        mismatches.push({
+          source: `scripts/agent-orchestrator/${name}`,
+          derived: `plugins/tech-persistence/scripts/agent-orchestrator/${name}`,
+          kind: 'orchestrator',
+          reason: 'orphan plugin submodule — source file does not exist',
+        });
+      }
+    }
+  }
+
+  return mismatches;
+}
+
 function parseFrontmatter(content) {
   // Accept both LF and CRLF line endings. Windows editors often write CRLF.
   const startsLF = content.startsWith('---\n');
@@ -209,6 +304,7 @@ function deriveRepairCommand(mismatches) {
   const ruleNames = [...new Set(mismatches
     .filter((m) => m.kind === 'rule')
     .map((m) => path.basename(m.source, '.md')))];
+  const hasOrchestrator = mismatches.some((m) => m.kind === 'orchestrator');
 
   const parts = [];
   if (cmdNames.length > 0 || ruleNames.length > 0) {
@@ -218,7 +314,7 @@ function deriveRepairCommand(mismatches) {
     }
     parts.push(`node scripts/propagate-command-changes.js ${propagateArgs}`);
   }
-  if (cmdNames.length > 0) {
+  if (cmdNames.length > 0 || hasOrchestrator) {
     parts.push('node plugins/tech-persistence/scripts/build-codex-plugin.js');
   }
   parts.push('node scripts/validate-codex-plugin.js');
@@ -226,11 +322,14 @@ function deriveRepairCommand(mismatches) {
 }
 
 function formatPropagateError(mismatches) {
-  const lines = [
-    '',
-    '✗ Propagate sync 失败: user-level/ 源已改但派生未同步',
-    '',
-  ];
+  const hasCmd = mismatches.some((m) => m.kind === 'command' || m.kind === 'rule');
+  const hasOrch = mismatches.some((m) => m.kind === 'orchestrator');
+  let title;
+  if (hasCmd && hasOrch) title = '✗ 多副本同步失败: user-level/ 派生 + agent-orchestrator plugin 副本均不一致';
+  else if (hasOrch) title = '✗ 多副本同步失败: agent-orchestrator 源与 plugin 副本不一致';
+  else title = '✗ Propagate sync 失败: user-level/ 源已改但派生未同步';
+
+  const lines = ['', title, ''];
   for (const m of mismatches) {
     lines.push(`  ${m.source}`);
     lines.push(`    → ${m.derived}`);
@@ -278,7 +377,10 @@ function main() {
     process.exit(0);
   }
 
-  const mismatches = checkPropagateSync(stagedFiles, repoRoot);
+  const mismatches = [
+    ...checkPropagateSync(stagedFiles, repoRoot),
+    ...checkOrchestratorSync(stagedFiles, repoRoot),
+  ];
   const failures = checkPlanScope(stagedFiles, repoRoot);
 
   if (mismatches.length === 0 && failures.length === 0) {
@@ -312,10 +414,12 @@ module.exports = {
   getStagedFiles,
   loadTransformers,
   checkPropagateSync,
+  checkOrchestratorSync,
   checkPlanScope,
   parseFrontmatter,
   deriveRepairCommand,
   formatPropagateError,
   formatPlanError,
   GRANDFATHER_BEFORE,
+  ORCHESTRATOR_PATH_RE,
 };

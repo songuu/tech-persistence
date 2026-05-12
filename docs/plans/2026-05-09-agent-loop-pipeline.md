@@ -1,21 +1,25 @@
 ---
 title: "Agent Loop pipeline mode"
 type: architecture-plan
-status: implemented
+status: partial
 created: "2026-05-09"
-updated: "2026-05-11"
+updated: "2026-05-12"
 checkpoints: 0
 tasks_total: 13
 tasks_completed: 13
-tags: [agent-loop, pipeline, claude-code, codex, orchestrator]
+tags: [agent-loop, pipeline, claude-code, codex, orchestrator, sprint-not-fully-closed]
 aliases: ["agent-loop --pipeline", "pipeline mode", "slice freeze"]
 ---
 
 # Agent Loop pipeline mode
 
-> **Status:** `implemented`
+> **Status:** `partial`
 > **Created:** 2026-05-09
-> **Updated:** 2026-05-11（13 个 Task 全部落地，回归通过）
+> **Updated:** 2026-05-12（13 个 Task 已实施；但 sprint 流程未完全闭环 — 见下方 errata）
+
+> [!warning] 2026-05-12 status correction — partial 而非 completed
+> 13 个 Task 已 implemented 且回归通过（2026-05-11），但 **Phase 4 Review (P0/P1/P2 表) 和 Phase 5 Compound (复利记录) 仍为占位行**（参见下方「审查结果」「复利记录」节）。按本项目 sprint 协议，未完成 Review+Compound 的 sprint 不视为 completed。原 `status: implemented` 被 [[2026-05-12-agent-loop-followup-audit]] F1+F2 标记为 broken example（让流程协议失去示范价值）。
+> 当前 status 改为 `partial`；要恢复 completed 需另起 retrospective sprint 补 review + 生成 solution doc。详见 audit 报告下一 sprint 候选 #3。
 
 ---
 

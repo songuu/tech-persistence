@@ -254,10 +254,24 @@ function resolveRunDir(options, positionals = []) {
   throw new Error(`Run not found: ${requested}`);
 }
 
+function applyStateDefaults(state) {
+  // ADR-008: persistent state may pre-date current field set. Default at the
+  // deserialization boundary so every push/assign site can trust shape.
+  // For null/primitive (e.g. state.json contains literal `null` from tampering),
+  // throw rather than return a value that violates the post-condition — every
+  // downstream callsite assumes state is an object.
+  if (state === null || state === undefined || typeof state !== 'object' || Array.isArray(state)) {
+    throw new Error(`state.json must be a JSON object, got ${state === null ? 'null' : Array.isArray(state) ? 'array' : typeof state}`);
+  }
+  if (!Array.isArray(state.providerRuns)) state.providerRuns = [];
+  if (!state.files || typeof state.files !== 'object' || Array.isArray(state.files)) state.files = {};
+  return state;
+}
+
 function loadRun(options, positionals) {
   const runDir = resolveRunDir(options, positionals);
   const statePath = path.join(runDir, 'state.json');
-  const state = readJson(statePath);
+  const state = applyStateDefaults(readJson(statePath));
   return { runDir, statePath, state };
 }
 
@@ -1907,6 +1921,39 @@ function runSelfTest() {
   assertSelfTest('auto flag canonical parses', boolOption({ auto: true }, 'auto'), true);
   assertSelfTest('auto-evaluate alias parses as auto', boolOption({ 'auto-evaluate': true }, 'auto'), true);
   assertSelfTest('auto-freeze legacy alias parses as auto', boolOption({ 'auto-freeze': true }, 'auto'), true);
+
+  // ADR-008 backward-compat: state.json from pre-caveman-audit may lack these fields.
+  const legacyState = applyStateDefaults({ runId: 'old-run', status: 'frozen' });
+  assertSelfTest('legacy state gains providerRuns default', Array.isArray(legacyState.providerRuns) && legacyState.providerRuns.length === 0, true);
+  assertSelfTest('legacy state gains files default', legacyState.files && typeof legacyState.files === 'object' && !Array.isArray(legacyState.files), true);
+  const stateWithFilesArray = applyStateDefaults({ files: ['a'], providerRuns: 'oops' });
+  assertSelfTest('files array is coerced to object', Array.isArray(stateWithFilesArray.files), false);
+  assertSelfTest('non-array providerRuns is reset', Array.isArray(stateWithFilesArray.providerRuns), true);
+  const preserveState = applyStateDefaults({ providerRuns: [{ phase: 'spec' }], files: { spec: 'spec.json' } });
+  assertSelfTest('existing providerRuns preserved', preserveState.providerRuns[0].phase, 'spec');
+  assertSelfTest('existing files preserved', preserveState.files.spec, 'spec.json');
+  // Reject non-object state explicitly (CORR-5): null/primitive state.json must not
+  // silently produce a state object that fails downstream property access.
+  let nullThrew = false;
+  try { applyStateDefaults(null); } catch { nullThrew = true; }
+  assertSelfTest('null state throws explicit error', nullThrew, true);
+  let undefThrew = false;
+  try { applyStateDefaults(undefined); } catch { undefThrew = true; }
+  assertSelfTest('undefined state throws explicit error', undefThrew, true);
+  let arrayThrew = false;
+  try { applyStateDefaults([]); } catch { arrayThrew = true; }
+  assertSelfTest('top-level array state throws explicit error', arrayThrew, true);
+  let stringThrew = false;
+  try { applyStateDefaults('frozen'); } catch { stringThrew = true; }
+  assertSelfTest('primitive string state throws explicit error', stringThrew, true);
+  // Mutate-in-place contract: loadRun expects same reference back so downstream
+  // mutations propagate to saveState. Verify identity, not just value equality.
+  const inputRef = { runId: 'r1', status: 'frozen' };
+  const outputRef = applyStateDefaults(inputRef);
+  assertSelfTest('applyStateDefaults returns same reference', outputRef === inputRef, true);
+  assertSelfTest('mutate-in-place: input gained providerRuns', Array.isArray(inputRef.providerRuns), true);
+  // Strengthen T7: confirm coerced files is actually {}, not arbitrary truthy non-array
+  assertSelfTest('files array dropped to empty object', JSON.stringify(stateWithFilesArray.files), '{}');
 
   const directBusinessJson = extractJsonValue(JSON.stringify({
     result: 'Implementation completed without structured wrapper.',

@@ -297,6 +297,115 @@ tags: [sprint]
   assert(res.code === 0, `expected exit 0, got ${res.code}. stderr=${res.stderr}`);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Orchestrator sync scenarios (S8-S12) — enforce sha256 between
+// scripts/agent-orchestrator.js (+ /*.js) and plugin copies.
+// ─────────────────────────────────────────────────────────────
+
+const ORCH_MAIN_SRC = 'scripts/agent-orchestrator.js';
+const ORCH_MAIN_DST = 'plugins/tech-persistence/scripts/agent-orchestrator.js';
+const ORCH_SUB_SRC_DIR = 'scripts/agent-orchestrator';
+const ORCH_SUB_DST_DIR = 'plugins/tech-persistence/scripts/agent-orchestrator';
+
+function setupOrchestratorFixture(dir, mainContent, submodules = {}) {
+  writeFile(dir, ORCH_MAIN_SRC, mainContent);
+  writeFile(dir, ORCH_MAIN_DST, mainContent);
+  for (const [name, content] of Object.entries(submodules)) {
+    writeFile(dir, `${ORCH_SUB_SRC_DIR}/${name}`, content);
+    writeFile(dir, `${ORCH_SUB_DST_DIR}/${name}`, content);
+  }
+}
+
+function scenarioOrchestratorSynced() {
+  const dir = makeRepo('s8');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator v1\nmodule.exports = {};\n', {
+    'queue.js': '// queue\n',
+  });
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST, `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`);
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0, got ${res.code}. stderr=${res.stderr}`);
+  assert(
+    !/hook 内部异常已忽略|fail-open 放行|MISSING_TRANSFORMERS/.test(res.stderr),
+    `expected real pass, got fail-open: stderr=${res.stderr}`
+  );
+}
+
+function scenarioOrchestratorTampered() {
+  const dir = makeRepo('s9');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator v1\n', { 'queue.js': '// queue v1\n' });
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST, `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`);
+  execSync('git commit -q -m "synced"', { cwd: dir });
+
+  // Tamper plugin copy of a submodule
+  writeFile(dir, `${ORCH_SUB_DST_DIR}/queue.js`, '// queue v1\n// TAMPERED\n');
+  gitAdd(dir, `${ORCH_SUB_DST_DIR}/queue.js`);
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/agent-orchestrator\/queue\.js/.test(res.stderr), `stderr missing file name: ${res.stderr}`);
+  assert(/sha256 mismatch/.test(res.stderr), `stderr missing reason: ${res.stderr}`);
+  assert(/build-codex-plugin/.test(res.stderr), `stderr missing repair command: ${res.stderr}`);
+}
+
+function scenarioOrchestratorCRLFSource() {
+  // Windows editors may save source with CRLF. Plugin build always writes LF.
+  // Raw-byte sha would mismatch forever; LF-normalization makes them equal.
+  const dir = makeRepo('s10');
+  clearRequireCache(dir);
+
+  const content = '// orchestrator\nmodule.exports = {};\n';
+  writeFile(dir, ORCH_MAIN_SRC, content.replace(/\n/g, '\r\n'));  // CRLF source
+  writeFile(dir, ORCH_MAIN_DST, content);                          // LF plugin copy
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST);
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0 (LF-normalized hash should match), got ${res.code}. stderr=${res.stderr}`);
+  assert(
+    !/hook 内部异常已忽略|fail-open 放行|sha256 mismatch/.test(res.stderr),
+    `expected clean pass without sha mismatch, stderr=${res.stderr}`
+  );
+}
+
+function scenarioOrchestratorSourceDeletedOrphan() {
+  const dir = makeRepo('s11');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator\n', { 'queue.js': '// queue\n', 'locks.js': '// locks\n' });
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_SUB_SRC_DIR}/locks.js`, `${ORCH_SUB_DST_DIR}/locks.js`);
+  execSync('git commit -q -m "synced with submodules"', { cwd: dir });
+
+  // Delete source submodule but leave plugin copy → orphan
+  execSync(`git rm -- "${ORCH_SUB_SRC_DIR}/locks.js"`, { cwd: dir });
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/orphan plugin submodule|source file missing/.test(res.stderr), `stderr missing orphan/missing msg: ${res.stderr}`);
+}
+
+function scenarioOrchestratorNestedSubdir() {
+  // build-codex-plugin.copyAgentOrchestratorSubmodules is non-recursive.
+  // pre-commit-check must surface that contract by reporting nested dirs.
+  const dir = makeRepo('s12');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator\n', { 'queue.js': '// queue\n' });
+  writeFile(dir, `${ORCH_SUB_SRC_DIR}/providers/claude.js`, '// nested provider\n');
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_SUB_SRC_DIR}/providers/claude.js`);
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/nested directory|non-recursive/.test(res.stderr), `stderr missing nested-dir reason: ${res.stderr}`);
+}
+
 function scenarioGrandfatheredPlan() {
   const dir = makeRepo('s5');
   clearRequireCache(dir);
@@ -334,6 +443,11 @@ function main() {
   runScenario('S5: grandfathered old plan (filename date < 2026-05-12) → exit 0', scenarioGrandfatheredPlan);
   runScenario('S6: user-level/rules/ source out of sync → exit 1 with --rules in repair cmd', scenarioRulesPathOutOfSync);
   runScenario('S7: missing transformer module → exit 0 with fail-open diagnostic', scenarioFailOpenOnMissingTransformer);
+  runScenario('S8: orchestrator src+plugin synced → exit 0 (not fail-open)', scenarioOrchestratorSynced);
+  runScenario('S9: orchestrator plugin tampered → exit 1 with file name + sha mismatch', scenarioOrchestratorTampered);
+  runScenario('S10: orchestrator source CRLF + plugin LF → exit 0 (LF-normalized)', scenarioOrchestratorCRLFSource);
+  runScenario('S11: orchestrator source submodule deleted, plugin remains → exit 1 (orphan)', scenarioOrchestratorSourceDeletedOrphan);
+  runScenario('S12: nested subdir under scripts/agent-orchestrator/ → exit 1 (non-recursive build)', scenarioOrchestratorNestedSubdir);
 
   process.stdout.write(`\nresult: ${passed} passed, ${failed} failed\n`);
 

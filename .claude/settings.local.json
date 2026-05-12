@@ -27,7 +27,9 @@
       "Bash(rm /tmp/plan-backup.md)",
       "Bash(echo \"pre-commit exit=$?\")",
       "Bash(grep -E \"^nul$|nul$\")",
-      "Bash(powershell -NoProfile -Command \"Get-Item -Force -LiteralPath '\\\\\\\\?\\\\C:\\\\project\\\\my\\\\tech-persistence\\\\nul' | Format-List Name,Length,CreationTime,LastWriteTime\")"
+      "Bash(powershell -NoProfile -Command \"Get-Item -Force -LiteralPath '\\\\\\\\?\\\\C:\\\\project\\\\my\\\\tech-persistence\\\\nul' | Format-List Name,Length,CreationTime,LastWriteTime\")",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(echo \"pre-commit EXIT=$?\")"
     ]
   }
 }
