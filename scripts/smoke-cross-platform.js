@@ -100,10 +100,24 @@ function testMacosWorkflowExists() {
   }
 }
 
+function testProjectPlanDirectoriesAreTracked() {
+  for (const rel of [
+    '.claude/plans/.gitkeep',
+    '.codex/plans/.gitkeep',
+  ]) {
+    assert(fs.existsSync(path.join(repoRoot, rel)), `${rel} must exist so clean checkouts keep the plans directory`);
+  }
+
+  const attributes = read('.gitattributes');
+  assertIncludes(attributes, '/.claude/**/.gitkeep text eol=lf', '.gitattributes');
+  assertIncludes(attributes, '/.codex/**/.gitkeep text eol=lf', '.gitattributes');
+}
+
 process.stdout.write('\nsmoke: cross-platform install and macOS CI\n');
 run('install.sh fails fast when Node.js is missing or too old', testInstallShNodePreflight);
 run('install-codex.sh keeps Node.js preflight', testCodexInstallStillHasNodePreflight);
 run('macOS workflow covers POSIX install and core smoke checks', testMacosWorkflowExists);
+run('project plans directories survive clean checkouts', testProjectPlanDirectoriesAreTracked);
 
 process.stdout.write(`\nresult: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) {

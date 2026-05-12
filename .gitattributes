@@ -10,6 +10,7 @@
 /project-level/**/*.md text eol=lf
 /user-level/**/*.md text eol=lf
 /.codex/**/*.md text eol=lf
+/.claude/**/.gitkeep text eol=lf
 /.codex/**/.gitkeep text eol=lf
 *.sh text eol=lf
 plugins/tech-persistence/**/*.md text eol=lf
