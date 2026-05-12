@@ -57,9 +57,12 @@ function hookCommand(hookRoot, script, suffix, shell) {
   const scriptPath = `${hookRoot.replace(/\\/g, '/')}/${script}`;
   const commandPath = shell === 'windows' ? quoteForWindows(scriptPath) : quoteForPosix(scriptPath);
   const argSuffix = suffix ? ` ${suffix}` : '';
-  return shell === 'windows'
-    ? `node ${commandPath}${argSuffix} 2>nul || exit /b 0`
-    : `node ${commandPath}${argSuffix} 2>/dev/null || true`;
+  // Claude Code on Windows executes hook command strings via Git Bash (MSYS2), not cmd.exe.
+  // `2>nul` in bash creates a literal file named `nul` in cwd; `exit /b 0` is invalid syntax.
+  // POSIX-style suppression works in bash and in any future cmd path (cmd would treat
+  // `/dev/null` as a literal path, but our hooks would still succeed via `|| true` short-circuit
+  // on the unrelated failure mode). The `shell` arg is preserved for future hard-cmd splits.
+  return `node ${commandPath}${argSuffix} 2>/dev/null || true`;
 }
 
 function hookSpec(hookRoot, shell) {

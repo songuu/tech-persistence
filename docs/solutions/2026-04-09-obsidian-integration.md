@@ -1,12 +1,17 @@
 ---
 title: "Obsidian Vault 集成与 Hook Bash 兼容性修复"
 date: 2026-04-09
-tags: [solution, obsidian, hooks, windows, yaml]
+tags: [solution, obsidian, hooks, windows, yaml, regression-tracked]
 related_instincts: [windows-hook-bash, yaml-inline-arrays, obsidian-integration]
 aliases:
   - "Obsidian 集成"
   - "Hook bash 兼容"
 ---
+
+> [!warning] Errata 2026-05-12 — 此问题回归了
+> 本文 2026-04-09 修复的 `install.ps1:63,75,87,99` cmd 语法，在后续重构（引入 `scripts/merge-claude-settings-hooks.js` + install.ps1 改写）时**再次回归**为 `2>nul || exit /b 0`，导致 Windows 上 hook 每次触发都在仓库 cwd 创建 `nul` 空文件。
+> 第二次修复见 [[2026-05-12-nul-pollution-fix]]，预防经验已升级到 [[debugging-gotchas]] 「[hooks, shell-mismatch, windows]」条目并标注「已踩 2 次」。
+> 教训：纯文档协议 enforcement（"以后记得用 POSIX 语法"）抵不住代码重构带来的回归；下一道防线应是**单元测试或 CI 检查**——任何安装产物生成的 hook command 必须断言不含 `2>nul` / `exit /b`。
 
 # Obsidian Vault 集成与 Hook Bash 兼容性修复
 

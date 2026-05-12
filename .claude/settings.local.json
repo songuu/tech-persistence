@@ -25,7 +25,9 @@
       "Bash(cp docs/plans/2026-05-12-defense-mechanism.md /tmp/plan-backup.md)",
       "Bash(cp /tmp/plan-backup.md docs/plans/2026-05-12-defense-mechanism.md)",
       "Bash(rm /tmp/plan-backup.md)",
-      "Bash(echo \"pre-commit exit=$?\")"
+      "Bash(echo \"pre-commit exit=$?\")",
+      "Bash(grep -E \"^nul$|nul$\")",
+      "Bash(powershell -NoProfile -Command \"Get-Item -Force -LiteralPath '\\\\\\\\?\\\\C:\\\\project\\\\my\\\\tech-persistence\\\\nul' | Format-List Name,Length,CreationTime,LastWriteTime\")"
     ]
   }
 }

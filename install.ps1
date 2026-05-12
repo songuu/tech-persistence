@@ -57,10 +57,12 @@ function Build-SettingsJson {
     $o = [ordered]@{
         '$schema'='https://code.claude.com/schemas/settings.json'; autoMemoryEnabled=$true
         hooks=[ordered]@{
-            SessionStart=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/inject-context.js`" 2>nul || exit /b 0";timeout=5000})})
-            PreToolUse=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/observe.js`" pre 2>nul || exit /b 0";timeout=2000})})
-            PostToolUse=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/observe.js`" post 2>nul || exit /b 0";timeout=2000})})
-            Stop=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/evaluate-session.js`" 2>nul || exit /b 0";timeout=10000})})
+            # Claude Code on Windows executes hooks via Git Bash. `2>nul` in bash creates a
+            # literal file named `nul` in cwd; use POSIX `2>/dev/null || true` for portability.
+            SessionStart=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/inject-context.js`" 2>/dev/null || true";timeout=5000})})
+            PreToolUse=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/observe.js`" pre 2>/dev/null || true";timeout=2000})})
+            PostToolUse=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/observe.js`" post 2>/dev/null || true";timeout=2000})})
+            Stop=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/evaluate-session.js`" 2>/dev/null || true";timeout=10000})})
         }
     }
     return ($o | ConvertTo-Json -Depth 10)

@@ -54,7 +54,7 @@ $agent-loop self-test
 
 ## 可选参数
 
-- `--auto`：自动审查模式。orchestrator 在 spec 通过自校验（required 字段齐全、`questions: []` 为空、`assumptions` 不阻塞、acceptance 与 scope 不冲突）时自动 `freeze` 并继续 implementation + review；否则保留人工 freeze gate。review 通过即 `completed`；review 不通过仍按 follow-up 流程，不会绕过 P0。详见 `~/.claude/rules/auto-mode.md`。
+- `--auto`：自动审查模式。orchestrator 在 spec 通过自校验（required 字段齐全、`questions: []` 为空、`assumptions` 不阻塞、acceptance 与 scope 不冲突）时自动 `freeze` 并继续 implementation + review；否则保留人工 freeze gate。review 通过即 `completed`；review 不通过仍按 follow-up 流程，不会绕过 P0。`--auto-evaluate` 与 `--auto-freeze` 是兼容别名，新文档和新调用统一使用 `--auto`。详见 `~/.claude/rules/auto-mode.md`。
 - `--pipeline`：启用 pipeline 流水线模式。默认串行模式（`state.mode = "classic"`）行为完全不变；只有显式传 `--pipeline` 才进入新状态机。pipeline 模式先由 Claude Code 生成全局契约，冻结后再分批生成可执行 slice，每个 slice 独立冻结、独立 Codex 实现、独立 review，最后由 Claude Code 做 integration review。详见下方"Pipeline 模式"章节。`--pipeline --auto` 仅自动 freeze "safe" 对象，reconciliation slice 永不自动 freeze。
 - `--target`、`--slice-id`、`--resolve`、`--revision`、`--unblock`：pipeline 模式 freeze/resume 的细粒度控制。详见下方章节。
 
@@ -98,15 +98,15 @@ node scripts/agent-orchestrator.js self-test
 node scripts/agent-orchestrator.js run --requirement "$ARGUMENTS"
 ```
 
-不要默认传 `--auto-freeze`。spec 必须先给用户 review。
+不要默认传 `--auto`。spec 必须先给用户 review。
 
-若用户传了 `--auto`，模型先把 `<原始需求>` 中的 `--auto` 移除，然后追加 `--auto-evaluate`：
+若用户传了 `--auto`，模型先把 `<原始需求>` 中的 `--auto` 移除，然后追加 canonical `--auto`：
 
 ```bash
-node scripts/agent-orchestrator.js run --requirement "<去掉 --auto 的需求>" --auto-evaluate
+node scripts/agent-orchestrator.js run --requirement "<去掉 --auto 的需求>" --auto
 ```
 
-`--auto-evaluate` 让 orchestrator 在 spec 通过自校验时自动 freeze + resume；不通过则停在 `spec-ready` 等待人工 freeze。模型在追加该 flag 前必须确认本会话当前不属于 destructive / 高风险场景。
+`--auto` 让 orchestrator 在 spec 通过自校验时自动 freeze + resume；不通过则停在 `spec-ready` 等待人工 freeze。`--auto-evaluate` 与 `--auto-freeze` 只作为历史兼容别名保留，不要在新文档或新调用里主动生成。模型在追加该 flag 前必须确认本会话当前不属于 destructive / 高风险场景。
 
 若用户传了 `--pipeline`，模型把 `<原始需求>` 中的 `--pipeline` 移除，然后追加 `--pipeline`（再追加 `--auto` 时同样移除并追加）：
 

@@ -109,6 +109,27 @@ function appendRevisionEvent(runDir, revision) {
   appendJsonl(revisionsPath(runDir), revision);
 }
 
+function loadRevisionEvents(runDir) {
+  const file = revisionsPath(runDir);
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+function findRevisionEvent(runDir, revisionId) {
+  const events = loadRevisionEvents(runDir);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.revisionId === revisionId && event.fields && typeof event.fields === 'object') {
+      return event;
+    }
+  }
+  return null;
+}
+
 function applyRevisionToContract(contract, revision) {
   const next = { ...contract };
   const fields = revision.fields || {};
@@ -147,6 +168,8 @@ module.exports = {
   loadGlobalContract,
   writeGlobalContract,
   appendRevisionEvent,
+  loadRevisionEvents,
+  findRevisionEvent,
   applyRevisionToContract,
   detectChangedCanonicalFields,
 };

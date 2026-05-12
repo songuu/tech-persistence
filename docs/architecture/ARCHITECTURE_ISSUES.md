@@ -387,6 +387,161 @@ node scripts/agent-orchestrator.js retry --run <runId>
 - 安装/发布流程中的 schema compatibility test。
 - 全局用户已安装插件需要重新安装或发布后，才能拿到 `plugins/tech-persistence` 副本之外的修复。
 
+## 2026-05-12 补充：当前架构深层缺陷
+
+这部分补充的是代码与文档已经形成的深层错位。它不是“还可以优化”的列表，而是会直接影响 `$sprint`、`/agent-loop`、pipeline 和双运行时投影可信度的架构缺陷。
+
+### 问题 10：Pipeline 状态机没有形成唯一状态转移入口
+
+现有设计已经有 `pipeline-state.js` 里的 run / slice transition 定义，但实际写入路径并不统一。`pipeline.js` 会通过 transition helper 推进部分状态，provider 层在实现路径里也会直接写入 `slice-completed` 等事件。
+
+这意味着状态机目前更像“文档化的期望”，不是系统唯一的状态门禁。只要某条路径绕过 transition helper，后续的 resume、audit、迁移和失败恢复就无法只相信事件日志。
+
+**影响**
+
+- 状态图无法作为真实契约使用。
+- `slice-implementing -> slice-reviewed -> slice-completed` 这类顺序可能被实现路径跳过。
+- 后续如果加入多 worker 或重放执行，事件日志会混入不同层级写出的状态。
+
+**建议**
+
+- 建立唯一写入口：例如 `transitionRun()` / `transitionSlice()` 或 event reducer。
+- provider 只返回 intent / result，不直接写状态事件。
+- 所有状态写入都带 `from`、`to`、`reason`、`actor` 和 `source`。
+- validator 增加一条检查：禁止 provider 模块直接写 `slice-*` 状态事件。
+
+### 问题 11：slice 实现失败缺少事务语义
+
+**状态（2026-05-12）**：已完成第一批修复。slice implementation provider 失败会进入 `slice-implementation-failed`，写入 `implementation-failure.json` 与 `pipeline.history.jsonl`，释放 locks，并把 queue 移入 blocked；缺少 handoff / diff / validation evidence 的 `slice-implementing` 不再进入 review。
+
+当前 pipeline 的执行顺序是：把任务从 queue 移到 running，声明文件锁，写入 `slice-implementing`，然后调用 provider。只要 provider 报错、超时、验证失败或中途退出，就可能留下一个已经 claiming lock、但没有完整 handoff / diff / validation 的 `slice-implementing`。
+
+更麻烦的是，后续 resume / review 逻辑可能把 `slice-implementing` 当作可 review 状态继续推进。这会把“执行失败”伪装成“实现完成但待审查”。
+
+**影响**
+
+- 失败状态不可区分：失败、暂停、实现中、待审查可能混在一起。
+- lock release / retain 没有明确语义。
+- 自动恢复时容易产生 false success。
+
+**建议**
+
+- 增加明确终态或中间态：`slice-implementation-failed`、`slice-blocked`、`slice-retryable`。
+- review 入口必须校验 handoff、diff、validation 三类证据存在。
+- provider 调用和事件写入需要形成最小事务：失败时写 failure event，并决定释放或保留 lock。
+- resume 时只处理 evidence-complete 的 slice。
+
+### 问题 12：`ownedFiles` 只是计划约束，没有校验真实改动面
+
+pipeline 架构里已经引入 `ownedFiles`、文件锁和 slice isolation，但当前实现还没有把它变成硬约束。实现完成后记录的是整个 worktree diff，review 看到的也是全局 diff，而不是“这个 slice 实际改了哪些文件，是否越过 ownedFiles”。
+
+这会让并行 slice 的隔离停留在计划层。只要 agent 改了未声明文件，系统不会天然阻止；如果两个 slice 间接改了同一个共享文件，也只能依赖人工 review 发现。
+
+**影响**
+
+- `ownedFiles` 不能作为冲突边界。
+- 多 worker 扩展时会放大 merge conflict 和隐性覆盖风险。
+- review 很难判断某个 diff 属于哪个 slice。
+
+**建议**
+
+- 每个 slice 完成后计算 changed files，并与 `ownedFiles` 做集合比较。
+- 允许显式声明 generated / managed / shared exception，但必须写入 contract。
+- out-of-scope diff 默认阻断 slice completion。
+- 中长期引入 per-slice baseline 或 worktree，避免不同 slice 共享同一个脏工作区。
+
+### 问题 13：contract-conflict 处理文档强于实现
+
+**状态（2026-05-12）**：已完成第一批修复。`accept-revision` 会查找原始 revision，应用到 `global-contract.json`，写入 `global-contract.history.jsonl`，按 drift impact supersede pending slices，并为 affected completed slices 生成 reconciliation slice。
+
+pipeline 架构文档描述了 conflict resolver、contract revision、supersede affected slices、reconciliation slice 等流程。但当前实现里，接受 revision 的路径更多是追加 accepted event 并 resume，尚未稳定体现“应用 revision 到 global contract，再让受影响 slice 重排 / reconciliate”的完整闭环。
+
+这类差异风险很高，因为用户看到的是“contract conflict 已解决”，但代码层可能只是记录了解决选择。
+
+**影响**
+
+- contract 版本与执行计划可能分叉。
+- 已完成 slice 与新 contract 的差异没有被强制 reconciliation。
+- pending slice 可能继续基于旧 contract 执行。
+
+**建议**
+
+- `accept-revision` 必须执行 contract patch，并产生新 contract version。
+- pending affected slices 标记为 superseded 或 replanned。
+- completed affected slices 必须生成 reconciliation slice。
+- resolver 完成后跑一次 contract drift check，失败则不得进入 implementation。
+
+### 问题 14：Codex projection 文档发生语义漂移
+
+本仓库的真实来源关系是：Claude Code skill 是 origin，Codex skill 是 projection。部分生成脚本为了把 Claude skill 投影成 Codex skill，会做全局词替换，导致 Codex 侧文档出现“Codex 生成 global contract / integration review”等语义。实际 provider 实现仍可能调用 Claude provider 做 spec 或 review。
+
+这不是单纯措辞问题。双运行时系统里，provenance 是架构边界：谁是 origin、谁是 projection、谁负责 spec/review/implementation，不能被生成脚本抹平。
+
+**影响**
+
+- 用户会误判 Codex runtime 的真实执行能力。
+- validator 通过不代表语义一致。
+- 未来排查 provider 行为时会被文档误导。
+
+**建议**
+
+- 生成脚本避免对 provider / provenance 词做无上下文替换。
+- 文档使用 runtime-neutral 名称：`analysis provider`、`implementation provider`、`review provider`。
+- Codex projection 里显式保留“origin is Claude Code skill, Codex is projection”的说明。
+- validator 增加语义检查：禁止 projection 文档声称 Codex 执行了当前代码实际不会执行的 provider 角色。
+
+### 问题 15：classic `--auto` 文档与实现参数不一致
+
+**状态（2026-05-12）**：已修复。canonical flag 为 `--auto`，`--auto-evaluate` 与 `--auto-freeze` 作为兼容别名保留；source command、Codex projection、plugin command / skill 和 plugin validator 已同步。
+
+文档里存在 `$sprint` / `/agent-loop --auto` / `--auto-evaluate` 的表述，但 classic orchestrator 实现中主要识别的是 `--auto-freeze`。这会造成命令层的“看起来存在，实际无效”问题。
+
+**影响**
+
+- 用户按文档执行时可能无法进入预期自动评估路径。
+- skill 让模型把 `--auto` 转成 `--auto-evaluate`，但脚本不识别这个参数。
+- 自动化能力的入口被文档和实现拆成两套。
+
+**建议**
+
+- 选定一个 canonical flag。
+- 短期让 `--auto`、`--auto-evaluate`、`--auto-freeze` 形成兼容别名。
+- 中期把 skill 文档改成调用真实 CLI 参数，而不是让模型“翻译”参数。
+- validator 增加 CLI help / docs flag parity 检查。
+
+### 问题 16：plans source of truth 分裂
+
+当前计划文档存在三类位置：`docs/plans`、`.codex/plans`、`.claude/plans`。其中 `$sprint` 和用户可审阅的计划更偏向 `docs/plans`，runtime helper 又会解析 `.codex/plans` 或 `.claude/plans`，上下文注入逻辑还会混用不同目录。
+
+这会让“哪一份计划是 source of truth”变得不清晰。对用户来说，`docs/plans` 是可审阅、可提交、可传承的计划；对 runtime 来说，隐藏目录又像执行状态。两者如果没有明确职责，很容易出现同名不同步。
+
+**影响**
+
+- resume 时可能拿到旧计划或 runtime-local 计划。
+- 文档计划和执行计划可能不同步。
+- Codex / Claude 两侧 fallback 副本更难保持一致。
+
+**建议**
+
+- 明确 `docs/plans` 是 human-readable source of truth。
+- `.codex/plans` / `.claude/plans` 只保留 runtime-local cache 或兼容读取，不作为长期权威。
+- plan resolver 返回 `kind`：`sourceOfTruth`、`runtimeCache`、`legacyFallback`。
+- 所有写计划路径默认写 `docs/plans`，除非显式写 runtime artifact。
+
+### 更新后的优先级
+
+| 优先级 | 缺陷 | 原因 |
+|--------|------|------|
+| P0 | `--auto` / `--auto-evaluate` / `--auto-freeze` 参数不一致 | 用户按文档运行会直接走不到预期路径 |
+| P0 | slice 实现失败没有明确失败态 | 会把失败恢复误判成待 review 或完成 |
+| P0 | contract-conflict resolve 没有强制应用 revision 闭环 | 会产生“冲突已解决”的 false success |
+| P1 | `ownedFiles` 没有校验真实改动面 | pipeline isolation 不能支撑并行扩展 |
+| P1 | Codex projection 语义漂移 | 双运行时边界和 provider provenance 会被误导 |
+| P1 | 状态机没有唯一写入口 | 后续 audit / replay / migration 不可信 |
+| P2 | plans source of truth 分裂 | 长期影响 resume、handoff 和跨运行时一致性 |
+
+执行路线见 `docs/plans/2026-05-12-pipeline-hardening-roadmap.md`。该计划保持 `status: proposed`，避免被误识别为当前 active sprint；真正开工前再按 `$sprint` / `/plan` 流程冻结。
+
 ---
 
 ## 附录：Windows 环境配置检查清单

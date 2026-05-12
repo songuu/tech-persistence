@@ -295,3 +295,85 @@ dry-run 端到端验证：
 3. `node plugins/tech-persistence/scripts/build-codex-plugin.js` 重新生成 plugin。
 4. `node scripts/validate-codex-plugin.js` 校验。
 5. `node scripts/agent-orchestrator.js self-test` 全套通过。
+
+## 13. 当前实现限制（2026-05-12）
+
+本文件描述的是 pipeline 目标架构。当前实现已经有 global contract、slice queue、locks、drift detector、contract conflict resolver 和 dry-run 验证，但还没有把所有约束都落成强制门禁。后续修改需要优先消除以下差距。
+
+对应执行路线见 `docs/plans/2026-05-12-pipeline-hardening-roadmap.md`。本节只记录架构现状和限制，具体拆解、代码落点和验收矩阵放在 roadmap 中维护。
+
+### 13.1 状态机还不是唯一写入口
+
+`pipeline-state.js` 定义了合法状态转移，但 provider / pipeline 层仍存在直接写 `slice-*` 事件的路径。目标状态应该是：
+
+- provider 只返回 implementation / review / conflict resolution result。
+- pipeline reducer 统一写 run / slice 状态事件。
+- 所有状态写入都经过 transition check。
+- validator 禁止 provider 模块直接写状态终态。
+
+### 13.2 slice 执行缺少事务边界
+
+**当前状态（2026-05-12）**：第一批修复已落地。slice implementation failure 会写入 `implementation-failure.json` 与 `pipeline.history.jsonl`，状态进入 `slice-implementation-failed`，queue 进入 blocked，并释放该 slice locks。后续仍可继续增强 retry/status UX。
+
+当前 slice 从 queued 进入 running 后，会声明 locks 并写入 implementing。若 provider 调用失败，系统需要明确写入 failure / blocked / retryable 状态，而不是把半成品留给 review 继续处理。
+
+必须补齐的门禁：
+
+- review 只能处理 evidence-complete 的 slice。
+- provider failure 必须写 failure event。
+- lock release / retain 需要显式策略。
+- resume 需要按失败类型决定 retry、block 还是人工介入。
+
+### 13.3 `ownedFiles` 尚未约束真实 diff
+
+`ownedFiles` 当前主要用于 planning、lock 和 review 提示。它还没有强制校验最终 changed files 是否越界。
+
+下一步应补：
+
+- slice 完成时计算 changed files。
+- changed files 必须是 `ownedFiles` 子集，或命中显式 shared / generated exception。
+- out-of-scope diff 默认阻断 `slice-completed`。
+- integration review 需要按 slice 维度展示 diff，而不是只看全局 diff。
+
+### 13.4 contract conflict resolver 需要实现闭环审计
+
+**当前状态（2026-05-12）**：第一批修复已落地。`accept-revision` 会应用 contract revision、记录 applied hash、supersede affected pending slices，并为 affected completed slices 生成 reconciliation slice。后续仍需继续补更完整的 pending replan 策略。
+
+文档目标是 accept revision 后更新 global contract、supersede pending slices、为 completed-local 生成 reconciliation slice。当前实现需要继续对齐这条闭环，避免“记录了接受事件，但执行计划仍基于旧 contract”的 false success。
+
+最低要求：
+
+- `accept-revision` 产生新的 contract version。
+- affected pending slices 不能继续按旧 contract 执行。
+- affected completed slices 必须进入 reconciliation。
+- resolver 后必须跑 drift check。
+
+### 13.5 当前 pipeline 仍是单 worker 执行模型
+
+当前 architecture 已为 parallel slices 做了 queue / lock / dependsOn 设计，但实现上仍应按 single worker 理解，不能把它当成真正的多 agent 并行执行系统。
+
+扩展到多 worker 前至少需要：
+
+- per-slice changed-files gate。
+- 状态事件唯一写入口。
+- provider failure transaction。
+- shared files conflict policy。
+- per-slice baseline 或 isolated worktree 策略。
+
+### 13.6 Codex projection 必须保留 provenance
+
+本仓库的来源关系是 Claude Code skill 为 origin，Codex skill 为 projection。生成 Codex plugin 时，不能用全局替换抹掉 provider provenance。
+
+要求：
+
+- projection 文档使用 runtime-neutral provider 词汇。
+- 需要显式说明 origin / projection 关系。
+- validator 应检查 projection 文档是否声称 Codex 执行了当前代码实际不会执行的角色。
+
+### 13.7 CLI flag 需要做 docs parity
+
+**当前状态（2026-05-12）**：已修复。`--auto` 是 canonical flag，`--auto-evaluate` 与 `--auto-freeze` 是兼容别名；`validate-codex-plugin.js` 已增加 agent-loop auto flag parity 检查。
+
+classic orchestrator、pipeline 文档和 skill 文档里的 `--auto`、`--auto-evaluate`、`--auto-freeze` 需要统一。当前读者不能只看文档就判断哪个参数是真实入口。
+
+建议先做兼容别名，再收敛到一个 canonical flag，并把 help / docs / skill / README 放进同一条 parity check。

@@ -33,8 +33,21 @@ function writeJson(file, data) {
   fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
 }
 
+function appendJsonl(file, data) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, `${JSON.stringify(data)}\n`);
+}
+
+function appendPipelineEvent(runDir, event) {
+  appendJsonl(path.join(runDir, 'pipeline.history.jsonl'), { ...event, at: nowIso() });
+}
+
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function readJsonIfExists(file, fallback = null) {
+  return fs.existsSync(file) ? readJson(file) : fallback;
 }
 
 function newPipelineState(workdir, runDir, runId, requirement) {
@@ -96,6 +109,116 @@ function recordAutoSkip(stateObj, reason) {
       autoSkipped: [...stateObj.pipeline.autoSkipped, { reason, at: nowIso() }],
     },
   };
+}
+
+function sliceEvidenceComplete(runDir, sliceId) {
+  return ['handoff.json', 'diff.patch', 'validation.json'].every((name) =>
+    fs.existsSync(path.join(runDir, 'slices', sliceId, name))
+  );
+}
+
+function blockFailedSlice(ctx, current, statePath, runDir, slice, error, reasonPrefix = 'implementation failed') {
+  const reason = `${reasonPrefix}: ${error && error.message ? error.message : String(error)}`;
+  const providerRecord = error && error.providerRecord ? error.providerRecord : null;
+  const failure = {
+    sliceId: slice.id,
+    failedAt: nowIso(),
+    reason,
+    providerRecord,
+    lockAction: 'released',
+    retryCommand: `node scripts/agent-orchestrator.js resume --run ${current.runId} --unblock ${slice.id}`,
+  };
+  writeJson(path.join(runDir, 'slices', slice.id, 'implementation-failure.json'), failure);
+  appendPipelineEvent(runDir, {
+    type: SLICE_STATES.IMPLEMENTATION_FAILED,
+    sliceId: slice.id,
+    reason,
+    providerRecord,
+    lockAction: 'released',
+  });
+
+  let q = queue.loadQueue(runDir);
+  q = queue.moveToBlocked(q, slice.id, reason);
+  queue.saveQueue(runDir, q);
+
+  let locksNow = locks.loadLocks(runDir);
+  locksNow = locks.releaseSliceLocks(locksNow, slice);
+  locks.saveLocks(runDir, locksNow);
+
+  let next = transitionSlice(current, slice.id, SLICE_STATES.IMPLEMENTATION_FAILED);
+  if (providerRecord) {
+    next = { ...next, providerRuns: [...(Array.isArray(next.providerRuns) ? next.providerRuns : []), providerRecord] };
+  }
+  saveState(statePath, next);
+  ctx.log(`[BLOCKED] slice ${slice.id} implementation failed; retry with: ${failure.retryCommand}`);
+  return next;
+}
+
+function findDriftEntry(runDir, revisionId) {
+  const report = readJsonIfExists(path.join(runDir, 'drift-report.json'), { revisions: [] });
+  const entries = Array.isArray(report.revisions) ? report.revisions : [];
+  return entries.find((entry) => entry.revisionId === revisionId) || null;
+}
+
+function uniqueStrings(values) {
+  return [...new Set((Array.isArray(values) ? values : []).filter(Boolean).map(String))];
+}
+
+function markSlicesSuperseded(runDir, stateObj, q, sliceIds, revisionId) {
+  let nextState = stateObj;
+  let nextQueue = q;
+  for (const sliceId of uniqueStrings(sliceIds)) {
+    const slice = slicePlanner.loadSlice(runDir, sliceId);
+    if (slice) {
+      slicePlanner.writeSliceArtifacts(runDir, {
+        ...slice,
+        supersededByRevision: revisionId,
+        supersededAt: nowIso(),
+      });
+    }
+    const currentSliceState = nextState.pipeline.sliceStates[sliceId] || SLICE_STATES.PENDING;
+    if (currentSliceState !== SLICE_STATES.REJECTED && currentSliceState !== SLICE_STATES.ABANDONED) {
+      nextState = transitionSlice(nextState, sliceId, SLICE_STATES.REJECTED);
+    }
+    nextQueue = queue.moveToRejected(nextQueue, sliceId);
+  }
+  return { state: nextState, queue: nextQueue };
+}
+
+function filesOwnedBySlices(runDir, sliceIds) {
+  return uniqueStrings(uniqueStrings(sliceIds).flatMap((sliceId) => {
+    const slice = slicePlanner.loadSlice(runDir, sliceId);
+    return slice && Array.isArray(slice.ownedFiles) ? slice.ownedFiles : [];
+  }));
+}
+
+function createReconciliationSlice(runDir, stateObj, q, revision, completedSlices, contractHash) {
+  const affectedSlices = uniqueStrings(completedSlices);
+  if (affectedSlices.length === 0) return { state: stateObj, queue: q, slice: null };
+  const fallbackIndex = slicePlanner.listSliceIds(runDir).length + (stateObj.pipeline.reconciliationCounter || 0);
+  const slice = reconciliation.generateReconciliationSlice({
+    revision,
+    affectedSlices,
+    affectedFiles: filesOwnedBySlices(runDir, affectedSlices),
+    fallbackIndex,
+    globalContractHash: contractHash,
+  });
+  slicePlanner.writeSliceArtifacts(runDir, slice, slice);
+  let nextQueue = queue.moveToPending(q, slice.id);
+  let nextState = {
+    ...stateObj,
+    pipeline: {
+      ...stateObj.pipeline,
+      reconciliationCounter: (stateObj.pipeline.reconciliationCounter || 0) + 1,
+    },
+  };
+  nextState = transitionSlice(nextState, slice.id, SLICE_STATES.PENDING);
+  const staticCheck = sliceNormalizer.evaluateStaticCanStart(slice);
+  if (staticCheck.canStart && !slice.rejected) {
+    nextQueue = queue.moveToReady(nextQueue, slice.id);
+    nextState = transitionSlice(nextState, slice.id, SLICE_STATES.READY);
+  }
+  return { state: nextState, queue: nextQueue, slice };
 }
 
 function isContractSafeForAuto(contract) {
@@ -250,23 +373,67 @@ function resolveContractConflict(ctx, options, runDir, statePath, stateObj, acti
   const revisionId = ctx.optionValue(options, 'revision');
   if (!revisionId) throw new Error('resume --resolve requires --revision <revisionId>');
   if (action === RESOLVE_ACTIONS.ACCEPT_REVISION) {
+    const revision = globalContract.findRevisionEvent(runDir, revisionId);
+    if (!revision) throw new Error(`Cannot accept revision ${revisionId}: original revision event not found`);
+    const currentContract = globalContract.loadGlobalContract(runDir);
+    if (!currentContract) throw new Error('Cannot accept revision: global-contract.json not found');
+    const nextContract = globalContract.applyRevisionToContract(currentContract, revision);
+    const writtenContract = globalContract.writeGlobalContract(runDir, nextContract, 'revision-applied');
+    const changedFields = globalContract.detectChangedCanonicalFields(currentContract, writtenContract);
+    const driftEntry = findDriftEntry(runDir, revisionId);
+    const impact = driftEntry && driftEntry.impact ? driftEntry.impact : {};
+    let q = queue.loadQueue(runDir);
+    let next = stateObj;
+    const superseded = markSlicesSuperseded(runDir, next, q, impact.pendingSlices || [], revisionId);
+    next = superseded.state;
+    q = superseded.queue;
+    const reconciliationResult = createReconciliationSlice(
+      runDir,
+      next,
+      q,
+      revision,
+      impact.completedSlices || [],
+      writtenContract.contractHash
+    );
+    next = reconciliationResult.state;
+    q = reconciliationResult.queue;
+    queue.saveQueue(runDir, q);
     globalContract.appendRevisionEvent(runDir, {
       revisionId,
       resolvedAt: nowIso(),
       resolvedBy: process.env.USER || process.env.USERNAME || 'human',
       resolution: 'accepted',
+      appliedContractHash: writtenContract.contractHash,
+      changedFields,
+      supersededSlices: uniqueStrings(impact.pendingSlices || []),
+      reconciliationSliceId: reconciliationResult.slice ? reconciliationResult.slice.id : null,
     });
-    const next = transitionRun(stateObj, RUN_STATES.EXECUTING_SLICES);
+    appendPipelineEvent(runDir, {
+      type: 'contract-revision-accepted',
+      revisionId,
+      appliedContractHash: writtenContract.contractHash,
+      changedFields,
+      supersededSlices: uniqueStrings(impact.pendingSlices || []),
+      reconciliationSliceId: reconciliationResult.slice ? reconciliationResult.slice.id : null,
+    });
+    next = transitionRun(next, RUN_STATES.EXECUTING_SLICES);
     saveState(statePath, next);
     ctx.log(`[OK] revision ${revisionId} accepted; run resumes in ${next.status}.`);
     return next;
   }
   if (action === RESOLVE_ACTIONS.REJECT_REVISION) {
+    const reason = ctx.optionValue(options, 'reason') || 'rejected by human';
     globalContract.appendRevisionEvent(runDir, {
       revisionId,
       resolvedAt: nowIso(),
       resolvedBy: process.env.USER || process.env.USERNAME || 'human',
       resolution: 'rejected',
+      reason,
+    });
+    appendPipelineEvent(runDir, {
+      type: 'contract-revision-rejected',
+      revisionId,
+      reason,
     });
     const next = transitionRun(stateObj, RUN_STATES.EXECUTING_SLICES);
     saveState(statePath, next);
@@ -339,6 +506,10 @@ function advancePipeline(ctx, options, runDir, statePath, stateObj) {
     if (current.status === RUN_STATES.EXECUTING_SLICES) {
       const q = queue.loadQueue(runDir);
       if (!queue.hasActiveWork(q)) {
+        if (q.blocked.length > 0) {
+          ctx.log(`[GATE] no runnable slices; ${q.blocked.length} blocked. Use resume --unblock after resolving the reason.`);
+          return current;
+        }
         if (q.completed.length > 0) {
           current = transitionRun(current, RUN_STATES.INTEGRATION_READY);
           saveState(statePath, current);
@@ -399,10 +570,27 @@ function advancePipeline(ctx, options, runDir, statePath, stateObj) {
           },
         };
         saveState(statePath, current);
-        current = providers.runSliceImplementationProvider(ctx, current, statePath, runDir, options, slice);
+        try {
+          current = providers.runSliceImplementationProvider(ctx, current, statePath, runDir, options, slice);
+        } catch (error) {
+          current = blockFailedSlice(ctx, current, statePath, runDir, slice, error);
+          return current;
+        }
         continue;
       }
       if (sliceStateNow === 'slice-implementing' || sliceStateNow === 'slice-implemented') {
+        if (sliceStateNow === 'slice-implementing' && !sliceEvidenceComplete(runDir, slice.id)) {
+          current = blockFailedSlice(
+            ctx,
+            current,
+            statePath,
+            runDir,
+            slice,
+            new Error('slice is still implementing and lacks complete handoff/diff/validation evidence'),
+            'implementation evidence incomplete'
+          );
+          return current;
+        }
         const outcome = providers.runSliceReviewProvider(ctx, current, statePath, runDir, options, slice);
         current = outcome.state;
         continue;

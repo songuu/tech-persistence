@@ -122,6 +122,62 @@ function listMarkdownFiles(dir) {
   });
 }
 
+function validateAgentLoopAutoFlagParity() {
+  const targets = [
+    {
+      label: 'plugin command agent-loop.md',
+      file: path.join(pluginRoot, 'commands', 'agent-loop.md'),
+    },
+    {
+      label: 'plugin skill agent-loop/SKILL.md',
+      file: path.join(pluginRoot, 'skills', 'agent-loop', 'SKILL.md'),
+    },
+  ];
+  const canonicalInvocation = 'node scripts/agent-orchestrator.js run --requirement "<去掉 --auto 的需求>" --auto';
+  const stalePatterns = [
+    '追加 `--auto-evaluate`',
+    '--auto-evaluate` 让 orchestrator',
+    'run --requirement "<去掉 --auto 的需求>" --auto-evaluate',
+  ];
+
+  targets.forEach((target) => {
+    if (!fs.existsSync(target.file)) {
+      fail(`${target.label} missing for auto flag parity`);
+      return;
+    }
+    const content = fs.readFileSync(target.file, 'utf-8');
+    if (!content.includes(canonicalInvocation)) {
+      fail(`${target.label} must document canonical --auto orchestrator invocation`);
+    }
+    if (!content.includes('`--auto-evaluate` 与 `--auto-freeze`')) {
+      fail(`${target.label} must document auto flag compatibility aliases`);
+    }
+    stalePatterns.forEach((pattern) => {
+      if (content.includes(pattern)) {
+        fail(`${target.label} must not instruct new calls to use ${pattern.trim()}`);
+      }
+    });
+  });
+
+  const orchestratorPath = path.join(pluginRoot, 'scripts', 'agent-orchestrator.js');
+  if (!fs.existsSync(orchestratorPath)) {
+    fail('plugin agent-orchestrator.js missing for auto flag parity');
+    return;
+  }
+  const orchestrator = fs.readFileSync(orchestratorPath, 'utf-8');
+  [
+    "auto: ['auto', 'auto-evaluate', 'auto-freeze']",
+    "'auto-evaluate': ['auto', 'auto-evaluate', 'auto-freeze']",
+    "'auto-freeze': ['auto', 'auto-evaluate', 'auto-freeze']",
+    '--auto-evaluate               Alias for --auto.',
+    '--auto-freeze                 Legacy alias for --auto.',
+  ].forEach((snippet) => {
+    if (!orchestrator.includes(snippet)) {
+      fail(`plugin agent-orchestrator.js missing auto flag parity snippet: ${snippet}`);
+    }
+  });
+}
+
 function validateNoClaudeOnlyText(dir, label) {
   const forbidden = /Claude Code|Claude|CLAUDE|~\/\.claude|\.claude\//;
   listMarkdownFiles(dir).forEach((file) => {
@@ -210,6 +266,7 @@ isFile(path.join(pluginRoot, 'hooks', 'run-hook.cmd'), 'hook script run-hook.cmd
 isFile(path.join(pluginRoot, 'hooks', 'run-hook.js'), 'hook script run-hook.js');
 validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence-small.svg'), 'asset tech-persistence-small.svg');
 validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence.svg'), 'asset tech-persistence.svg');
+validateAgentLoopAutoFlagParity();
 
 isFile(
   path.join(pluginRoot, 'scripts', 'import-claude-homunculus.js'),

@@ -182,9 +182,21 @@ function optionValues(options, key) {
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
+const BOOL_OPTION_ALIASES = {
+  auto: ['auto', 'auto-evaluate', 'auto-freeze'],
+  'auto-evaluate': ['auto', 'auto-evaluate', 'auto-freeze'],
+  'auto-freeze': ['auto', 'auto-evaluate', 'auto-freeze'],
+};
+
+function boolOptionKeys(key) {
+  return BOOL_OPTION_ALIASES[key] || [key];
+}
+
 function boolOption(options, key) {
-  const value = optionValue(options, key);
-  return value === true || value === 'true' || value === '1';
+  return boolOptionKeys(key).some((candidate) => {
+    const value = optionValue(options, candidate);
+    return value === true || value === 'true' || value === '1';
+  });
 }
 
 function toolRoot() {
@@ -518,11 +530,17 @@ function runProcess(label, launchOrCommand, args, settings) {
     envOverrides: settings.env || null,
   };
 
+  function failWithRecord(message) {
+    const error = new Error(message);
+    error.providerRecord = record;
+    throw error;
+  }
+
   if (result.error && result.error.code === 'ETIMEDOUT') {
-    throw new Error(`${label} timed out after ${timeoutMs}ms; see ${settings.stdoutFile || 'stdout'} and ${settings.stderrFile || 'stderr'}`);
+    failWithRecord(`${label} timed out after ${timeoutMs}ms; see ${settings.stdoutFile || 'stdout'} and ${settings.stderrFile || 'stderr'}`);
   }
   if (result.error) {
-    throw new Error(`${label} failed to start: ${result.error.message}`);
+    failWithRecord(`${label} failed to start: ${result.error.message}`);
   }
   if (!settings.allowFailure && result.status !== 0) {
     const envelopeError = extractProviderEnvelopeError(result.stdout || '');
@@ -532,7 +550,7 @@ function runProcess(label, launchOrCommand, args, settings) {
       ? `stdout: ${stdoutPath}`
       : `stderr: ${stderrPath} / stdout: ${stdoutPath}`;
     const reason = envelopeError ? ` — ${envelopeError}` : '';
-    throw new Error(`${label} exited with ${result.status}${reason}; see ${where}`);
+    failWithRecord(`${label} exited with ${result.status}${reason}; see ${where}`);
   }
   return { result, record };
 }
@@ -1731,7 +1749,7 @@ function runStart(options, positionals) {
   }
 
   runSpecProvider(state, statePath, runDir, options);
-  if (!boolOption(options, 'auto-freeze')) {
+  if (!boolOption(options, 'auto')) {
     console.log(`[OK] spec ready: ${runDir}`);
     console.log(`Next: review ${path.join(runDir, 'requirement-spec.md')}`);
     console.log(`Freeze: node scripts/agent-orchestrator.js freeze --run ${runId}`);
@@ -1739,7 +1757,7 @@ function runStart(options, positionals) {
   }
 
   state.specFrozenAt = nowIso();
-  state.specFrozenBy = 'auto-freeze';
+  state.specFrozenBy = 'auto';
   state.status = 'frozen';
   saveState(statePath, state);
   runImplementationProvider(state, statePath, runDir, options);
@@ -1886,6 +1904,9 @@ function runSelfTest() {
   assertSelfTest('envelope extractor surfaces generic is_error', codex402.includes('insufficient quota'), true);
   assertSelfTest('envelope extractor ignores plain text', extractProviderEnvelopeError('hello world'), null);
   assertSelfTest('envelope extractor ignores empty', extractProviderEnvelopeError(''), null);
+  assertSelfTest('auto flag canonical parses', boolOption({ auto: true }, 'auto'), true);
+  assertSelfTest('auto-evaluate alias parses as auto', boolOption({ 'auto-evaluate': true }, 'auto'), true);
+  assertSelfTest('auto-freeze legacy alias parses as auto', boolOption({ 'auto-freeze': true }, 'auto'), true);
 
   const directBusinessJson = extractJsonValue(JSON.stringify({
     result: 'Implementation completed without structured wrapper.',
@@ -1936,8 +1957,16 @@ function runPipelineSelfTests() {
     pipelineState.isValidRunTransition('completed', 'executing-slices'), false);
   assertSelfTest('pipeline slice transitions: pending -> ready',
     pipelineState.isValidSliceTransition('slice-pending', 'slice-ready'), true);
+  assertSelfTest('pipeline slice transitions: pending -> rejected supersede',
+    pipelineState.isValidSliceTransition('slice-pending', 'slice-rejected'), true);
+  assertSelfTest('pipeline slice transitions: ready -> rejected supersede',
+    pipelineState.isValidSliceTransition('slice-ready', 'slice-rejected'), true);
   assertSelfTest('pipeline slice transitions: frozen -> rejected branch',
     pipelineState.isValidSliceTransition('slice-frozen', 'slice-rejected'), true);
+  assertSelfTest('pipeline slice transitions: implementing -> implementation-failed',
+    pipelineState.isValidSliceTransition('slice-implementing', 'slice-implementation-failed'), true);
+  assertSelfTest('pipeline slice transitions: implementation-failed -> ready retry',
+    pipelineState.isValidSliceTransition('slice-implementation-failed', 'slice-ready'), true);
   assertSelfTest('pipeline slice transitions: completed has no successor',
     pipelineState.isValidSliceTransition('slice-completed', 'slice-implementing'), false);
 
@@ -2172,6 +2201,188 @@ function runProviderIntegrationSelfTests() {
   assertSelfTest('provider integration: breaking revision enters contract-conflict', breakingOutcome.state.status, 'contract-conflict');
   assertSelfTest('provider integration: breaking drift recorded', breakingOutcome.drift[0].classification, 'breaking');
 
+  const failureBase = path.join(os.tmpdir(), `agent-loop-selftest-failure-${process.pid}-${Date.now()}`);
+  fs.mkdirSync(path.join(failureBase, 'prompts'), { recursive: true });
+  fs.mkdirSync(path.join(failureBase, 'logs'), { recursive: true });
+  fs.mkdirSync(path.join(failureBase, 'slices'), { recursive: true });
+  let failureState = pipeline.newPipelineState(failureBase, failureBase, 'selftest-failure', 'provider failure requirement');
+  const failureStatePath = path.join(failureBase, 'state.json');
+  const failureContract = pipeline.dryRunGlobalContract('provider failure');
+  globalContractModule.writeGlobalContract(failureBase, failureContract, 'self-test');
+  const failureSlice = sliceNormalizerModule.normalizeSlice({
+    id: 'slice-failure',
+    title: 'mock failure slice',
+    dependsOn: [],
+    ownedFiles: ['failure.txt'],
+    readFiles: [],
+    risk: 'L1',
+    acceptanceCriteria: ['failure is blocked'],
+    doneCriteria: ['failure is recorded'],
+    validationCommands: [],
+    questions: [],
+  }, { fallbackIndex: 0, globalContractHash: failureContract.contractHash });
+  slicePlannerModule.writeSliceArtifacts(failureBase, failureSlice);
+  pipelineQueue.saveQueue(failureBase, pipelineQueue.moveToReady(pipelineQueue.emptyQueue(), failureSlice.id));
+  failureState = {
+    ...failureState,
+    status: 'executing-slices',
+    pipeline: {
+      ...failureState.pipeline,
+      sliceStates: { [failureSlice.id]: 'slice-frozen' },
+    },
+  };
+  writeJson(failureStatePath, failureState);
+  const failureCtx = buildMockCtx(failureBase);
+  failureCtx.runProcess = (label, launchOrCommand, args, settings) => {
+    if (settings && settings.stdoutFile) writeText(settings.stdoutFile, '');
+    if (settings && settings.stderrFile) writeText(settings.stderrFile, 'mock failure');
+    const error = new Error('mock implementation provider failure');
+    error.providerRecord = {
+      label,
+      args,
+      cwd: settings ? settings.cwd : null,
+      stdoutFile: settings && settings.stdoutFile,
+      stderrFile: settings && settings.stderrFile,
+      status: 1,
+      startedAt: 'mock',
+      finishedAt: 'mock',
+    };
+    throw error;
+  };
+  const failedState = pipeline.resumePipelineRun(failureCtx, {}, []);
+  assertSelfTest('provider integration: implementation failure state recorded',
+    failedState.pipeline.sliceStates[failureSlice.id], 'slice-implementation-failed');
+  const failedQueue = pipelineQueue.loadQueue(failureBase);
+  assertSelfTest('provider integration: implementation failure blocks queue',
+    failedQueue.blocked[0].sliceId, failureSlice.id);
+  const failedLocks = pipelineLocks.loadLocks(failureBase);
+  assertSelfTest('provider integration: implementation failure releases locks',
+    failedLocks.files['failure.txt'].status, 'released');
+  assertSelfTest('provider integration: failure artifact written',
+    fs.existsSync(path.join(failureBase, 'slices', failureSlice.id, 'implementation-failure.json')), true);
+  assertSelfTest('provider integration: failure history written',
+    fs.existsSync(path.join(failureBase, 'pipeline.history.jsonl')), true);
+  assertSelfTest('provider integration: failed provider run recorded',
+    Array.isArray(failedState.providerRuns) && failedState.providerRuns.length === 1, true);
+  fs.rmSync(failureBase, { recursive: true, force: true });
+
+  const resolveBase = path.join(os.tmpdir(), `agent-loop-selftest-resolve-${process.pid}-${Date.now()}`);
+  fs.mkdirSync(path.join(resolveBase, 'prompts'), { recursive: true });
+  fs.mkdirSync(path.join(resolveBase, 'logs'), { recursive: true });
+  fs.mkdirSync(path.join(resolveBase, 'slices'), { recursive: true });
+  const resolveStatePath = path.join(resolveBase, 'state.json');
+  const resolveContract = globalContractModule.writeGlobalContract(
+    resolveBase,
+    pipeline.dryRunGlobalContract('resolve contract'),
+    'self-test'
+  );
+  const completedSlice = sliceNormalizerModule.normalizeSlice({
+    id: 'slice-completed',
+    title: 'completed slice',
+    ownedFiles: ['completed.txt'],
+    acceptanceCriteria: ['done'],
+    doneCriteria: ['done'],
+  }, { fallbackIndex: 0, globalContractHash: resolveContract.contractHash });
+  const pendingSlice = sliceNormalizerModule.normalizeSlice({
+    id: 'slice-pending',
+    title: 'pending slice',
+    ownedFiles: ['pending.txt'],
+    acceptanceCriteria: ['pending'],
+    doneCriteria: ['pending'],
+  }, { fallbackIndex: 1, globalContractHash: resolveContract.contractHash });
+  slicePlannerModule.writeSliceArtifacts(resolveBase, completedSlice);
+  slicePlannerModule.writeSliceArtifacts(resolveBase, pendingSlice);
+  let resolveQueue = pipelineQueue.emptyQueue();
+  resolveQueue = pipelineQueue.moveToCompleted(resolveQueue, completedSlice.id);
+  resolveQueue = pipelineQueue.moveToReady(resolveQueue, pendingSlice.id);
+  pipelineQueue.saveQueue(resolveBase, resolveQueue);
+  globalContractModule.appendRevisionEvent(resolveBase, {
+    revisionId: 'rev-accept',
+    source: 'slice-review',
+    sourceSliceId: completedSlice.id,
+    fields: { architectureConstraints: ['revised constraint'] },
+    rationale: 'self-test accept revision',
+    classification: 'completed-local',
+    resolution: 'pending',
+  });
+  driftDetectorModule.writeDriftReport(resolveBase, [{
+    revisionId: 'rev-accept',
+    classification: 'completed-local',
+    reason: 'self-test',
+    impact: { pendingSlices: [pendingSlice.id], completedSlices: [completedSlice.id] },
+    action: 'create-reconciliation-slice',
+  }], resolveContract.contractHash);
+  let resolveState = pipeline.newPipelineState(resolveBase, resolveBase, 'selftest-resolve', 'resolve requirement');
+  resolveState = {
+    ...resolveState,
+    status: 'contract-conflict',
+    pipeline: {
+      ...resolveState.pipeline,
+      sliceStates: {
+        [completedSlice.id]: 'slice-completed',
+        [pendingSlice.id]: 'slice-ready',
+      },
+      conflictRevisionIds: ['rev-accept'],
+    },
+  };
+  writeJson(resolveStatePath, resolveState);
+  const resolvedState = pipeline.resumePipelineRun(buildMockCtx(resolveBase), {
+    resolve: 'accept-revision',
+    revision: 'rev-accept',
+  }, []);
+  assertSelfTest('provider integration: accept revision resumes execution', resolvedState.status, 'executing-slices');
+  assertSelfTest('provider integration: accept revision applies contract',
+    globalContractModule.loadGlobalContract(resolveBase).architectureConstraints[0], 'revised constraint');
+  assertSelfTest('provider integration: accept revision supersedes pending slice',
+    resolvedState.pipeline.sliceStates[pendingSlice.id], 'slice-rejected');
+  const reconcileIds = slicePlannerModule.listSliceIds(resolveBase).filter((id) => id.startsWith('reconcile-'));
+  assertSelfTest('provider integration: accept revision creates reconciliation slice', reconcileIds.length, 1);
+  const acceptedEvent = globalContractModule.loadRevisionEvents(resolveBase).find((event) =>
+    event.revisionId === 'rev-accept' && event.resolution === 'accepted'
+  );
+  assertSelfTest('provider integration: accept revision records applied hash',
+    Boolean(acceptedEvent && acceptedEvent.appliedContractHash), true);
+  fs.rmSync(resolveBase, { recursive: true, force: true });
+
+  const rejectBase = path.join(os.tmpdir(), `agent-loop-selftest-reject-${process.pid}-${Date.now()}`);
+  fs.mkdirSync(path.join(rejectBase, 'slices'), { recursive: true });
+  const rejectStatePath = path.join(rejectBase, 'state.json');
+  const rejectContract = globalContractModule.writeGlobalContract(
+    rejectBase,
+    pipeline.dryRunGlobalContract('reject contract'),
+    'self-test'
+  );
+  globalContractModule.appendRevisionEvent(rejectBase, {
+    revisionId: 'rev-reject',
+    source: 'slice-review',
+    fields: { goal: 'should not apply' },
+    rationale: 'self-test reject revision',
+    classification: 'breaking',
+    resolution: 'pending',
+  });
+  pipelineQueue.saveQueue(rejectBase, pipelineQueue.emptyQueue());
+  let rejectState = pipeline.newPipelineState(rejectBase, rejectBase, 'selftest-reject', 'reject requirement');
+  rejectState = {
+    ...rejectState,
+    status: 'contract-conflict',
+    pipeline: { ...rejectState.pipeline, conflictRevisionIds: ['rev-reject'] },
+  };
+  writeJson(rejectStatePath, rejectState);
+  const rejectedState = pipeline.resumePipelineRun(buildMockCtx(rejectBase), {
+    resolve: 'reject-revision',
+    revision: 'rev-reject',
+    reason: 'self-test says no',
+  }, []);
+  assertSelfTest('provider integration: reject revision resumes execution', rejectedState.status, 'executing-slices');
+  assertSelfTest('provider integration: reject revision leaves contract unchanged',
+    globalContractModule.loadGlobalContract(rejectBase).contractHash, rejectContract.contractHash);
+  const rejectedEvent = globalContractModule.loadRevisionEvents(rejectBase).find((event) =>
+    event.revisionId === 'rev-reject' && event.resolution === 'rejected'
+  );
+  assertSelfTest('provider integration: reject revision records reason',
+    rejectedEvent && rejectedEvent.reason, 'self-test says no');
+  fs.rmSync(rejectBase, { recursive: true, force: true });
+
   fs.rmSync(tmpBase, { recursive: true, force: true });
 }
 
@@ -2249,13 +2460,15 @@ Options:
   --workdir <path>              Repository root. Defaults to cwd.
   --runs-dir <path>             Run directory under workdir. Defaults to .agent-runs.
   --run-id <id>                 Stable run id.
-  --auto-freeze                 Explicitly skip human freeze and continue.
-  --auto                        Pipeline mode: auto-freeze "safe" objects only (see docs).
+  --auto                        Auto-evaluate safe gates. Classic: freeze spec only when self-check passes.
+  --auto-evaluate               Alias for --auto.
+  --auto-freeze                 Legacy alias for --auto.
   --pipeline                    Enable pipeline mode (experimental).
   --target <kind>               Pipeline freeze target: global-contract | slice.
   --slice-id <id>               Pipeline slice id (with --target slice).
   --resolve <action>            Pipeline contract-conflict action: accept-revision | reject-revision | abandon.
   --revision <id>               Revision id for --resolve accept/reject.
+  --reason <text>               Optional human reason for --resolve reject-revision.
   --unblock <sliceId>           Move a blocked slice back to ready.
   --allow-dirty                 Allow implementation in a dirty git worktree.
   --validation-command <cmd>    Shell command to run after implementation. Repeatable.
