@@ -3,7 +3,7 @@ title: "gstack 最新功能扫描与本项目可优化点分析"
 type: sprint
 status: completed
 created: "2026-05-12"
-updated: "2026-05-12"
+updated: "2026-05-13"
 checkpoints: 0
 tasks_total: 8
 tasks_completed: 8
@@ -17,9 +17,9 @@ aliases: ["gstack-latest-scan", "gstack-analysis-2"]
 
 # gstack 最新功能扫描与本项目可优化点分析
 
-> **Status:** `reviewing`
+> **Status:** `completed`
 > **Created:** 2026-05-12
-> **Updated:** 2026-05-12
+> **Updated:** 2026-05-13
 
 ---
 
@@ -425,46 +425,59 @@ Phase 5 可能新增（视 Task 6 输出）：
 
 ## 21 命令使用率审计（Task 7 — reframe 新增）
 
-**取证方法**（每个数据源在 Phase 4 reframe 前后都明示）：
+**2026-05-13 复核修正**：原审计把不存在于 `user-level/commands/` 的 `/debug-journal` 纳入 21 命令，并把部分低提及命令误判为 0 提及。以下为按当前仓库重跑后的结果。
+
+**取证方法**（排除本 sprint 自引文档）：
 
 | 数据源 | 覆盖范围 | 限制 |
 |---|---|---|
-| `~/.claude/homunculus/projects/8331ab9c2853/observations.jsonl` | 252 entries / 4 hook 类型 | **earliest = 2026-05-12T13:04**（本 sprint 启动时）= 历史使用率 0 数据 |
-| git log (last 60d) | 全部 commit msg | 仅匹配 commit msg 关键词，不反映实际调用 |
-| `docs/plans/*.md` + `docs/solutions/*.md` 提及次数 | 全部历史文档 | 间接 proxy — 文档提及不等于实际调用，但**长期 0 提及 = 强信号 "已建未用"** |
+| `user-level/commands/*.md` | 当前真实命令面 | ✅ 21 个文件；`/debug-journal` 不存在，不能纳入 21 命令审计 |
+| `~/.claude/homunculus/projects/8331ab9c2853/observations.jsonl` | 1562 entries，2026-05-12T01:04:58Z → 2026-05-13T01:25:08Z | hook 里 `session_id` 多为 fallback，不能当真实 session 数；slash 命中来自 input/output 文本，不等同实际 slash command 调用 |
+| `~/.codex/homunculus/projects/8331ab9c2853/observations.jsonl` | 3 entries，2026-04-23T02:47:20Z → 2026-04-23T02:54:56Z | 样本太少，只能证明 Codex 侧路径存在 |
+| `docs/plans/*.md` + `docs/solutions/*.md` | 79 个历史文档；排除本文件、followup plan、reframe lessons 3 个自引文档 | 间接 proxy — 文档提及不等于实际调用，但能发现"长期没有被工作流提到"的命令 |
+| `git log --since "60 days ago" --format=%s` | commit message | 当前 21 个命令均 0 命中；不作为使用率依据 |
 
 **核心发现 — 4-hook observation 系统已建但跨 session 聚合缺失**：
 
-- observe.js 单 session 100% 捕获率（验证 OK，本 session 252 entries）
-- **但**无跨 session 聚合脚本（如 `scripts/usage-report.js`），retro 类命令（`/review-learnings`、`/session-summary`）只读单 session
-- 这是 gstack `/retro` JSON snapshot + delta 模式的**真问题映射**（C5 仍成立，但要再加一层"跨 session 聚合"）
+- observation 文件存在并持续增长，但当前没有稳定的跨 session 聚合脚本（如 `scripts/usage-report.js`）。
+- `detectProjectIdentity()` 在本次 Node 复核中返回 `b68201be5c69`（cwd fallback），而历史 observation 实际在 `8331ab9c2853` 下；说明 usage-report 不能只信当前 runtime 推导路径，必须兼容历史项目 id / 迁移路径。
+- 这是 gstack `/retro` JSON snapshot + delta 模式的**真问题映射**（C5 仍成立，但落点应是"跨 session / 跨 runtime 聚合"，不是 generic retro 指标）。
 
-**Docs 提及次数（21 命令）**：
+**Docs 提及次数（21 命令，排除自引后）**：
 
-| 提及数 | 命令 | 判定 |
+| 提及数 / 文件广度 | 命令 | 判定 |
 |---|---|---|
-| **0** | `/instinct-status` `/instinct-import` `/instinct-export` `/debug-journal` | 🔴 已建未用，候选退役 |
-| **1** | `/learn` `/prototype` `/review-learnings` `/session-summary` `/skill-improve` | 🟡 极低用，候选合并 |
-| **2** | `/checkpoint` `/evolve` `/skill-eval` `/skill-publish` | 🟡 低用，可观察 |
-| **3-5** | `/test` `/skill-diagnose` `/think` | 🟡 中等，保留 |
-| **8-10** | `/work` `/agent-loop` `/sprint` | ✅ 主力 |
-| **14-16** | `/compound` `/review` | ✅ 高频 |
-| **61** | `/plan` | ✅（含路径匹配噪音）|
+| **0 / 0 文件** | `/instinct-export` `/instinct-import` `/instinct-status` `/review-learnings` `/session-summary` | 🔴 文档证据缺失；候选收敛，但执行前需 usage-report 复核真实调用 |
+| **1 / 1 文件** | `/checkpoint` | 🟡 极低提及；保留观察 |
+| **4-5 / 1 文件** | `/learn` `/prototype` `/skill-eval` `/skill-improve` `/skill-publish` | 🟡 低广度，不是 0 提及；不能按旧方案直接移入 experimental |
+| **4-5 / 2-3 文件** | `/test` `/skill-diagnose` | 🟡 中低提及；保留 |
+| **9-11** | `/evolve` `/think` | ✅ 保留 |
+| **19-20** | `/plan` `/work` | ✅ 主力 |
+| **30+** | `/sprint` `/compound` `/review` `/agent-loop` | ✅ 高频 / 核心 |
 
-**结论 — 已建未用候选清理 4 条**（不立即执行，作为后续 sprint 输入）：
+**Observation slash 文本命中（仅辅助，不等同实际调用）**：
 
-| 命令 | 0 提及原因猜测 | 建议动作 |
+| 命中数 | 命令 |
 |---|---|---|
-| `/instinct-status` | 与 `/review-learnings` 功能重叠（都查本能态）| 合并到 `/review-learnings --instincts` |
-| `/instinct-import` `/instinct-export` | 跨项目本能共享场景几乎从未发生 | 推迟到第一次真实需求来；当前从 commands/ 移出 |
-| `/debug-journal` | `/compound` 已覆盖调试经验沉淀 | 合并到 `/compound --debug` flag |
+| **0** | `/checkpoint` `/evolve` `/instinct-export` `/learn` `/prototype` `/session-summary` `/skill-diagnose` `/skill-eval` `/skill-improve` `/skill-publish` `/test` |
+| **2-6** | `/instinct-import` `/instinct-status` `/plan` `/review` `/review-learnings` `/think` `/work` |
+| **16+** | `/compound` `/agent-loop` `/sprint` |
+
+**结论 — 原清理清单作废，改为候选收敛清单**（不立即执行，作为后续 sprint 输入）：
+
+| 命令 | 证据状态 | 建议动作 |
+|---|---|---|
+| `/instinct-export` `/instinct-import` `/instinct-status` | docs 0；observation 中仅 `/instinct-import` `/instinct-status` 有 2 次文本命中 | 暂列 experimental 候选；执行前用 usage-report 区分真实调用与文档文本命中 |
+| `/review-learnings` `/session-summary` | docs 0；`/review-learnings` 有 6 次 observation 文本命中，`/session-summary` 为 0 | 暂不移动；先确认它们是否作为 Stop/复盘链路被隐式使用 |
+| `/prototype` `/skill-eval` `/skill-improve` `/skill-publish` | docs 4-5，但全部集中在 `docs/plans/2026-04-13-skill-self-iteration-loop.md` 单文件 | 从"0 提及清理"改为"低广度观察"，不能按旧 followup A 直接移动 |
 
 **反方理由**：
-- `/instinct-export` 是 0 提及但**结构性价值**（团队协作场景）；当前是 solo 项目，但若未来开源协作场景出现，移除是负回归 → 建议**移出 commands/ 主线但保留代码**作为 "experimental"
-- `/debug-journal` 0 提及可能是因为它太年轻（CLAUDE.md 中提到了但没用机会），不是没价值
+- `/instinct-export` 是 0 docs 提及但**结构性价值**仍成立（团队协作 / 开源共享场景）；移除主线前必须保留源码和恢复路径。
+- `/review-learnings` / `/session-summary` 属于复盘链路命令，可能通过文档外触发；仅靠 docs proxy 判定风险偏高。
+- skill 自迭代命令虽然低广度，但与本项目 inbound self-evolution 定位直接相关，不能和 outbound shipping 命令同一套退役标准。
 
 **产品级洞察（来自 product-lens reviewer F5/F2）**：
-gstack 从 N=23 → N=30+ 是**用户价值假设的扩张**。本项目从 N=21 看，如果有 4 个 0 提及命令 + 5 个 1 提及命令 = **N=21 的 43% 命令证据不足**。"已建"不等于"应建"，**先收敛到 N=12 真正用得起来的核心**比"补吸收 gstack 新东西"价值高。
+gstack 从 N=23 → N=30+ 是**用户价值假设的扩张**。本项目从 N=21 看，当前更准确的结论不是"9 个命令可立即退役"，而是：**5 个命令 docs 0 提及，6 个命令只被单个历史文档提到，命令面确实偏宽，但退役清单必须先由 usage-report 复核**。"已建"不等于"应建"，但"低文档提及"也不等于"可直接移出主线"。
 
 ---
 
@@ -521,14 +534,14 @@ gstack 从 N=23 → N=30+ 是**用户价值假设的扩张**。本项目从 N=21
 
 **🥇 ROI 第 1 — 已建未用命令清理（Task 7 产出）**
 
-- **5 年杠杆**：4 个 0 提及命令 + 5 个 1 提及命令 = 21 命令 43% 证据不足。清理后用户 cognitive surface 缩小（"哪个命令用"决策成本下降）；新 sprint 不再被"我们有命令"的假象误导；维护表面立即减小
+- **5 年杠杆**：复核后是 5 个 docs 0 提及命令 + 6 个单文档低广度命令，而不是旧结论的"4 个 0 + 5 个 1"。先把清理候选从"直接移动文件"改为"基于 usage-report 复核后的收敛动作"，可以避免继续被"我们有命令"的假象误导，同时不误伤 skill 自迭代 / 复盘链路命令。
 - **维护表面增量**：**负的**（删 / 合并 = 减表面）
 - **杠杆/增量比**：**∞**（无新增维护，全是减表面）
-- **风险**：误删年轻命令（`/debug-journal` 等）；缓解 = "experimental" 子目录保留代码
+- **风险**：docs proxy 不是实际调用数据；缓解 = 先做 usage-report，再决定 experimental 清单
 
 **🥈 ROI 第 2 — 跨 session 使用率聚合脚本（Task 7 衍生）**
 
-- **5 年杠杆**：实施后 every sprint 可见"60 天未用命令"清单，未来"是否再加 X 命令"决策有真实数据支持；本能 `documented-claim-vs-code-reality-drift` 加一层防御（命令文档也是"声称"）
+- **5 年杠杆**：实施后 every sprint 可见"60 天未用命令"清单，未来"是否再加 X 命令"决策有真实数据支持；本能 `documented-claim-vs-code-reality-drift` 加一层防御（命令文档也是"声称"）。2026-05-13 复核还发现 current id `b68201be5c69` 与历史 observation id `8331ab9c2853` 漂移，usage-report 必须兼容历史 id / runtime 路径。
 - **维护表面增量**：~80 行（聚合脚本 + `/review-learnings` 集成）
 - **杠杆/增量比**：~10x
 - **关键约束**：吸收 gstack `/retro` 的"delta 比较"内核（C5 仍成立），但落点改为命令使用率而非 generic engineering metrics
@@ -561,52 +574,18 @@ gstack 从 N=23 → N=30+ 是**用户价值假设的扩张**。本项目从 N=21
 | 拒5 | G15-17 Browser / prompt-injection / pair-agent | scope 外 |
 | 拒6 | gstack outbound shipping 方向整体跟随 | Positioning 决策（Task 8）显式拒绝 |
 
-按 5 年杠杆 / 维护表面增量评（**不**按人天 / 速胜）。
-
-### 🥇 ROI 第 1 — **C1 / I2 Pre-tool destructive command hook**
-
-- **5 年杠杆**：每次 destructive 误操作（rm -rf / force-push / DROP TABLE）拦下一次价值 = 0.5-数天工作恢复 + 一次 trust 事件。本项目 4 月已踩 1 次 nul 类（仅文件污染，但同款根因 = 文档协议失效）。年频估 1-3 次 = 5 年 5-15 次拦截。
-- **维护表面增量**：~250 行（脚本 150 + hook 配置 20 + smoke 30 + Codex 镜像 50）
-- **杠杆/增量比**：极高（10x+）
-- **风险**：Windows 上 hook command 必须 POSIX 语法（已踩 2 次 nul），实施前 grep 反向断言
-
-### 🥈 ROI 第 2 — **C2 / I1 Phase 间预热段 lint enforcement**
-
-- **5 年杠杆**：grandfather + 强制后，每次 sprint Phase 衔接节省 1-2 次"重新探索下一 phase 关键文件"往返 ≈ 5-10 min。每 sprint 5 phase × 4 衔接 × 7.5 min × 30 sprint/年 × 5 年 = ~75 小时
-- **维护表面增量**：~50 行（lint 30 + smoke 20）
-- **杠杆/增量比**：极高（5x+）
-- **依据**：本项目过去 5 sprint 反复验证「mechanism > discipline」（ADR-013 / pre-commit-check 升级 / 本能"documented-claim-vs-code-reality-drift"）
-
-### 🥉 ROI 第 3 — **C5 Retro delta JSON 内核（去周月 cron）**
-
-- **5 年杠杆**：每次 `/session-summary` 自动可见 delta（如"测试覆盖 vs 上次 -5pp"）= 不靠记忆识别退步。tech-persistence 类自进化项目，**自身退化早期信号**价值 > 普通工具项目
-- **维护表面增量**：~100 行（snapshot writer 60 + delta diff 40）
-- **杠杆/增量比**：高（4x+）
-- **关键约束**：拒绝 gstack 的周月 cron 形态（solo-maintainer ROI 低），只吸收 delta 内核
-
-### 🔴 显式拒绝 ≥ 2
-
-| # | 拒绝项 | 拒绝理由（一句话） |
-|---|---|---|
-| 拒1 | **G12 Parallel sprint management 10-15 sessions** | 违反"轻量"原则；solo-maintainer 单 sprint 已足够；power-user 优化，杠杆假 |
-| 拒2 | **G13 /setup-gbrain /sync-gbrain 完整集成** | ADR-011 已显式拒绝 gbrain 整体融入；本 sprint 复核仍拒，理由不变 |
-| 拒3 | **C7 Plan completion verification（扫 diff）** | 服务于 release pipeline，本项目无 release 阶段，错位 |
-| 拒4 | **C8 多层测试管道 cost-tiered** | 与本项目风险驱动测试根本同问题不同切法，无替换价值 |
-| 拒5 | **C9 Domain skills（per-site）** | "site"概念不存在于 dev 工具链 scope |
-| 拒6 | **G15-17 Browser stack + prompt-injection L1-L6 + /pair-agent** | scope 外，本项目非 browser agent toolchain |
-
 ---
 
 ## 三问作答（Task 6 — Phase 4 reframe 后重写）
 
 ### Q1（产品级版本）: **什么单一改动让已建的东西价值 10x？**
 
-**A: 清理 21 命令中证据不足的 9 个**（4 个 0 提及 + 5 个 1 提及，43%）。
+**A: 先建立可信 usage-report，再收敛 21 命令中证据不足的候选**（当前复核为 5 个 docs 0 提及 + 6 个单文档低广度命令；旧结论 "4 个 0 + 5 个 1" 作废）。
 
 理由：
-- 本项目的 self-evolution 主张要成立，**必须自己用得起来**。若 43% 命令长期 0/1 提及，"自我进化"是空的
-- 跟"吸收 gstack 新功能"完全相反：先**先收敛**，再考虑要不要扩
-- 失败成本低（合并 / 移 "experimental"，非删源码）；杠杆指向项目核心论点
+- 本项目的 self-evolution 主张要成立，**必须自己用得起来**。但 docs proxy 只能证明文档提及，不等同实际 slash command 调用
+- 跟"吸收 gstack 新功能"完全相反：先**先计量、再收敛**，最后才考虑要不要扩
+- 失败成本低（usage-report + experimental 候选清单），但不能再按错误清单直接移动文件
 
 ### Q2: 听起来酷但**该拒**的是哪个？为什么？
 
@@ -620,15 +599,15 @@ gstack 从 N=23 → N=30+ 是**用户价值假设的扩张**。本项目从 N=21
 
 ### Q3（产品 + 工程合并）: 今天只能动一件事，**最小动作**是什么？
 
-**A: 标记 9 个低提及命令为 "experimental" 子目录**（不删源码，只移出 user-level/commands/ 主线，1 个 commit，~30 LOC + frontmatter 改动 + README 更新）。
+**A: 修正 21 命令审计口径并重写 followup A 的候选列表**（先不移动文件；把 `prototype/skill-eval/skill-improve/skill-publish` 从"0 提及清理"降级为"低广度观察"）。
 
 理由：
-- 比 C1（~250 LOC）和 C2（~50 LOC + 错的产品判断）都小
-- 立刻验证 Task 7/8 reframe 的核心论点："**先 retire 没人用的，再考虑要不要补**"
-- 失败安全：experimental 子目录保留代码，6 个月内若有用例可移回
+- 比 C1（~250 LOC）和 C2（~50 LOC + 错的产品判断）都小，且直接修复当前 followup 的执行风险
+- 立刻验证 Task 7/8 reframe 的核心论点："**先证明没人用，再 retire；不要把低文档广度误当 0 使用**"
+- 失败安全：usage-report 做完后仍可把确认无用的命令移入 experimental，6 个月内若有用例可移回
 - **不需要 Windows hook 复杂度 / 不依赖未验证证据 / 不要求 ADR-014 框架**
 
-**注意**：本答案在 ROI 排序中是 🥇（已建未用命令清理），二者**不再矛盾**（修 P0-C）。
+**注意**：本答案把 ROI 第 1 拆成"先可信计量，再清理候选"，避免再次出现 P0-C 式优先级矛盾。
 
 ---
 
@@ -660,6 +639,7 @@ gstack 从 N=23 → N=30+ 是**用户价值假设的扩张**。本项目从 N=21
 | 2026-05-12 | Task 4 | 内省维度 5 项（I1-I5），证据驱动 |
 | 2026-05-12 | Task 5 | ROI 排序前 3 + 显式拒绝 6 项 |
 | 2026-05-12 | Task 6 | 三问作答 + ADR-014 候选起草 |
+| 2026-05-13 | Task 7 复核 | 重跑 21 命令审计，修正 `/debug-journal` 不存在、低提及命令误判、旧 ROI 段残留 |
 
 ---
 
@@ -671,9 +651,9 @@ Phase 4 spawn 4 reviewer 并行（coherence / scope-guardian / product-lens [ADR
 
 | # | 视角 | 文件:行 | 问题 | 状态 |
 |---|------|---------|------|------|
-| P0-A | adversarial + scope-guardian | 候选定级 C1 + ROI 第 1 | **C1 ROI 数据捏造** — `grep "rm -rf\|DROP TABLE\|force-push\|accident\|误删" debugging-gotchas.md` 零命中。nul 污染是 hook 语法事故，C1 hook 拦不住。"年频 1-3 次"无证据 | ✅ 已解决（path-2 reframe：C1 推迟，新 ROI 第 1 = 已建未用清理）|
+| P0-A | adversarial + scope-guardian | 候选定级 C1 + ROI 第 1 | **C1 ROI 数据捏造** — `grep "rm -rf\|DROP TABLE\|force-push\|accident\|误删" debugging-gotchas.md` 零命中。nul 污染是 hook 语法事故，C1 hook 拦不住。"年频 1-3 次"无证据 | ✅ 已解决（path-2 reframe：C1 推迟；2026-05-13 复核后新 ROI 第 1 = 先可信计量，再收敛命令面）|
 | P0-B | adversarial + product-lens | 内省 I1 / 候选 C2 | **C2/I1 "2/20+"分母错** — 20 个 plan 大多是 handoff/research/历史，协议仅适用 active sprint 的阶段报告；正确分母 ≈ 4。**dogfood 失败：本文档自己也无「下一 Phase 预热」段**（在对话不在 doc）→ 提 lint 的人就是被 lint 的人 | ✅ 已解决（path-2 reframe：C2 推迟，承认是产品信号而非 enforcement gap）|
-| P0-C | coherence | 三问作答 Q3 vs ROI 排序 | **优先级矛盾** — Q3 答 C2 是"最小动作"，ROI 排 C1 第 1。两套排序逻辑未说清 | ✅ 已解决（Q3 重写：现在 Q3 答案 = ROI 第 1 = 已建未用清理，统一）|
+| P0-C | coherence | 三问作答 Q3 vs ROI 排序 | **优先级矛盾** — Q3 答 C2 是"最小动作"，ROI 排 C1 第 1。两套排序逻辑未说清 | ✅ 已解决（Q3 重写；2026-05-13 复核后明确拆成"usage-report 计量 → experimental 候选收敛"）|
 | P0-D | adversarial + scope-guardian | ADR-014 候选 | **N=2 premature** — gbrain sprint = zero-absorption，gstack sprint = partial-absorption diff，**两个不同问题类**，不是同原则的两次应用。一周连发 2 个 ADR 是 inflation | ✅ 已解决（ADR-014 取消，推迟到 N≥3）|
 | P0-E | adversarial + product-lens | 候选 C7 拒绝 | **拒绝过急** — CLAUDE.md 第 28 条本能 `documented-claim-vs-code-reality-drift` 是项目最强活跃本能，C7 正是它的 mechanism。应 scope 到 `type:sprint+status:done` 且有代码 Task，非整体拒绝 | ✅ 已解决（C7 升级 🟡，scope 到 code sprint）|
 | P0-F | adversarial | 候选定级 C1 | **轻量原则自相矛盾** — C1 评 ✅ 轻量 (<200 行)，估算 ~250 行（150+20+30+50） | ✅ 已解决（C1 评级改 ⚠ 轻量违反；推迟）|
@@ -733,5 +713,5 @@ Phase 4 spawn 4 reviewer 并行（coherence / scope-guardian / product-lens [ADR
 ### CLAUDE.md 索引追加
 
 ```text
-- [2026-05-12] [sprint/sibling-evaluation/reframe] gstack 分析 sprint 暴露 sibling-evaluation 易产"framework-building 偏见"（用户问研究问题→sprint 输出 9 候选 + 4 抽象层 + ADR 候选）；4 reviewer 中 3 个独立给 reframe 建议（scope-guardian + product-lens + adversarial），coherence 给具体 P0。path-2 reframe：删 ADR-014（N=2 不足）+ 降级 C1 destructive hook（ROI 分子捏造，grep `debugging-gotchas.md` 零真实事故）+ 推迟 C2 phase warmup lint（dogfood 失败 + 分母错）+ C7 plan completion verify 从 🔴 升 🟡 scope 到 code sprint（呼应本项目最强本能 documented-claim-vs-code-reality-drift）+ 新增 Task 7 21 命令使用率审计（4 个 0 提及 + 5 个 1 提及 = 43% 证据不足）+ Task 8 positioning 决策（gstack outbound vs 本项目 inbound 正交不竞争）。新增 6 条经验 L1-L6 → `docs/solutions/2026-05-12-gstack-analysis-reframe-lessons.md`
+- [2026-05-12] [sprint/sibling-evaluation/reframe] gstack 分析 sprint 暴露 sibling-evaluation 易产"framework-building 偏见"（用户问研究问题→sprint 输出 9 候选 + 4 抽象层 + ADR 候选）；4 reviewer 中 3 个独立给 reframe 建议（scope-guardian + product-lens + adversarial），coherence 给具体 P0。path-2 reframe：删 ADR-014（N=2 不足）+ 降级 C1 destructive hook（ROI 分子捏造，grep `debugging-gotchas.md` 零真实事故）+ 推迟 C2 phase warmup lint（dogfood 失败 + 分母错）+ C7 plan completion verify 从 🔴 升 🟡 scope 到 code sprint（呼应本项目最强本能 documented-claim-vs-code-reality-drift）+ 新增 Task 7 21 命令使用率审计（2026-05-13 复核修正：`/debug-journal` 不存在；当前是 5 个 docs 0 提及 + 6 个单文档低广度命令，需 usage-report 复核后再收敛）+ Task 8 positioning 决策（gstack outbound vs 本项目 inbound 正交不竞争）。新增 6 条经验 L1-L6 → `docs/solutions/2026-05-12-gstack-analysis-reframe-lessons.md`
 ```

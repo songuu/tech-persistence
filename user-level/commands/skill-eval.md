@@ -1,8 +1,10 @@
 ---
-description: "用测试集验证 skill：A/B 对比当前版本和提案版本的通过率"
+description: "[alias → /skill eval] 用测试集验证 skill：A/B 对比当前版本和提案版本的通过率"
 ---
 
 # /skill-eval — Skill 验证
+
+> **已合并到 `/skill eval <name>`**（行为完全一致，新代码请用 `/skill eval`）。本命令保留作 alias，向后兼容。
 
 用预定义的测试用例验证 skill 的质量。
 

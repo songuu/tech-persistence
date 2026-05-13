@@ -1,6 +1,6 @@
 ---
 name: skill-publish
-description: Codex-compatible entry point for the former /skill-publish command. 将已验证的 skill 改进提案发布为新版本，含备份、changelog、回滚能力
+description: Codex-compatible entry point for the former /skill-publish command. [alias → /skill publish] 将已验证的 skill 改进提案发布为新版本，含备份、changelog、回滚能力
 ---
 
 # Skill Publish
@@ -16,6 +16,8 @@ When the command instructions below mention `/skill-publish`, interpret that as 
 ## Command Instructions
 
 # /skill-publish — Skill 版本发布
+
+> **已合并到 `/skill publish <name>`**（行为完全一致，新代码请用 `/skill publish`）。本命令保留作 alias，向后兼容。
 
 将 `/skill-improve` 的提案（经 `/skill-eval` 验证后）发布为新版本。
 

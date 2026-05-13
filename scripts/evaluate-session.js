@@ -38,6 +38,7 @@ const {
   topicTitle,
   yamlEscape,
 } = require('./lib/memory-v5');
+const { aggregateSkillSignals } = require('./lib/skill-signals');
 
 // ─── 配置 ───
 const CONFIG = {
@@ -853,6 +854,18 @@ function main() {
   // 8. 健康检查
   const warnings = healthCheck(paths);
 
+  // 8.5. Skill 信号派生（Stage A）
+  let skillSignals = { written: 0, skills: [] };
+  try {
+    skillSignals = aggregateSkillSignals(observations, {
+      project,
+      baseDir: paths.baseDir,
+      sessionId: resolveSessionId({ fallback: true }),
+    });
+  } catch (err) {
+    process.stderr.write(`[skill-signals] aggregation failed: ${err.message}\n`);
+  }
+
   // 9. 输出报告
   console.log('');
   console.log(`📊 会话自学习报告 [${project.name}]`);
@@ -884,6 +897,10 @@ function main() {
   if (checkpoint) {
     console.log(`   ⚡ Sprint 自动 checkpoint: ${checkpoint.file} (${checkpoint.tasksDone}/${checkpoint.tasksTotal} tasks)`);
     console.log(`     下次 /sprint resume 可从此处恢复`);
+  }
+
+  if (skillSignals.written > 0) {
+    console.log(`   📊 Skill 信号: +${skillSignals.written} (${skillSignals.skills.join(', ')})`);
   }
 
   if (warnings.length > 0) {

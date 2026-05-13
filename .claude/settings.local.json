@@ -32,7 +32,12 @@
       "Bash(echo \"pre-commit EXIT=$?\")",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(sort -t: -k2 -rn)",
-      "Bash(grep -v \":0$\")"
+      "Bash(grep -v \":0$\")",
+      "Bash(xargs -I {} stat -c \"%n %y\" {})",
+      "Bash(python -c \"import sys, json; d=json.loads\\(sys.stdin.read\\(\\)\\); print\\('keys:', list\\(d.keys\\(\\)\\)\\); print\\('type:', d.get\\('type'\\)\\)\")",
+      "Bash(grep -oE '\"phase\":\"[a-z]+\"|\"timestamp\":\"[^\"]*\"|\"skill\\\\\\\\\":\\\\\\\\\"[a-z-]+\"')",
+      "Bash(echo \"---exit=$?---\")",
+      "Bash(echo \"final exit=$?\")"
     ]
   }
 }

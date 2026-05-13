@@ -20,6 +20,7 @@ const expectedCommands = [
   'review.md',
   'review-learnings.md',
   'session-summary.md',
+  'skill.md',
   'skill-diagnose.md',
   'skill-eval.md',
   'skill-improve.md',

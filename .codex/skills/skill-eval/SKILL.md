@@ -17,6 +17,8 @@ When the command instructions below mention `/skill-eval`, interpret that as thi
 
 # /skill-eval — Skill 验证
 
+> **已合并到 `/skill eval <name>`**（行为完全一致，新代码请用 `/skill eval`）。本命令保留作 alias，向后兼容。
+
 用预定义的测试用例验证 skill 的质量。
 
 ## 用法

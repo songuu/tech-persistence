@@ -17,6 +17,8 @@ When the command instructions below mention `/skill-improve`, interpret that as 
 
 # /skill-improve — Skill 改进提案
 
+> **已合并到 `/skill improve <name>`**（行为完全一致，新代码请用 `/skill improve`）。本命令保留作 alias，向后兼容。
+
 读取 `/skill-diagnose` 的诊断报告 + 信号文件 + 相关本能，生成结构化修改提案。
 
 ## 用法

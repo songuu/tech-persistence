@@ -1,5 +1,5 @@
 ---
-description: "诊断 skill 健康状况：使用信号分析、步骤热力图、纠正模式、本能差异"
+description: "[alias → /skill diagnose] 诊断 skill 健康状况：使用信号分析、步骤热力图、纠正模式、本能差异"
 ---
 
 # /skill-diagnose — Skill 健康诊断

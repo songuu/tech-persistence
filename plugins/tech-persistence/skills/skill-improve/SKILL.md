@@ -1,6 +1,6 @@
 ---
 name: skill-improve
-description: Codex-compatible entry point for the former /skill-improve command. 基于诊断结果为 skill 生成修改提案：合并/精简/吸收本能/拆分
+description: Codex-compatible entry point for the former /skill-improve command. [alias → /skill improve] 基于诊断结果为 skill 生成修改提案：合并/精简/吸收本能/拆分
 ---
 
 # Skill Improve
@@ -16,6 +16,8 @@ When the command instructions below mention `/skill-improve`, interpret that as 
 ## Command Instructions
 
 # /skill-improve — Skill 改进提案
+
+> **已合并到 `/skill improve <name>`**（行为完全一致，新代码请用 `/skill improve`）。本命令保留作 alias，向后兼容。
 
 读取 `/skill-diagnose` 的诊断报告 + 信号文件 + 相关本能，生成结构化修改提案。
 

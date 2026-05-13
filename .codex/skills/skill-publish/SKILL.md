@@ -17,6 +17,8 @@ When the command instructions below mention `/skill-publish`, interpret that as 
 
 # /skill-publish — Skill 版本发布
 
+> **已合并到 `/skill publish <name>`**（行为完全一致，新代码请用 `/skill publish`）。本命令保留作 alias，向后兼容。
+
 将 `/skill-improve` 的提案（经 `/skill-eval` 验证后）发布为新版本。
 
 ## 用法

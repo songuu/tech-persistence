@@ -108,6 +108,40 @@ aliases: ["触发描述"]
    打开 Obsidian Graph View 查看新增节点和关联
 ```
 
+### 步骤 9.5: Skill 健康摘要
+
+> **本段由 /compound 的 LLM 执行者在产出报告前手动派生**（读取 `skill-signals/*.jsonl` + 应用阈值），非自动 hook。Stage A 仅负责数据写入，本步骤是消费端。
+
+读 `~/.codex/homunculus/skill-signals/*.jsonl`（Stage A hook 派生），按累计调用数 + 阈值输出健康度：
+
+```
+🎯 Skill 健康摘要
+
+| Skill   | 累计 | 末次   | 健康度        |
+|---------|-----|-------|--------------|
+| sprint  | 18  | 05-13 | 🟢 healthy    |
+| work    | 6   | 05-10 | 🟢 healthy    |
+| evolve  | 22  | 04-22 | 🔴 recommend  |
+
+🔴 1 个 skill 累计调用 ≥ 20 — 建议跑 /skill diagnose evolve
+💡 详细诊断: /skill diagnose <name>
+```
+
+阈值（`~/.codex/homunculus/config.json` 可配置，未配置时取默认）：
+- 🟢 healthy: 累计 ≥ 5
+- 🟡 observe: 累计 < 5
+- 🔴 recommend: 累计 ≥ 20
+
+**信号为空时**（首次 compound 或无 Codex Skill 调用）：
+
+```
+🎯 Skill 健康摘要
+  暂无信号（skill-signals/ 为空或仅含 0 调用）
+  💡 Stage A hook 仅采集 Codex 端 tool:"Skill"；Codex SlashCommand 不在统计内
+```
+
+**实现指引**（不绑死 API 签名）：读 `scripts/lib/skill-signals` 模块派生健康度摘要数据；阈值优先从 `~/.codex/homunculus/config.json` 的 `skill_evolution_thresholds` 读，未配置时取默认 `{ healthy: 5, recommend_diagnose: 20 }`。
+
 ## Phase 间预热钩子
 
 完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**必须**追加「收尾预热」段（无下一 phase，但有清场动作）。协议见当前命令集合中 `sprint.md` 的「Phase 间预热协议」。
