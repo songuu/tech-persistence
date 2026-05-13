@@ -12,13 +12,13 @@ description: "复利步骤：提取经验→写入本能+rules+解决方案+skil
 ### 步骤 1: 扫描会话，提取 7 类知识
 | 类型 | 写入位置 |
 |------|---------|
-| 解决方案 | `docs/solutions/` + AGENTS.md 索引 |
-| 踩坑记录 | `.codex/rules/debugging-gotchas.md` |
-| 架构决策 | `.codex/rules/architecture.md` |
-| 行为本能 | `~/.codex/homunculus/instincts/` |
-| 模式发现 | `.codex/rules/` 对应文件 |
-| 性能数据 | `.codex/rules/performance.md` |
-| 测试模式 | `.codex/rules/testing-patterns.md` |
+| 解决方案 | `docs/solutions/` + CLAUDE.md 索引 |
+| 踩坑记录 | `.claude/rules/debugging-gotchas.md` |
+| 架构决策 | `.claude/rules/architecture.md` |
+| 行为本能 | `~/.claude/homunculus/instincts/` |
+| 模式发现 | `.claude/rules/` 对应文件 |
+| 性能数据 | `.claude/rules/performance.md` |
+| 测试模式 | `.claude/rules/testing-patterns.md` |
 
 ### 步骤 2: 生成解决方案文档（Obsidian 兼容）
 
@@ -56,10 +56,10 @@ aliases: ["问题的别名"]
 - [[session-YYYY-MM-DD]] — 发现此问题的会话
 ```
 
-在 AGENTS.md 解决方案索引追加一行。
+在 CLAUDE.md 解决方案索引追加一行。
 
 ### 步骤 3: 提取经验到 rules
-项目特有 → `.codex/rules/`，跨项目 → `~/.codex/AGENTS.md`
+项目特有 → `.claude/rules/`，跨项目 → `~/.claude/CLAUDE.md`
 
 ### 步骤 4: 创建/更新本能（Obsidian 兼容）
 
@@ -112,7 +112,7 @@ aliases: ["触发描述"]
 
 > **本段由 /compound 的 LLM 执行者在产出报告前手动派生**（读取 `skill-signals/*.jsonl` + 应用阈值），非自动 hook。Stage A 仅负责数据写入，本步骤是消费端。
 
-读 `~/.codex/homunculus/skill-signals/*.jsonl`（Stage A hook 派生），按累计调用数 + 阈值输出健康度：
+读 `~/.claude/homunculus/skill-signals/*.jsonl`（Stage A hook 派生），按累计调用数 + 阈值输出健康度：
 
 ```
 🎯 Skill 健康摘要
@@ -127,7 +127,7 @@ aliases: ["触发描述"]
 💡 详细诊断: /skill diagnose <name>
 ```
 
-阈值（`~/.codex/homunculus/config.json` 可配置，未配置时取默认）：
+阈值（`~/.claude/homunculus/config.json` 可配置，未配置时取默认）：
 - 🟢 healthy: 累计 ≥ 5
 - 🟡 observe: 累计 < 5
 - 🔴 recommend: 累计 ≥ 20
@@ -137,10 +137,10 @@ aliases: ["触发描述"]
 ```
 🎯 Skill 健康摘要
   暂无信号（skill-signals/ 为空或仅含 0 调用）
-  💡 Stage A hook 仅采集 Codex 端 tool:"Skill"；Codex SlashCommand 不在统计内
+  💡 Stage A hook 仅采集 Codex 端 tool:"Skill"；Claude Code SlashCommand 不在统计内
 ```
 
-**实现指引**（不绑死 API 签名）：读 `scripts/lib/skill-signals` 模块派生健康度摘要数据；阈值优先从 `~/.codex/homunculus/config.json` 的 `skill_evolution_thresholds` 读，未配置时取默认 `{ healthy: 5, recommend_diagnose: 20 }`。
+**实现指引**（不绑死 API 签名）：读 `scripts/lib/skill-signals` 模块派生健康度摘要数据；阈值优先从 `~/.claude/homunculus/config.json` 的 `skill_evolution_thresholds` 读，未配置时取默认 `{ healthy: 5, recommend_diagnose: 20 }`。
 
 ## Phase 间预热钩子
 

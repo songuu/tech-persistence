@@ -15,6 +15,10 @@ When the command instructions below mention `/evolve`, interpret that as this `$
 
 ## Command Instructions
 
+---
+description: "将高置信度本能聚类进化为可复用的 skill、command 或 agent"
+---
+
 # /evolve — 本能进化
 
 分析所有高置信度本能，找出可以聚类的相关本能组，

@@ -10,9 +10,9 @@ description: "查看所有已学习的本能及其置信度状态"
 
 ### 1. 扫描本能文件
 读取以下目录中所有 `.md` 文件的 YAML frontmatter：
-- `~/.codex/homunculus/projects/{当前项目hash}/instincts/` → 项目本能
-- `~/.codex/homunculus/instincts/personal/` → 全局本能
-- `~/.codex/homunculus/instincts/inherited/` → 导入的本能
+- `~/.claude/homunculus/projects/{当前项目hash}/instincts/` → 项目本能
+- `~/.claude/homunculus/instincts/personal/` → 全局本能
+- `~/.claude/homunculus/instincts/inherited/` → 导入的本能
 
 ### 2. 解析置信度等级
 

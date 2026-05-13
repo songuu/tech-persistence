@@ -121,7 +121,8 @@ function syncedDerivedSet(dir, name, sourceContent) {
   const build = require(path.join(dir, 'plugins/tech-persistence/scripts/build-codex-plugin.js'));
 
   writeFile(dir, `.codex/commands/${name}.md`, propagate.applyCodexRegex(sourceContent));
-  writeFile(dir, `plugins/tech-persistence/commands/${name}.md`, build.normalizeLf(build.transform(sourceContent)));
+  // plugin command 是 plain copy (与 pre-commit-check.js 期望对齐, 服务 Claude Code 2.x plugin)
+  writeFile(dir, `plugins/tech-persistence/commands/${name}.md`, build.normalizeLf(sourceContent));
   if (build.expectedCommands.includes(`${name}.md`)) {
     writeFile(dir, `plugins/tech-persistence/skills/${name}/SKILL.md`, build.commandToSkill(`${name}.md`, sourceContent));
   }

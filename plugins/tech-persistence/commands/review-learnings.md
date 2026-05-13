@@ -10,13 +10,13 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 
 | 层次 | 位置 | 内容 |
 |------|------|------|
-| 核心知识 | `AGENTS.md` | 项目/个人核心信息 |
-| 分类经验 | `.codex/rules/*.md` | 按领域分类的成熟经验 |
-| 项目本能 | `~/.codex/homunculus/projects/{id}/instincts/` | 项目级学习的行为 |
-| 全局本能 | `~/.codex/homunculus/instincts/personal/` | 跨项目通用行为 |
-| 进化产物 | `~/.codex/homunculus/evolved/` | 聚类生成的 skill/command |
-| 原始观察 | `~/.codex/homunculus/projects/{id}/observations.jsonl` | 未处理的原始数据 |
-| 会话摘要 | `~/.codex/homunculus/projects/{id}/sessions/` | 历史会话总结 |
+| 核心知识 | `CLAUDE.md` | 项目/个人核心信息 |
+| 分类经验 | `.claude/rules/*.md` | 按领域分类的成熟经验 |
+| 项目本能 | `~/.claude/homunculus/projects/{id}/instincts/` | 项目级学习的行为 |
+| 全局本能 | `~/.claude/homunculus/instincts/personal/` | 跨项目通用行为 |
+| 进化产物 | `~/.claude/homunculus/evolved/` | 聚类生成的 skill/command |
+| 原始观察 | `~/.claude/homunculus/projects/{id}/observations.jsonl` | 未处理的原始数据 |
+| 会话摘要 | `~/.claude/homunculus/projects/{id}/sessions/` | 历史会话总结 |
 
 ## 操作模式
 
@@ -25,7 +25,7 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 📊 知识库统计 — 项目: {name}
 
 经验层:
-  AGENTS.md: N 行 | rules/: N 个文件, N 条经验
+  CLAUDE.md: N 行 | rules/: N 个文件, N 条经验
 
 本能层:
   项目本能: N 个 (🔵N 🟢N 🟡N 🟠N 🔴N)
@@ -58,7 +58,7 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 按时间倒序展示知识积累过程。
 
 **`--usage` — 21 命令使用率**：
-显示 21 个 tech-persistence 命令在 Codex transcript（`~/.codex/projects/<slug>/*.jsonl`）+ Codex observations（`tool:"Skill"`）中的**精准**使用次数，区分 30 天滚动窗口和累计。
+显示 21 个 tech-persistence 命令在 Claude Code transcript（`~/.claude/projects/<slug>/*.jsonl`）+ Codex observations（`tool:"Skill"`）中的**精准**使用次数，区分 30 天滚动窗口和累计。
 
 实现：执行 `node scripts/usage-report.js --inline`（或 `--window 60` 自定义窗口），把输出直接展示给用户。完整归档报告用 `node scripts/usage-report.js` 写入 `docs/reports/command-usage-YYYY-MM-DD.md`。
 
@@ -68,7 +68,7 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 - Codex observations 同秒同 skill 已去重
 
 ## 健康检查（每次自动执行）
-- ⚠️ AGENTS.md > 200 行
+- ⚠️ CLAUDE.md > 200 行
 - ⚠️ 单个 rules 文件 > 100 行
 - ⚠️ 本能 > 50 个未聚类
 - ⚠️ 观察日志 > 5MB 未归档

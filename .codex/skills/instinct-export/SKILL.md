@@ -15,6 +15,10 @@ When the command instructions below mention `/instinct-export`, interpret that a
 
 ## Command Instructions
 
+---
+description: "导出本能供团队成员或其他项目使用"
+---
+
 # /instinct-export — 导出本能
 
 将指定范围的本能打包导出为可分享的文件。

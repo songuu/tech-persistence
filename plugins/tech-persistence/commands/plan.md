@@ -15,7 +15,7 @@ description: "架构师视角生成结构化实现计划，含任务拆解、风
 
 ## 可选参数
 
-- `--auto`：自动审查模式。计划终审 gate 由模型自主判断；任务数过多、含高风险任务、scope 与原始需求不一致时仍保留人工 gate。详见 `~/.codex/rules/auto-mode.md`。
+- `--auto`：自动审查模式。计划终审 gate 由模型自主判断；任务数过多、含高风险任务、scope 与原始需求不一致时仍保留人工 gate。详见 `~/.claude/rules/auto-mode.md`。
 
 ## 角色约束
 
@@ -36,10 +36,10 @@ description: "架构师视角生成结构化实现计划，含任务拆解、风
 
 在制定方案前先研究：
 
-- 读取项目 AGENTS.md 了解架构约定
-- 读取 `.codex/rules/` 了解已有经验和踩坑记录
+- 读取项目 CLAUDE.md 了解架构约定
+- 读取 `.claude/rules/` 了解已有经验和踩坑记录
 - 读取相关源码文件了解现有实现模式
-- 检查高置信度本能（`~/.codex/homunculus/`）了解项目偏好
+- 检查高置信度本能（`~/.claude/homunculus/`）了解项目偏好
 
 ### 2. 方案设计
 

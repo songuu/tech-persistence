@@ -32,7 +32,7 @@ $sprint resume --auto
 ## 可选参数
 
 - `--caveman`：输出 token 压缩，详见下方 Caveman Token Budget Mode。
-- `--auto`：自动审查模式。Phase 1-4 间的 'go' gate 由模型按风险等级 / 用户行为 / 置信度自主判断；强制人工的边界（destructive、L4、scope creep、P0 不平凡修复）仍保留。详见 `~/.codex/rules/auto-mode.md`。
+- `--auto`：自动审查模式。Phase 1-4 间的 'go' gate 由模型按风险等级 / 用户行为 / 置信度自主判断；强制人工的边界（destructive、L4、scope creep、P0 不平凡修复）仍保留。详见 `~/.claude/rules/auto-mode.md`。
 
 ## 项目文档贯穿全流程
 

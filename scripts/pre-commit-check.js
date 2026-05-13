@@ -116,9 +116,13 @@ function checkPropagateSync(stagedFiles, repoRoot) {
 
       const pluginCmdRel = `plugins/tech-persistence/commands/${name}.md`;
       const pluginCmdActual = readIfExists(path.join(repoRoot, pluginCmdRel));
-      const pluginCmdExpected = t.normalizeLf(t.pluginTransform(sourceContent));
+      // plugins/tech-persistence/commands/ 服务 Claude Code 2.x plugin 系统,
+      // 应保持 Claude Code 形态 (与 propagate-command-changes.js line 81 一致,
+      // build-codex-plugin.js::copyCommands 也已改为 shouldTransform=false).
+      // 期望: 源内容 LF-normalize, 不跑 codex transform.
+      const pluginCmdExpected = t.normalizeLf(sourceContent);
       if (pluginCmdActual !== pluginCmdExpected) {
-        mismatches.push({ source: sourceRel, derived: pluginCmdRel, kind: 'command', reason: 'build-codex-plugin output mismatch' });
+        mismatches.push({ source: sourceRel, derived: pluginCmdRel, kind: 'command', reason: 'plugin command out of sync (LF-normalized plain copy expected)' });
       }
 
       if (Array.isArray(t.expectedCommands) && t.expectedCommands.includes(`${name}.md`)) {

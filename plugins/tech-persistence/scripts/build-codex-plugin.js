@@ -227,8 +227,12 @@ function copyCommands() {
   fs.readdirSync(targetDir)
     .filter((name) => name.endsWith('.md') && !commandFiles.includes(name))
     .forEach((name) => fs.rmSync(path.join(targetDir, name), { force: true }));
+  // plugins/tech-persistence/commands/ 服务于 Claude Code 2.x plugin 系统,
+  // 必须保持 Claude Code 形态 (~/.claude/ 路径). Codex 端通过 skills/ 调用,
+  // 不读 commands/, 所以这里不应该跑 codex transform.
+  // 与 propagate-command-changes.js line 81 行为对齐 (transform = identity).
   commandFiles.forEach((name) => {
-    copyTextFile(path.join(sourceDir, name), path.join(targetDir, name));
+    copyTextFile(path.join(sourceDir, name), path.join(targetDir, name), false);
   });
   const copied = fs.readdirSync(targetDir)
     .filter((name) => name.endsWith('.md'))
@@ -237,7 +241,7 @@ function copyCommands() {
   commandFiles
     .filter((name) => !copiedSet.has(name))
     .forEach((name) => {
-      copyTextFile(path.join(sourceDir, name), path.join(targetDir, name));
+      copyTextFile(path.join(sourceDir, name), path.join(targetDir, name), false);
     });
   assertInventory(
     'generated commands',
@@ -278,7 +282,16 @@ function copySkills() {
 
 function copyHooks() {
   const targetDir = path.join(pluginRoot, 'hooks');
+  // hooks.json 是 Claude Code 2.x plugin 系统的 hook 注册清单 (手维护 source),
+  // 不是 build 输出. emptyDir 前先 stash 它, 清完再写回, 避免 git delete.
+  const hooksJsonPath = path.join(targetDir, 'hooks.json');
+  const hooksJsonContent = fs.existsSync(hooksJsonPath)
+    ? fs.readFileSync(hooksJsonPath, 'utf-8')
+    : null;
   emptyDir(targetDir);
+  if (hooksJsonContent !== null) {
+    fs.writeFileSync(hooksJsonPath, hooksJsonContent);
+  }
   [
     'caveman-activate.js',
     'inject-context.js',

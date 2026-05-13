@@ -24,10 +24,10 @@ Codex 同义：`$skill <action> <name>`
 
 ## 数据源
 
-所有子动作读 `~/.codex/homunculus/skill-signals/{name}.jsonl`（Stage A hook 自动派生）。
+所有子动作读 `~/.claude/homunculus/skill-signals/{name}.jsonl`（Stage A hook 自动派生）。
 
 **数据局限**（必读）：
-- 信号源**仅覆盖 Codex 端 `tool:"Skill"` 调用**。Codex 端 SlashCommand 不进 PreToolUse hook，结构性无法捕获
+- 信号源**仅覆盖 Codex 端 `tool:"Skill"` 调用**。Claude Code 端 SlashCommand 不进 PreToolUse hook，结构性无法捕获
 - 跑 `/skill list` 看当前有多少 skill 有信号可分析；如为空说明 30 天内无 Codex 端 Skill 调用
 
 ## 子动作详情
@@ -46,17 +46,17 @@ Codex 同义：`$skill <action> <name>`
 | evolve  | 2       | 04-22 | 🟡 observe   |
 | ...     |         |       |             |
 
-健康度阈值（可在 ~/.codex/homunculus/config.json 配置）:
+健康度阈值（可在 ~/.claude/homunculus/config.json 配置）:
 - 🟢 healthy:   累计调用 ≥ 5
 - 🟡 observe:   累计 < 5（保持观察，未达分析阈值）
 - 🔴 recommend: 累计 ≥ 20（建议跑 /skill diagnose <name>）
 
-💡 仅显示 Codex 端调用；Codex SlashCommand 不在统计内
+💡 仅显示 Codex 端调用；Claude Code SlashCommand 不在统计内
 ```
 
 ### `/skill diagnose <name>`
 
-读取 `~/.codex/homunculus/skill-signals/{name}.jsonl`，分析使用情况。详细规范见 [skill-diagnose.md](./skill-diagnose.md)（保留 alias）。
+读取 `~/.claude/homunculus/skill-signals/{name}.jsonl`，分析使用情况。详细规范见 [skill-diagnose.md](./skill-diagnose.md)（保留 alias）。
 
 ### `/skill eval <name>`
 
@@ -123,7 +123,7 @@ Phase 4/4: publish <name>
 
 ## 阈值配置
 
-`~/.codex/homunculus/config.json`：
+`~/.claude/homunculus/config.json`：
 
 ```json
 {

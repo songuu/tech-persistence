@@ -4,7 +4,7 @@ description: "导入他人分享的本能文件"
 
 # /instinct-import — 导入本能
 
-从导出文件中导入本能到 `~/.codex/homunculus/instincts/inherited/` 目录。
+从导出文件中导入本能到 `~/.claude/homunculus/instincts/inherited/` 目录。
 
 ## 使用方式
 `/instinct-import path/to/instincts-export.md`
@@ -30,7 +30,7 @@ description: "导入他人分享的本能文件"
 确认导入? (y/n，或输入编号选择性导入)
 ```
 
-4. 确认后写入 `~/.codex/homunculus/instincts/inherited/`
+4. 确认后写入 `~/.claude/homunculus/instincts/inherited/`
 5. 冲突的本能放入独立子目录 `inherited/pending-review/`
 
 ## 注意

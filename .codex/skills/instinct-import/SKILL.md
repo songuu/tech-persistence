@@ -15,6 +15,10 @@ When the command instructions below mention `/instinct-import`, interpret that a
 
 ## Command Instructions
 
+---
+description: "导入他人分享的本能文件"
+---
+
 # /instinct-import — 导入本能
 
 从导出文件中导入本能到 `~/.codex/homunculus/instincts/inherited/` 目录。

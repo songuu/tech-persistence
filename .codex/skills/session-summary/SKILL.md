@@ -15,6 +15,10 @@ When the command instructions below mention `/session-summary`, interpret that a
 
 ## Command Instructions
 
+---
+description: "生成当前会话的完整技术总结 + 自动调用 /learn 提取经验和本能"
+---
+
 # /session-summary — 会话总结（自学习增强版）
 
 ## 报告模板
