@@ -37,7 +37,13 @@
       "Bash(python -c \"import sys, json; d=json.loads\\(sys.stdin.read\\(\\)\\); print\\('keys:', list\\(d.keys\\(\\)\\)\\); print\\('type:', d.get\\('type'\\)\\)\")",
       "Bash(grep -oE '\"phase\":\"[a-z]+\"|\"timestamp\":\"[^\"]*\"|\"skill\\\\\\\\\":\\\\\\\\\"[a-z-]+\"')",
       "Bash(echo \"---exit=$?---\")",
-      "Bash(echo \"final exit=$?\")"
+      "Bash(echo \"final exit=$?\")",
+      "Bash(find ~/.claude/plugins/cache -path */commands/__TRACKED_VAR__.md)",
+      "Bash(xargs -I {} basename {} .md)",
+      "Bash(claude plugin *)",
+      "Bash(xargs -I{} basename {} .md)",
+      "Bash(chmod +x install-plugin.sh)",
+      "Bash(bash install-plugin.sh)"
     ]
   }
 }
