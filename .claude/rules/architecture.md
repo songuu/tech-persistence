@@ -17,6 +17,24 @@
 
 ## 决策列表
 
+### ADR-013: 关键规则必须从文档协议下沉为工具拒绝（mechanism over discipline） (2026-05-12)
+- **状态**：已采纳
+- **上下文**：`docs/plans/2026-05-11-sprint-speed-layer1.md` Compound 阶段实证两次失败：(1) 我自己漏跑 `build-codex-plugin`，validate 才暴露；(2) Plan 阶段两次基于错误假设（`CONTEXT_BUDGET_CHARS=25KB`、`pipeline.js` 是 /sprint 代码），work 阶段才发现，催生 ADR-012。两次失败的共同根因：**关键规则只活在 .md 里**——propagate 纪律在 `debugging-gotchas.md`，plan 勘察规则在 ADR-012，靠模型每次读 context 时记得遵守。上下文压缩 / 压力下 / 重要时刻会被悄悄省略。文档协议级 enforcement 有 3 个失效模式：(a) **遗忘**——上下文压缩后规则不在 active context；(b) **省略**——压力下模型主动跳过 self-check；(c) **漂移**——多次修订后文档与实际期望偏移，但没有客观信号验证。
+- **决策**：高频违反、影响其他副本一致性、或涉及 dogfood 边界的规则，必须从"靠模型记得"的文档协议下沉为"工具层拒绝"。第一批落地：`scripts/pre-commit-check.js` 接管 propagate sync 检查（多副本 sha256 比对，LF-normalize）和 plan 假设验证段 lint（filename-date 做 grandfather，独立于 frontmatter 的鲁棒标识）。后续新增 enforcement 必须沿用同套模式：(a) 复用现有 transform 函数做 sha256 比对而非重写；(b) 3 层 fail-open 防御（用户 `--no-verify` / hook try-catch / sh wrapper node 缺失）；(c) 派生具体修复命令包含**真实参数**而非占位符；(d) 跨平台 LF-normalize 必须先于 hash 比对（[[cross-platform-sha-needs-lf-normalize]]）。
+- **原因**：(1) 文档协议 3 个失效模式都是结构性的，写更多文档解决不了；(2) hook 拒绝是确定性信号，每次 commit 都跑，不依赖模型 context 状态；(3) fail-open 保证用户永远有逃生通道，不会被自己写的工具锁死；(4) "派生具体 fix 命令"把错误信息变成可 copy-paste 的修复路径，错误成本接近零。
+- **备选**：(a) 继续靠文档协议 + reviewer agent 提醒——已实证失效 2 次；(b) 改用 server-side CI 拒绝——延迟反馈，本地 commit 仍可携带 broken state；(c) 在 LLM 主循环加 self-check prompt——增加 token + 不可靠。
+- **影响**：所有"高频违反 / 跨副本一致性 / dogfood 边界"类规则必须问"能不能 pre-commit 拒掉"。第一批落地的 checker：`checkPropagateSync` / `checkOrchestratorSync` / `checkPlanScope`（ADR-012）/ `checkPlanCompletion`（C7）。新增 checker 必须配 smoke scenarios（`scripts/smoke-pre-commit.js`），覆盖 pass/fail/grandfather/fail-open 4 类至少各 1 个。
+- **来源**：`docs/solutions/2026-05-12-pre-commit-defense.md`、Phase 4 review 暴露 7 P0 中 6+ 个无-FM 旧 plan dogfood blocker。
+
+### ADR-013 §B: Enforcement 提案必须 inline dogfood 边界产物枚举 (2026-05-12)
+- **状态**：已采纳
+- **上下文**：ADR-013 主决策落地时 Phase 4 reviewer 发现 hook 装上**立刻**会拒绝 6+ 个本仓库**已有的**无 frontmatter 旧 plan。原 dogfood 步骤只验证：(a) 我刚写的新 plan 通过 + (b) 破坏一次再恢复——**没枚举本仓库已有的同类产物是否都满足新规则**。如合并，hook 上线第一天就阻塞合法旧产物，用户必须 `--no-verify` 绕过——enforcement 最差启动状态。修复方式是 grandfather signal 改用 filename date（path-regex 强制，独立于 frontmatter），一次性解决无-FM / CRLF / 不可解析 created 三个失效。
+- **决策**：任何新 enforcement 机制（pre-commit / lint / CI / hook with reject）合并前必须满足"dogfood 边界覆盖"：(a) 枚举本仓库与新规则同类的**已有产物**至少 3 个边界样本（最老 / 最新 / 格式异常 / 跨平台 line-ending / 中文文件名 / 已 grandfather）；(b) 离线模拟 enforcement 跑这些样本不被误拒；(c) 如有误拒，要么 grandfather 要么主动改造旧产物——而不是上线让用户 `--no-verify`；(d) plan 阶段「关键假设验证」段必须含一条"会拒绝哪些现有产物"枚举。**额外要求**：当前态全部合规时必须主动制造负样本验证（改一个文件 1 字符 → 跑必须 fail；恢复 → 跑必须 pass），少了这步 = enforcement 上线但实际从未被验证过（fail-open 风险）。
+- **原因**：(1) 智能猜测的 enforcement 规则在真实语料上 FP 率惊人（C7 实施时 12 个现有 plan 立刻爆 2 个 FP = 17%）；(2) 上线后被 `--no-verify` 绕过 = enforcement 死亡，因为用户养成"反正先 --no-verify"习惯后不可逆；(3) "当前态合规"是 trivial pass 状态，单测不能证明 hook 真在拒（fail-open 静默失效在 `[hook] failed:` marker 不存在时无法检测）；(4) 边界产物枚举是低成本步骤（10 分钟跑一次），节省的是上线后用户绕过 hook 几周的隐性成本。
+- **备选**：(a) 不枚举边界产物，上线后修复 FP——已实证 ADR-013 主决策第一次就踩；(b) 把所有现存产物 grandfather——会让规则永远无法约束历史；(c) 强制用户改造所有旧产物——用户成本太高，会拒绝合并 enforcement。
+- **影响**：plan 阶段「关键假设验证」段必须含"会拒绝哪些现有产物"枚举；plan 阶段必须有「Dogfood 自检」H2 或 H3 段（含边界产物列表 + 负样本验证步骤）；smoke 必须覆盖 pass / fail / skip-grandfather / fail-open 4 类。本条款已在 C7 (`docs/plans/2026-05-13-plan-completion-verify.md`) 第二次成功应用：dogfood 12 个现有 status:completed plan → 立刻爆 2 个 FP（命令形式 inline-code 误匹配 / 仓库外路径），均通过 regex 迭代修复而非降低 enforcement 强度。
+- **来源**：`docs/solutions/2026-05-12-pre-commit-defense.md` Prevention §1；`docs/plans/2026-05-13-plan-completion-verify.md` Phase 5 复利（第二次应用验证）；本能 [[mechanism-over-discipline]]。
+
 ### ADR-012: Plan 阶段必须勘察被改文件，不能纯靠假设 (2026-05-11)
 - **状态**：已采纳
 - **上下文**：`docs/plans/2026-05-11-sprint-speed-layer1.md` Phase 2 plan 阶段连续两次基于错误假设拍 plan，到 Phase 3 work 阶段才发现：(1) 假设 `CONTEXT_BUDGET_CHARS = 25KB`，实际 `inject-context.js:25` 是 12KB — T3 价值定位需重写为"提升相关性"而非"减小体积"；(2) 假设要改 `scripts/agent-orchestrator/pipeline.js` 实现 Phase 间预热，实际该文件是 agent-loop v7 pipeline mode 的代码，跟 `/sprint` 完全不是同一回事，T4 改动对象错了 → 必须停下来重新设计为修订版 A 方案（改 sprint.md 协议 + 5 phase 钩子）。两次错误都导致 work 阶段停顿、重新与用户对齐、调整 plan。
