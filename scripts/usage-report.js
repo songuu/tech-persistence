@@ -76,7 +76,7 @@ function formatMarkdown(result) {
   lines.push('');
 
   // 主表
-  lines.push('## 主表（21 个命令）');
+  lines.push(`## 主表（${result.whitelist.length} 个命令）`);
   lines.push('');
   lines.push('| 命令 | 30d CC | 30d Codex | 30d 合计 | 累计 CC | 累计 Codex | 累计合计 | 首次 | 末次 |');
   lines.push('|---|---|---|---|---|---|---|---|---|');

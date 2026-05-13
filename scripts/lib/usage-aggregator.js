@@ -5,7 +5,8 @@ const path = require('path');
 const os = require('os');
 const readline = require('readline');
 
-// 21 个 tech-persistence 命令白名单（与 user-level/commands/*.md 同步）
+// 22 个 tech-persistence 命令白名单（与 user-level/commands/*.md 同步）
+// 注：/skill 是 2026-05-13 新增的统一入口；/skill-* 4 命令保留作 alias
 const COMMAND_WHITELIST = Object.freeze([
   'agent-loop',
   'checkpoint',
@@ -20,6 +21,7 @@ const COMMAND_WHITELIST = Object.freeze([
   'review',
   'review-learnings',
   'session-summary',
+  'skill',
   'skill-diagnose',
   'skill-eval',
   'skill-improve',

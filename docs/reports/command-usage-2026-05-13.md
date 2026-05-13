@@ -1,6 +1,6 @@
 # 命令使用频率报告 (2026-05-13)
 
-> 生成时间: 2026-05-13T02:23:38.075Z
+> 生成时间: 2026-05-13T02:52:48.145Z
 > 工作目录: `C:\project\my\tech-persistence`
 > 滚动窗口: 30 天（cutoff = 2026-04-13）
 
@@ -11,7 +11,7 @@
 - Codex observations: 1 个项目目录
   - `8331ab9c2853`: `C:\Users\songyu\.claude\homunculus\projects\8331ab9c2853\observations.jsonl`
 
-## 主表（21 个命令）
+## 主表（22 个命令）
 
 | 命令 | 30d CC | 30d Codex | 30d 合计 | 累计 CC | 累计 Codex | 累计合计 | 首次 | 末次 |
 |---|---|---|---|---|---|---|---|---|
@@ -29,6 +29,7 @@
 | /review | 0 | 0 | **0** | 0 | 0 | **0** | — | — |
 | /review-learnings | 0 | 0 | **0** | 0 | 0 | **0** | — | — |
 | /session-summary | 0 | 0 | **0** | 0 | 0 | **0** | — | — |
+| /skill | 0 | 0 | **0** | 0 | 0 | **0** | — | — |
 | /skill-diagnose | 0 | 0 | **0** | 0 | 0 | **0** | — | — |
 | /skill-eval | 0 | 0 | **0** | 0 | 0 | **0** | — | — |
 | /skill-improve | 0 | 0 | **0** | 0 | 0 | **0** | — | — |
@@ -45,8 +46,8 @@
 ### 🟡 累计极低（≤2 次，1）
 /compound(2)
 
-### 🔴 累计零调用（19）
-/agent-loop, /checkpoint, /evolve, /instinct-export, /instinct-import, /instinct-status, /learn, /plan, /prototype, /review, /review-learnings, /session-summary, /skill-diagnose, /skill-eval, /skill-improve, /skill-publish, /test, /think, /work
+### 🔴 累计零调用（20）
+/agent-loop, /checkpoint, /evolve, /instinct-export, /instinct-import, /instinct-status, /learn, /plan, /prototype, /review, /review-learnings, /session-summary, /skill, /skill-diagnose, /skill-eval, /skill-improve, /skill-publish, /test, /think, /work
 
 ## 数据局限
 
