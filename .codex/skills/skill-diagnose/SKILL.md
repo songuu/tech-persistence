@@ -1,6 +1,6 @@
 ---
 name: skill-diagnose
-description: Codex-compatible entry point for the former /skill-diagnose command. 诊断 skill 健康状况：使用信号分析、步骤热力图、纠正模式、本能差异
+description: Codex-compatible entry point for the former /skill-diagnose command. [alias → /skill diagnose] 诊断 skill 健康状况：使用信号分析、步骤热力图、纠正模式、本能差异
 ---
 
 # Skill Diagnose

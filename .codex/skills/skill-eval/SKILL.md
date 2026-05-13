@@ -1,6 +1,6 @@
 ---
 name: skill-eval
-description: Codex-compatible entry point for the former /skill-eval command. 用测试集验证 skill：A/B 对比当前版本和提案版本的通过率
+description: Codex-compatible entry point for the former /skill-eval command. [alias → /skill eval] 用测试集验证 skill：A/B 对比当前版本和提案版本的通过率
 ---
 
 # Skill Eval

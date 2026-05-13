@@ -1,6 +1,6 @@
 ---
 name: skill-improve
-description: Codex-compatible entry point for the former /skill-improve command. 基于诊断结果为 skill 生成修改提案：合并/精简/吸收本能/拆分
+description: Codex-compatible entry point for the former /skill-improve command. [alias → /skill improve] 基于诊断结果为 skill 生成修改提案：合并/精简/吸收本能/拆分
 ---
 
 # Skill Improve

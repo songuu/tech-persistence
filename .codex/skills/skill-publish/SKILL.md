@@ -1,6 +1,6 @@
 ---
 name: skill-publish
-description: Codex-compatible entry point for the former /skill-publish command. 将已验证的 skill 改进提案发布为新版本，含备份、changelog、回滚能力
+description: Codex-compatible entry point for the former /skill-publish command. [alias → /skill publish] 将已验证的 skill 改进提案发布为新版本，含备份、changelog、回滚能力
 ---
 
 # Skill Publish

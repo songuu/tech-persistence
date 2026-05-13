@@ -15,10 +15,6 @@ When the command instructions below mention `/review-learnings`, interpret that 
 
 ## Command Instructions
 
----
-description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索、统计、裁剪"
----
-
 # /review-learnings — 全量知识回顾
 
 回顾、搜索和管理所有层次的知识积累。
