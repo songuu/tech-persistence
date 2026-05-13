@@ -297,6 +297,131 @@ function checkPlanScope(stagedFiles, repoRoot) {
   return failures;
 }
 
+function checkPlanCompletion(stagedFiles, repoRoot) {
+  // C7 / ADR-013: a sprint marked status:completed must actually have touched
+  // at least one of the inline-code paths mentioned in each checked task line.
+  // Research-style sprints (no inline-code paths) are skipped naturally.
+  // Inspired by gstack /ship "verifies each actionable item is addressed in the diff".
+
+  // Match `path/to/file.ext` — restrict to known extensions so command tokens
+  // like `node` or `rm` inside inline code don't match.
+  // [^`\s]+ disallows whitespace inside the path: rejects `node scripts/foo.js`
+  // (command form) while still matching real repo paths (we don't use spaces in
+  // filenames). Absolute paths and `~/` are filtered post-match below.
+  const PATH_EXT_RE = /`([^`\s]+\.(?:js|ts|tsx|jsx|md|sh|ps1|json|jsonl|yml|yaml|toml|py|rb|css|html))`/g;
+  const CHECKED_LINE_RE = /^\s*[-*]\s+\[[xX]\]\s+(.+)$/gm;
+
+  const planEntries = [];
+  for (const f of stagedFiles) {
+    if (f.includes('-handoff-')) continue;
+    if (f.endsWith('/TEMPLATE.md')) continue;
+    const m = f.match(PLAN_PATH_RE);
+    if (!m) continue;
+    planEntries.push({ rel: f, filenameDate: m[1] });
+  }
+  if (planEntries.length === 0) return [];
+
+  const failures = [];
+
+  for (const { rel: planRel, filenameDate } of planEntries) {
+    // Filename date authoritative for grandfather decisions — same threshold as plan-scope lint.
+    if (filenameDate < GRANDFATHER_BEFORE) continue;
+
+    const content = readIfExists(path.join(repoRoot, planRel));
+    if (content == null) continue;
+    const fm = parseFrontmatter(content);
+    if (!fm) continue;
+    if (fm.type !== 'sprint') continue;
+    if (fm.status !== 'completed') continue;
+
+    // Collect checked tasks that mention at least one inline-code path
+    const tasksWithPaths = [];
+    let lineMatch;
+    CHECKED_LINE_RE.lastIndex = 0;
+    while ((lineMatch = CHECKED_LINE_RE.exec(content)) !== null) {
+      const taskText = lineMatch[1];
+      const paths = [];
+      let pathMatch;
+      PATH_EXT_RE.lastIndex = 0;
+      while ((pathMatch = PATH_EXT_RE.exec(taskText)) !== null) {
+        const p = pathMatch[1];
+        // Skip paths outside the repo: ~/ home, /absolute, or C:\ Windows absolute.
+        if (p.startsWith('~/') || p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p)) continue;
+        paths.push(p);
+      }
+      if (paths.length > 0) tasksWithPaths.push({ text: taskText, paths });
+    }
+    if (tasksWithPaths.length === 0) continue; // research-style sprint, skip
+
+    // Build changed-file set: git log since filename date ∪ staged diff.
+    // staged is essential — when plan flip-to-completed and code changes
+    // land in the same commit, log alone misses them.
+    const changedFiles = new Set();
+    try {
+      const logOut = execSync(
+        `git -c core.quotePath=false log --since="${filenameDate} 00:00:00" --name-only --pretty=format: -- .`,
+        { cwd: repoRoot, encoding: 'utf-8' }
+      );
+      for (const line of logOut.split('\n')) {
+        const t = line.trim();
+        if (t) changedFiles.add(t);
+      }
+      const stagedOut = execSync('git -c core.quotePath=false diff --cached --name-only', {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+      });
+      for (const line of stagedOut.split('\n')) {
+        const t = line.trim();
+        if (t) changedFiles.add(t);
+      }
+    } catch {
+      continue; // git failure — don't crash other checkers
+    }
+    const changedArr = [...changedFiles];
+
+    for (const { text, paths } of tasksWithPaths) {
+      // bidirectional endsWith for path normalization differences
+      const anyHit = paths.some((p) =>
+        changedArr.some((cf) => cf === p || cf.endsWith('/' + p) || p.endsWith('/' + cf))
+      );
+      if (!anyHit) {
+        failures.push({
+          plan: planRel,
+          task: text.length > 100 ? text.slice(0, 97) + '...' : text,
+          paths,
+          since: filenameDate,
+        });
+      }
+    }
+  }
+
+  return failures;
+}
+
+function formatPlanCompletionError(failures) {
+  const lines = [
+    '',
+    '✗ Plan completion verify 失败: 任务声称完成但 diff 中找不到对应文件改动（C7 / ADR-013）',
+    '',
+  ];
+  for (const f of failures) {
+    lines.push(`  ${f.plan}`);
+    lines.push(`    Task: ${f.task}`);
+    lines.push(`    × 提到的文件均未在 ${f.since} 之后的 commit 或当前 staged changes 中出现:`);
+    for (const p of f.paths) {
+      lines.push(`        ${p}`);
+    }
+  }
+  lines.push('');
+  lines.push('  修复（任选其一）:');
+  lines.push('    A. 取消勾选该 task（恢复 `- [ ]`）并把 status 回退到 reviewing/in-progress');
+  lines.push('    B. 真完成 task 工作 → commit 改动 → 重新 stage plan');
+  lines.push('    C. 修正 plan 中的 inline-code 路径以指向真实改动的文件');
+  lines.push('  绕过: git commit --no-verify (不推荐, 失去 drift 检测)');
+  lines.push('');
+  return lines.join('\n');
+}
+
 function deriveRepairCommand(mismatches) {
   const cmdNames = [...new Set(mismatches
     .filter((m) => m.kind === 'command')
@@ -382,13 +507,15 @@ function main() {
     ...checkOrchestratorSync(stagedFiles, repoRoot),
   ];
   const failures = checkPlanScope(stagedFiles, repoRoot);
+  const completionFailures = checkPlanCompletion(stagedFiles, repoRoot);
 
-  if (mismatches.length === 0 && failures.length === 0) {
+  if (mismatches.length === 0 && failures.length === 0 && completionFailures.length === 0) {
     process.exit(0);
   }
 
   if (mismatches.length > 0) process.stderr.write(formatPropagateError(mismatches));
   if (failures.length > 0) process.stderr.write(formatPlanError(failures));
+  if (completionFailures.length > 0) process.stderr.write(formatPlanCompletionError(completionFailures));
 
   process.exit(1);
 }
@@ -416,10 +543,13 @@ module.exports = {
   checkPropagateSync,
   checkOrchestratorSync,
   checkPlanScope,
+  checkPlanCompletion,
   parseFrontmatter,
   deriveRepairCommand,
   formatPropagateError,
   formatPlanError,
+  formatPlanCompletionError,
   GRANDFATHER_BEFORE,
+  PLAN_PATH_RE,
   ORCHESTRATOR_PATH_RE,
 };

@@ -431,6 +431,175 @@ This plan predates ADR-012 and has no 「关键假设验证」 section.
 }
 
 // ─────────────────────────────────────────────────────────────
+// Plan completion verify scenarios (S13a-f) — C7 / ADR-013.
+// Validate that sprints marked status:completed have actually
+// touched the inline-code paths claimed by checked tasks.
+// ─────────────────────────────────────────────────────────────
+
+function planWithFrontmatter({ type, status, body }) {
+  return `---
+title: "Smoke plan"
+type: ${type}
+status: ${status}
+created: "2026-05-13"
+tags: [sprint]
+---
+
+# Smoke plan
+
+## 需求分析
+
+### 风险和假设
+
+**关键假设验证**:
+
+| 假设 | 验证方式 | 实际 |
+|------|---------|------|
+| 一项假设是这样的需要确认 | Read 一些文件并跑命令验证 | 已确认通过且无问题 |
+| 第二项假设也是这样需要看 | Read 别的文件并跑 grep 命令 | 已确认通过且无问题 |
+| 第三项假设这样验证 | 跑一些命令做验证 | 实际符合预期目标 |
+
+${body}
+`;
+}
+
+function scenarioPlanCompletionPathInDiff() {
+  // S13a: type=sprint + status=completed + checked task with path that DOES appear in diff → pass
+  const dir = makeRepo('s13a');
+  clearRequireCache(dir);
+
+  // Pre-create a target file and commit, so it appears in `git log` since the plan date.
+  writeFile(dir, 'scripts/foo.js', '// foo\n');
+  gitAdd(dir, 'scripts/foo.js');
+  execSync('git commit -q -m "add foo"', { cwd: dir });
+
+  const body = `## 技术方案
+
+### 任务拆解
+
+- [x] **Task 1**: implement foo — 文件: \`scripts/foo.js\`
+`;
+  writeFile(dir, 'docs/plans/2026-05-13-smoke.md', planWithFrontmatter({
+    type: 'sprint', status: 'completed', body,
+  }));
+  gitAdd(dir, 'docs/plans/2026-05-13-smoke.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0, got ${res.code}. stderr=${res.stderr}`);
+  assert(
+    !/hook 内部异常已忽略|fail-open 放行|MISSING_TRANSFORMERS/.test(res.stderr),
+    `expected real pass, got fail-open: stderr=${res.stderr}`
+  );
+}
+
+function scenarioPlanCompletionPathMissing() {
+  // S13b: type=sprint + status=completed + checked task with path NOT in diff → fail
+  const dir = makeRepo('s13b');
+  clearRequireCache(dir);
+
+  // No prior commit touching scripts/missing.js, and not staged either.
+  const body = `## 技术方案
+
+### 任务拆解
+
+- [x] **Task 1**: implement missing — 文件: \`scripts/missing.js\`
+`;
+  writeFile(dir, 'docs/plans/2026-05-13-smoke.md', planWithFrontmatter({
+    type: 'sprint', status: 'completed', body,
+  }));
+  gitAdd(dir, 'docs/plans/2026-05-13-smoke.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/Plan completion verify/.test(res.stderr), `stderr missing C7 marker: ${res.stderr}`);
+  assert(/scripts\/missing\.js/.test(res.stderr), `stderr missing path: ${res.stderr}`);
+  assert(/Task 1/.test(res.stderr), `stderr missing task ref: ${res.stderr}`);
+}
+
+function scenarioPlanCompletionNoCodeTask() {
+  // S13c: type=sprint + status=completed + checked task but NO inline-code path → skip (research sprint)
+  const dir = makeRepo('s13c');
+  clearRequireCache(dir);
+
+  const body = `## 技术方案
+
+### 任务拆解
+
+- [x] **Task 1**: write research findings (no code)
+- [x] **Task 2**: interview stakeholders
+`;
+  writeFile(dir, 'docs/plans/2026-05-13-smoke.md', planWithFrontmatter({
+    type: 'sprint', status: 'completed', body,
+  }));
+  gitAdd(dir, 'docs/plans/2026-05-13-smoke.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0 (research skip), got ${res.code}. stderr=${res.stderr}`);
+}
+
+function scenarioPlanCompletionNotSprintType() {
+  // S13d: type=plan + status=completed + path missing → skip (only `type:sprint` triggers)
+  const dir = makeRepo('s13d');
+  clearRequireCache(dir);
+
+  const body = `## 任务拆解
+
+- [x] **Task 1**: implement — 文件: \`scripts/missing.js\`
+`;
+  writeFile(dir, 'docs/plans/2026-05-13-smoke.md', planWithFrontmatter({
+    type: 'plan', status: 'completed', body,
+  }));
+  gitAdd(dir, 'docs/plans/2026-05-13-smoke.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0 (non-sprint skip), got ${res.code}. stderr=${res.stderr}`);
+}
+
+function scenarioPlanCompletionStatusNotCompleted() {
+  // S13e: type=sprint + status=in-progress + path missing → skip (only completed triggers)
+  const dir = makeRepo('s13e');
+  clearRequireCache(dir);
+
+  const body = `## 任务拆解
+
+- [x] **Task 1**: implement — 文件: \`scripts/missing.js\`
+`;
+  writeFile(dir, 'docs/plans/2026-05-13-smoke.md', planWithFrontmatter({
+    type: 'sprint', status: 'in-progress', body,
+  }));
+  gitAdd(dir, 'docs/plans/2026-05-13-smoke.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0 (status skip), got ${res.code}. stderr=${res.stderr}`);
+}
+
+function scenarioPlanCompletionGrandfathered() {
+  // S13f: filename date < 2026-05-12 + status=completed + path missing → skip (grandfather)
+  const dir = makeRepo('s13f');
+  clearRequireCache(dir);
+
+  const body = `## 任务拆解
+
+- [x] **Task 1**: implement — 文件: \`scripts/missing.js\`
+`;
+  // Use a filename date strictly before the grandfather threshold.
+  const planContent = `---
+title: "Old"
+type: sprint
+status: completed
+created: "2026-04-15"
+---
+
+${body}
+`;
+  writeFile(dir, 'docs/plans/2026-04-15-old.md', planContent);
+  gitAdd(dir, 'docs/plans/2026-04-15-old.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0 (grandfather), got ${res.code}. stderr=${res.stderr}`);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────
 
@@ -448,6 +617,12 @@ function main() {
   runScenario('S10: orchestrator source CRLF + plugin LF → exit 0 (LF-normalized)', scenarioOrchestratorCRLFSource);
   runScenario('S11: orchestrator source submodule deleted, plugin remains → exit 1 (orphan)', scenarioOrchestratorSourceDeletedOrphan);
   runScenario('S12: nested subdir under scripts/agent-orchestrator/ → exit 1 (non-recursive build)', scenarioOrchestratorNestedSubdir);
+  runScenario('S13a: sprint completed + checked task path in diff → exit 0 (not fail-open)', scenarioPlanCompletionPathInDiff);
+  runScenario('S13b: sprint completed + checked task path missing → exit 1 with C7 marker + path', scenarioPlanCompletionPathMissing);
+  runScenario('S13c: sprint completed + checked task without inline-code path → exit 0 (research skip)', scenarioPlanCompletionNoCodeTask);
+  runScenario('S13d: type=plan (not sprint) + status=completed → exit 0 (non-sprint skip)', scenarioPlanCompletionNotSprintType);
+  runScenario('S13e: sprint type but status=in-progress → exit 0 (status skip)', scenarioPlanCompletionStatusNotCompleted);
+  runScenario('S13f: grandfathered date + completed + path missing → exit 0', scenarioPlanCompletionGrandfathered);
 
   process.stdout.write(`\nresult: ${passed} passed, ${failed} failed\n`);
 
