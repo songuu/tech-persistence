@@ -57,6 +57,16 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 **`timeline` — 时间线**：
 按时间倒序展示知识积累过程。
 
+**`--usage` — 21 命令使用率**：
+显示 21 个 tech-persistence 命令在 Codex transcript（`~/.codex/projects/<slug>/*.jsonl`）+ Codex observations（`tool:"Skill"`）中的**精准**使用次数，区分 30 天滚动窗口和累计。
+
+实现：执行 `node scripts/usage-report.js --inline`（或 `--window 60` 自定义窗口），把输出直接展示给用户。完整归档报告用 `node scripts/usage-report.js` 写入 `docs/reports/command-usage-YYYY-MM-DD.md`。
+
+数据局限（必读）：
+- transcript 仅覆盖当前 cwd 对应的 session；subagent 内调用不计
+- 仅捕获**用户显式输入 `/xxx`**；对话式触发（"实现 X"）不计
+- Codex observations 同秒同 skill 已去重
+
 ## 健康检查（每次自动执行）
 - ⚠️ AGENTS.md > 200 行
 - ⚠️ 单个 rules 文件 > 100 行
