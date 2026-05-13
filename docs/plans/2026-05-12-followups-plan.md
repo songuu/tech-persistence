@@ -167,7 +167,7 @@ aliases: ["gstack-followups", "command-audit-plan"]
 
 ### 目标
 
-避免 sibling-evaluation framework-building 偏见复发。3 个候选（C1 destructive hook / C2 phase warmup lint / C5 retro delta）需要真实事件触发分子才解冻。
+避免 sibling-evaluation framework-building 偏见复发。**4** 个候选（C1 destructive hook / C2 phase warmup lint / C5 retro delta / **AP3 User-Challenge 档**）需要真实事件触发分子才解冻。
 
 ### 解冻条件
 
@@ -176,12 +176,21 @@ aliases: ["gstack-followups", "command-audit-plan"]
 | C1 destructive hook | `grep "rm -rf\|DROP TABLE\|force-push\|accident\|误删" .claude/rules/debugging-gotchas.md` 出现 ≥1 真实事故 | 等待自然事件 |
 | C2 phase warmup lint | 方案 B 产物显示 ≥ 5 个 sprint 在 Phase N→N+1 之间有显著探索往返 | 方案 B usage-report |
 | C5 retro delta | N=3 sibling-evaluation sprint 完成（gstack ×1 + gbrain ×1 + 未来 ×1） | 自然累积 |
+| **AP3 User-Challenge 档**（来自 G3 autoplan 子机制） | `grep "challenge\|挑战\|反对\|push.?back\|顺从\|该挑战但没挑战" docs/plans/ docs/solutions/` 出现 ≥1 真实"模型该挑战用户但顺从"事故 | 等待自然事件 |
+
+**AP3 推迟理由（2026-05-13 reframe）**：
+
+1. **分子缺失**：当前 grep 上述关键词跨 `docs/plans/` + `docs/solutions/` = 0 命中（仅 G3 deep dive 自引）。
+2. **概念错位**：gstack autoplan 三档（Mechanical/Taste/Challenge）是「自动决策**内部**分类」，本项目 auto-mode 三档（强制人工/自动通过/灰区）是「**问/不问**之间的分类」，根本不是同一维度，强行嫁接 = framework-building。
+3. **mechanism 路径不通**：纯文档协议（auto-mode.md 加段落）违反 [[ADR-013-section-b]] enforcement 提案必须 mechanism 的原则；"User-Challenge 触发"靠模型自我裁定，无客观信号，无 smoke 可写。
+4. **反身性验证**：AP3 决策本身就是 "User-Challenge"（模型挑战用户实施 AP3 的方向）— 反证模型本来就该这么做，不需要新机制。本能 [[sibling-evaluation-defaults-to-framework-building]] N 实例从 2 → 3，confidence 0.7 → 0.8 候选升级。
 
 ### 30 天复盘 checklist（2026-06-12）
 
 - [ ] 跑 `node scripts/usage-report.js --window 30d --by command` 看跨 session 数据
-- [ ] grep debugging-gotchas.md 是否有真实 destructive 事故
-- [ ] 是否出现第 3 个 sibling-evaluation sprint
+- [ ] grep debugging-gotchas.md 是否有真实 destructive 事故（C1）
+- [ ] 是否出现第 3 个 sibling-evaluation sprint（C5）
+- [ ] grep `docs/plans/ docs/solutions/` 是否有"模型该挑战但顺从"事故（AP3）
 - [ ] 若任一条件满足 → 启动对应候选的 plan sprint
 
 ### 不做什么
@@ -210,6 +219,9 @@ D (30 天后复盘)     — 无动作，仅等待
 ## 变更日志
 
 - 2026-05-12 初稿（基于 `2026-05-12-gstack-analysis-reframe-lessons.md` 的 6 条经验）
+- 2026-05-13 方案 B 已完成（sprint 1 `2026-05-13-command-usage-report.md`）
+- 2026-05-13 C7 plan-completion-verify 已完成（sprint 3 `2026-05-13-plan-completion-verify.md`，独立于方案 ABCD 体系，落地 ADR-013 §B mechanism）
+- 2026-05-13 AP3 User-Challenge 档加入方案 D，理由见上方 reframe 段；本能 [[sibling-evaluation-defaults-to-framework-building]] N=3 反身性触发
 
 ---
 
