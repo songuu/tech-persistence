@@ -79,7 +79,12 @@ function inferRuntime() {
   if (process.env.CODEX_HOME || process.env.CODEX_SESSION_ID || process.env.CODEX_PROJECT_DIR) {
     return 'codex';
   }
-  if (process.env.CLAUDE_SESSION_ID || process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_PROJECT_DIR) {
+  if (
+    process.env.CLAUDE_PLUGIN_ROOT
+    || process.env.CLAUDE_SESSION_ID
+    || process.env.CLAUDE_CONFIG_DIR
+    || process.env.CLAUDE_PROJECT_DIR
+  ) {
     return 'claude';
   }
   return 'codex';

@@ -358,6 +358,9 @@ if (fs.existsSync(runHookPath)) {
   if (!content.includes('function inferRuntime()')) {
     fail('hook script run-hook.js must infer Claude/Codex runtime');
   }
+  if (!content.includes('CLAUDE_PLUGIN_ROOT')) {
+    fail('hook script run-hook.js must recognize Claude Code plugin runtime');
+  }
   if (content.includes("process.env.TECH_PERSISTENCE_RUNTIME = 'codex';")) {
     fail('hook script run-hook.js must not hard-code Codex runtime');
   }

@@ -1,5 +1,5 @@
 ---
-title: "21 个 tech-persistence 命令精准使用率统计"
+title: "22 个 tech-persistence 命令精准使用率统计"
 type: sprint
 status: completed
 created: "2026-05-13"
@@ -11,7 +11,7 @@ tags: [sprint, observability, usage-stats, command-audit]
 aliases: ["command-usage-report", "usage-stats"]
 ---
 
-# 21 个 tech-persistence 命令精准使用率统计
+# 22 个 tech-persistence 命令精准使用率统计
 
 > 解决 `2026-05-12-gstack-latest-analysis.md` 的 Task 7 用「docs 提及次数」作 proxy 的问题，改用**精准信号源**（Claude Code transcript + Codex observations）。
 
@@ -21,7 +21,7 @@ aliases: ["command-usage-report", "usage-stats"]
 
 `2026-05-12-gstack-latest-analysis.md` Task 7 用「docs/plans/ + docs/solutions/ 提及次数」作为命令使用率 proxy，得出 43% 命令证据不足、4 个 0 提及。基于此推断"清理 9 个低频命令到 experimental/"。
 
-**用户在 2026-05-13 明确否决"清理"路径**：21 个命令都需要保留。但需要一份**精准统计文档**反映真实使用频率，用于未来决策（不是清理决策，是观察 + 复盘的依据）。
+**用户在 2026-05-13 明确否决"清理"路径**：当时的 21 个命令都需要保留。随后新增 `/skill` 统一入口，当前统计口径为 **22 个命令**。本 sprint 需要一份**精准统计文档**反映真实使用频率，用于未来决策（不是清理决策，是观察 + 复盘的依据）。
 
 ### 已勘察的数据源
 
@@ -40,7 +40,7 @@ aliases: ["command-usage-report", "usage-stats"]
 | Codex `tool:"Skill"` + `input_summary.skill` 是 slash 命令精准信号 | `observations.jsonl` 4 个 Skill 命中 | ✅ skill=sprint | high |
 | Codex hook 双触发产生重复（同秒同 skill）| 4 entries = 2 pre + 2 post，间隔 34/41ms | ✅ 需去重（按秒级 timestamp + skill）| high |
 | cwd → transcript slug 派生规则 = lowercase + `:`/`\`/`/`→`-` | `C:\project\my\tech-persistence` → `c--project-my-tech-persistence` | ✅ 实测匹配 | high |
-| 21 命令白名单 | `ls user-level/commands/*.md` | ✅ 21 文件 | high |
+| 22 命令白名单 | `ls user-level/commands/*.md` | ✅ 22 文件 | high |
 
 ### 要做
 
@@ -61,7 +61,7 @@ aliases: ["command-usage-report", "usage-stats"]
 
 ### 成功标准
 
-- [x] 21 命令白名单与 `user-level/commands/` 一致
+- [x] 22 命令白名单与 `user-level/commands/` 一致
 - [x] Claude Code transcript 字符串 content 精准捕获（排除 tool_result 噪音）
 - [x] Codex observations 同秒同 skill 去重
 - [x] 输出含 30 天 + 累计双视图 + 首末时间戳

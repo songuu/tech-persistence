@@ -15,10 +15,6 @@ When the command instructions below mention `/instinct-status`, interpret that a
 
 ## Command Instructions
 
----
-description: "查看所有已学习的本能及其置信度状态"
----
-
 # /instinct-status — 本能状态面板
 
 扫描本能存储目录，展示所有已学习本能的状态面板。

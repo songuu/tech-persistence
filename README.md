@@ -1,7 +1,7 @@
 # Claude Code / Codex 自进化工程系统
 
 > 融合 gstack 角色分工 + Compound Engineering 复利循环 + ECC/Claude-Mem 自学习本能 + Skill 自迭代 + 风险自适应测试 + 上下文交接 + Obsidian 知识图谱。
-> 21 个用户命令 · 3 个项目命令 · 10 个按需技能 · 4 个 Hook · Memory v5 · Caveman 压缩层 · 5 层知识存储。
+> 22 个用户命令 · 3 个项目命令 · 10 个按需技能 · 4 个 Hook · Memory v5 · Caveman 压缩层 · 5 层知识存储。
 > 支持 Claude Code 原生目录和 Codex 原生插件两种运行时；每一次工作都让下一次更容易。
 
 ---
@@ -493,14 +493,15 @@ Skill 优化:       /skill diagnose → /skill-improve → /skill-eval → /skil
 ~/.claude/                              ← 用户级 (跟着你走)
 ├── CLAUDE.md                           ← 核心偏好 + 路由规则 (< 200行)
 ├── settings.json                       ← 4 Hook 配置
-├── commands/ (21 个)                   ← 全部用户命令
+├── commands/ (22 个)                   ← 全部用户命令
 ├── rules/general-standards.md
-├── skills/                             ← 5 个按需加载技能
+├── skills/                             ← 10 个按需加载技能
 │   ├── memory/
 │   ├── continuous-learning/{SKILL.md, hooks/}
 │   ├── prototype-workflow/
 │   ├── test-strategy/
-│   └── context-handoff/
+│   ├── context-handoff/
+│   └── caveman*/
 └── homunculus/                         ← 知识存储
     ├── instincts/{personal/, inherited/}
     ├── evolved/{skills/, commands/, agents/}
@@ -522,8 +523,8 @@ your-project/                           ← 项目级 (提交 Git)
 
 plugins/tech-persistence/               ← Codex 原生插件包
 ├── .codex-plugin/plugin.json
-├── commands/                            ← 21 个兼容命令源文件
-├── skills/                              ← 5 个按需技能 + 21 个 command skill wrappers
+├── commands/                            ← 22 个兼容命令源文件
+├── skills/                              ← 10 个按需技能 + 22 个 command skill wrappers
 ├── hooks.json                           ← 4 Hook 配置
 ├── hooks/                               ← Codex runtime hook scripts
 ├── scripts/                             ← build/import utilities
@@ -535,9 +536,9 @@ Codex 调用方式：
 
 ~/.codex/                              ← Codex 用户级 (与 ~/.claude 对齐)
 ├── AGENTS.md                           ← 核心偏好 + 路由规则
-├── commands/ (21 个)                   ← 兼容命令源文件
+├── commands/ (22 个)                   ← 兼容命令源文件
 ├── rules/general-standards.md
-├── skills/                             ← 5 个按需技能 + 21 个 command skill wrappers
+├── skills/                             ← 10 个按需技能 + 22 个 command skill wrappers
 │   ├── memory/
 │   ├── continuous-learning/{SKILL.md, hooks/}
 │   ├── prototype-workflow/
