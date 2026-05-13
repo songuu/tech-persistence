@@ -1,0 +1,26 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "tech-persistence-local",
+  "description": "Local marketplace for tech-persistence self-evolution toolchain",
+  "owner": {
+    "name": "songyu_qiming"
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Single-plugin local marketplace exposing tech-persistence to Claude Code 2.x plugin system"
+  },
+  "plugins": [
+    {
+      "name": "tech-persistence",
+      "source": "./",
+      "description": "think/plan/work/review/compound workflow + memory v5 + skills + Codex orchestration",
+      "category": "workflow",
+      "tags": [
+        "workflow",
+        "self-evolution",
+        "memory",
+        "agent-orchestration"
+      ]
+    }
+  ]
+}

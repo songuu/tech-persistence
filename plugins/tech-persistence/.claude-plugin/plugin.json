@@ -1,0 +1,20 @@
+{
+  "name": "tech-persistence",
+  "version": "1.0.0",
+  "description": "Self-evolving engineering toolchain: think/plan/work/review/compound workflow + memory v5 + skills + Codex orchestration + pre-commit defense (ADR-012/013).",
+  "author": {
+    "name": "songyu_qiming"
+  },
+  "homepage": "https://github.com/songyu/tech-persistence",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "self-evolution",
+    "memory",
+    "compound-engineering",
+    "codex",
+    "agent-orchestration",
+    "pre-commit",
+    "dogfood"
+  ]
+}
