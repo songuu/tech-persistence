@@ -223,6 +223,7 @@ D (30 天后复盘)     — 无动作，仅等待
 - 2026-05-13 C7 plan-completion-verify 已完成（sprint 3 `2026-05-13-plan-completion-verify.md`，独立于方案 ABCD 体系，落地 ADR-013 §B mechanism）
 - 2026-05-13 AP3 User-Challenge 档加入方案 D，理由见上方 reframe 段；本能 [[sibling-evaluation-defaults-to-framework-building]] N=3 反身性触发
 - 2026-05-13 方案 C 部分完成：C1+C2+C3 已毕业 ADR-013 主体 + §B 到 `.claude/rules/architecture.md`（commit 10e7d6b）；C4+C5（checkEnforcementDogfood + smoke）按元层级 dogfood 原则推迟——缺真实分子（"新 enforcement plan 没写 dogfood 段"事故 grep 0 命中），C7 自身已证明 inline dogfood doable + low-cost；C6 独立 solution doc 不做（ADR 表 + C7 sprint plan 已等价记录）
+- 2026-05-13 Claude Code 2.1 plugin 迁移：根因诊断"用户级 `~/.claude/commands/` 被废弃" → 补 `plugins/tech-persistence/.claude-plugin/{plugin,marketplace}.json` 注册为 plugin（commit 20e29ab）+ 移 `hooks.json` → `hooks/hooks.json` 让 Claude Code 识别（commit c7ed2cc，Hooks 4 ✓）+ 新增 `install-plugin.{sh,ps1}` 提供 plugin-mode 一键安装入口。**B4 推迟**：22 个 command-derived SKILL.md 与 commands/ 同名导致 inventory 双计数（~600-800 always-on tok/session 浪费），等触发"session token 超限"或"inventory 混乱误导"事故再做（解冻条件待补入方案 D 表）
 
 ---
 
