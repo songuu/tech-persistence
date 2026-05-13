@@ -2,8 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const readline = require('readline');
+const { homeDir, resolveCompatReadDirs } = require('./runtime-paths');
 
 // 22 个 tech-persistence 命令白名单（与 user-level/commands/*.md 同步）
 // 注：/skill 是 2026-05-13 新增的统一入口；/skill-* 4 命令保留作 alias
@@ -36,7 +36,7 @@ const WHITELIST_SET = new Set(COMMAND_WHITELIST);
 
 const COMMAND_NAME_RE = /<command-name>\/([a-z][a-z0-9-]*)<\/command-name>/g;
 
-// cwd → Claude Code transcript slug：小写 + `:` `\` `/` 各替换为单个 `-`
+// cwd → transcript slug：小写 + `:` `\` `/` 各替换为单个 `-`
 // 例 `C:\project\my\tech-persistence` → `c--project-my-tech-persistence`
 // （盘符冒号 + 反斜杠产生连续两个 `-`，这是 Claude Code 实际规则）
 function cwdToSlug(cwd) {
@@ -47,28 +47,28 @@ function cwdToSlug(cwd) {
 }
 
 function resolveTranscriptDir(cwd) {
-  const home = os.homedir();
   const slug = cwdToSlug(cwd);
-  return path.join(home, '.claude', 'projects', slug);
+  return path.join(homeDir(), '.claude', 'projects', slug);
 }
 
 function resolveObservationsPaths() {
-  const home = os.homedir();
-  const homunculusDir = path.join(home, '.claude', 'homunculus', 'projects');
-  if (!fs.existsSync(homunculusDir)) return [];
-  const projects = fs.readdirSync(homunculusDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
   const paths = [];
-  for (const projectId of projects) {
-    const main = path.join(homunculusDir, projectId, 'observations.jsonl');
-    if (fs.existsSync(main)) paths.push({ projectId, file: main });
-    const archiveDir = path.join(homunculusDir, projectId, 'archive');
-    if (fs.existsSync(archiveDir)) {
-      const archives = fs.readdirSync(archiveDir)
-        .filter((name) => name.endsWith('.jsonl'))
-        .map((name) => path.join(archiveDir, name));
-      for (const a of archives) paths.push({ projectId, file: a });
+  for (const baseDir of resolveCompatReadDirs()) {
+    const projectsDir = path.join(baseDir, 'projects');
+    if (!fs.existsSync(projectsDir)) continue;
+    const projects = fs.readdirSync(projectsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+    for (const projectId of projects) {
+      const main = path.join(projectsDir, projectId, 'observations.jsonl');
+      if (fs.existsSync(main)) paths.push({ baseDir, projectId, file: main });
+      const archiveDir = path.join(projectsDir, projectId, 'archive');
+      if (fs.existsSync(archiveDir)) {
+        const archives = fs.readdirSync(archiveDir)
+          .filter((name) => name.endsWith('.jsonl'))
+          .map((name) => path.join(archiveDir, name));
+        for (const a of archives) paths.push({ baseDir, projectId, file: a });
+      }
     }
   }
   return paths;
@@ -124,6 +124,15 @@ function extractSkillFromObservation(entry) {
     if (m) return m[1];
   }
   return null;
+}
+
+function runtimeFromObservationSource(entry, source) {
+  if (entry.runtime === 'claude') return 'cc';
+  if (entry.runtime === 'codex') return 'codex';
+  const normalizedBase = path.normalize(source.baseDir).toLowerCase();
+  if (normalizedBase.includes(`${path.sep}.claude${path.sep}`)) return 'cc';
+  if (normalizedBase.includes(`${path.sep}.codex${path.sep}`)) return 'codex';
+  return 'codex';
 }
 
 // 主聚合函数
@@ -184,7 +193,7 @@ async function aggregate(opts = {}) {
     }
   }
 
-  // 源 2: Codex observations
+  // 源 2: Claude/Codex observations
   // 去重 key：skill + 秒级 timestamp（同秒内同 skill 视为 hook 重复触发，记 1 次）
   // 根因：Claude Code + Codex 可能同时注册 PreToolUse hook，单次工具调用产生多条 observation
   const observationSources = resolveObservationsPaths();
@@ -199,7 +208,7 @@ async function aggregate(opts = {}) {
       const dedupKey = `${skill}@${secondTs}`;
       if (observationSeen.has(dedupKey)) return;
       observationSeen.add(dedupKey);
-      record(skill, 'codex', ts);
+      record(skill, runtimeFromObservationSource(entry, source), ts);
     });
   }
 
@@ -230,7 +239,11 @@ async function aggregate(opts = {}) {
         exists: transcriptSources.exists,
         fileCount: transcriptSources.files.length,
       },
-      observations: observationSources.map((s) => ({ projectId: s.projectId, file: s.file })),
+      observations: observationSources.map((s) => ({
+        baseDir: s.baseDir,
+        projectId: s.projectId,
+        file: s.file,
+      })),
     },
     whitelist: COMMAND_WHITELIST.slice(),
     rows,
@@ -244,5 +257,6 @@ module.exports = {
   resolveObservationsPaths,
   extractCommandsFromTranscriptEntry,
   extractSkillFromObservation,
+  runtimeFromObservationSource,
   aggregate,
 };

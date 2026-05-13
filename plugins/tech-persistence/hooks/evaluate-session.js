@@ -5,7 +5,7 @@
  *
  * 融合：
  *   - ECC: 本能提取 + 置信度评分 + 域标签 + 进化路径
- *   - Codex-Mem: 会话摘要生成 + 结构化观察分类
+ *   - Claude-Mem: 会话摘要生成 + 结构化观察分类
  *
  * 在每次会话结束 (Stop) 时执行：
  *   1. 读取本次会话的所有观察
@@ -54,7 +54,7 @@ const CONFIG = {
     'architecture', 'security', 'toolchain', 'api-design', 'workflow'
   ],
   observation_types: [
-    'user_correction',   // 用户纠正了 Codex 的行为
+    'user_correction',   // 用户纠正了 Claude 的行为
     'error_resolution',  // 解决了一个错误
     'repeated_workflow',  // 反复出现的工作流模式
     'tool_preference',   // 偏好某种工具/方法
@@ -265,7 +265,7 @@ function detectPatterns(observations) {
       });
     });
 
-  // 5. 记录可复用的验证/工具链命令，形成类似 Codex auto memory 的项目索引
+  // 5. 记录可复用的验证/工具链命令，形成类似 Claude Code auto memory 的项目索引
   const commandCounts = {};
   postObservations
     .filter(o => o.command && o.status !== 'error')
@@ -434,7 +434,7 @@ function decayInstincts(instinctDir) {
   return decayed;
 }
 
-// ─── Codex Memory v5: Codex auto-memory style index + topic files ───
+// ─── Codex Memory v5: Claude Code auto-memory style index + topic files ───
 function memoryEntryFromPattern(pattern) {
   if (!pattern.memory || pattern.confidence < CONFIG.memory.minMemoryConfidence) return null;
   const dateStr = new Date().toISOString().split('T')[0];
@@ -635,7 +635,7 @@ ${instinctLinks || '_No instinct changes this session_'}
 function healthCheck(paths) {
   const warnings = [];
 
-  // AGENTS.md / AGENTS.md 行数
+  // CLAUDE.md / AGENTS.md 行数
   if (fs.existsSync(paths.localInstructionsFile)) {
     const lines = fs.readFileSync(paths.localInstructionsFile, 'utf-8').split('\n').length;
     if (lines > 200) {
@@ -669,7 +669,7 @@ function healthCheck(paths) {
     }
   }
 
-  // Memory v5 索引预算：对齐 Codex auto memory 的 200 行 / 25KB 启动索引
+  // Memory v5 索引预算：对齐 Claude Code auto memory 的 200 行 / 25KB 启动索引
   const memoryIndex = path.join(paths.projectMemory, 'MEMORY.md');
   if (fs.existsSync(memoryIndex)) {
     const content = fs.readFileSync(memoryIndex, 'utf-8');
@@ -914,7 +914,7 @@ function main() {
 }
 
 try { main(); } catch (err) {
-  // Hook 错误不应中断 Codex 主流程
+  // Hook 错误不应中断 Claude Code 主流程
   // console.error('evaluate-session error:', err.message);
   process.exit(0);
 }

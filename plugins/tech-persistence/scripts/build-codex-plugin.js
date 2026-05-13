@@ -72,7 +72,20 @@ if (!scriptName) {
   process.exit(0);
 }
 
-process.env.TECH_PERSISTENCE_RUNTIME = 'codex';
+function inferRuntime() {
+  if (process.env.TECH_PERSISTENCE_RUNTIME) {
+    return process.env.TECH_PERSISTENCE_RUNTIME.toLowerCase();
+  }
+  if (process.env.CODEX_HOME || process.env.CODEX_SESSION_ID || process.env.CODEX_PROJECT_DIR) {
+    return 'codex';
+  }
+  if (process.env.CLAUDE_SESSION_ID || process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_PROJECT_DIR) {
+    return 'claude';
+  }
+  return 'codex';
+}
+
+process.env.TECH_PERSISTENCE_RUNTIME = inferRuntime();
 
 const scriptPath = path.join(__dirname, scriptName);
 process.argv = [process.argv[0], scriptPath, ...scriptArgs];
@@ -143,6 +156,23 @@ function copyDirectoryRecursive(sourceDir, targetDir, options = {}) {
     }
     if (entry.isFile()) copyFilePreservingType(source, target, options.transformText !== false);
   });
+}
+
+function copyHookLibs(targetDir) {
+  const sourceLibDir = path.join(repoRoot, 'scripts', 'lib');
+  const targetLibDir = path.join(targetDir, 'lib');
+  emptyDir(targetLibDir);
+
+  const libFiles = fs
+    .readdirSync(sourceLibDir)
+    .filter((name) => name.endsWith('.js'))
+    .sort();
+
+  libFiles.forEach((name) => {
+    copyTextFile(path.join(sourceLibDir, name), path.join(targetLibDir, name), false);
+  });
+
+  return libFiles.length;
 }
 
 function assertInventory(label, actual, expected) {
@@ -298,19 +328,12 @@ function copyHooks() {
     'observe.js',
     'evaluate-session.js',
   ].forEach((name) => {
-    copyTextFile(path.join(repoRoot, 'scripts', name), path.join(targetDir, name));
+    copyTextFile(path.join(repoRoot, 'scripts', name), path.join(targetDir, name), false);
   });
-  copyTextFile(
-    path.join(repoRoot, 'scripts', 'lib', 'runtime-paths.js'),
-    path.join(targetDir, 'lib', 'runtime-paths.js')
-  );
-  copyTextFile(
-    path.join(repoRoot, 'scripts', 'lib', 'memory-v5.js'),
-    path.join(targetDir, 'lib', 'memory-v5.js')
-  );
+  const hookLibCount = copyHookLibs(targetDir);
   writeTextFile(path.join(targetDir, 'run-hook.js'), runHookJs);
   writeTextFile(path.join(targetDir, 'run-hook.cmd'), runHookCmd);
-  return 8;
+  return 4 + hookLibCount + 2;
 }
 
 function copyHomunculusTemplate() {
@@ -401,4 +424,5 @@ module.exports = {
   replacements,
   expectedCommands,
   expectedSkills,
+  copyHookLibs,
 };

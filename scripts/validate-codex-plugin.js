@@ -4,43 +4,50 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const pluginRoot = path.join(root, 'plugins', 'tech-persistence');
-const expectedCommands = [
-  'agent-loop.md',
-  'checkpoint.md',
-  'compound.md',
-  'evolve.md',
-  'instinct-export.md',
-  'instinct-import.md',
-  'instinct-status.md',
-  'learn.md',
-  'plan.md',
-  'prototype.md',
-  'review.md',
-  'review-learnings.md',
-  'session-summary.md',
-  'skill-diagnose.md',
-  'skill-eval.md',
-  'skill-improve.md',
-  'skill-publish.md',
-  'sprint.md',
-  'test.md',
-  'think.md',
-  'work.md',
-];
-const expectedSkills = [
-  'caveman',
-  'caveman-commit',
-  'caveman-compress',
-  'caveman-help',
-  'caveman-review',
-  'memory',
-  'continuous-learning',
-  'prototype-workflow',
-  'test-strategy',
-  'context-handoff',
-];
+const { normalizeLf } = require(path.join(
+  pluginRoot,
+  'scripts',
+  'build-codex-plugin.js'
+));
+
+function listTopLevelMarkdownNames(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function listTopLevelJsNames(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.js'))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function listSkillNames(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(dir, entry.name, 'SKILL.md')))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+const expectedCommands = listTopLevelMarkdownNames(path.join(root, 'user-level', 'commands'));
+const expectedSkills = listSkillNames(path.join(root, 'user-level', 'skills'));
 const expectedCommandSkills = expectedCommands.map((name) => path.basename(name, '.md'));
-const expectedCodexSkills = [...expectedSkills, ...expectedCommandSkills].sort();
+const expectedCodexSkills = Array.from(new Set([...expectedSkills, ...expectedCommandSkills])).sort();
+const expectedHookScripts = [
+  'caveman-activate.js',
+  'evaluate-session.js',
+  'inject-context.js',
+  'observe.js',
+];
+const expectedHookLibs = listTopLevelJsNames(path.join(root, 'scripts', 'lib'));
 
 function fail(message) {
   console.error(`[FAIL] ${message}`);
@@ -49,6 +56,71 @@ function fail(message) {
 
 function ok(message) {
   console.log(`[OK] ${message}`);
+}
+
+function validateInventory(label, actual, expected) {
+  const actualSorted = [...actual].sort();
+  const expectedSorted = [...expected].sort();
+  const actualSet = new Set(actualSorted);
+  const expectedSet = new Set(expectedSorted);
+  const missing = expectedSorted.filter((name) => !actualSet.has(name));
+  const extra = actualSorted.filter((name) => !expectedSet.has(name));
+
+  if (missing.length > 0 || extra.length > 0) {
+    fail(`${label} inventory mismatch. Missing: ${missing.join(', ') || 'none'}; Extra: ${extra.join(', ') || 'none'}`);
+    return;
+  }
+
+  ok(`${label} inventory matches source`);
+}
+
+function validateGeneratedFileParity(source, target, label) {
+  if (!fs.existsSync(source) || !fs.existsSync(target)) return;
+  const sourceContent = fs.readFileSync(source, 'utf-8');
+  const expected = normalizeLf(sourceContent);
+  const actual = normalizeLf(fs.readFileSync(target, 'utf-8'));
+  if (actual !== expected) {
+    fail(`${label} is not in sync with source`);
+    return;
+  }
+  ok(`${label} matches source`);
+}
+
+function resolveLocalRequire(fromFile, request) {
+  const base = path.resolve(path.dirname(fromFile), request);
+  const candidates = request.endsWith('.js')
+    ? [base]
+    : [base, `${base}.js`, path.join(base, 'index.js')];
+  return candidates.find((candidate) => {
+    const entry = stat(candidate);
+    return entry && entry.isFile();
+  });
+}
+
+function validateLocalRequireClosure(entryFiles, label) {
+  const queue = entryFiles.filter((file) => fs.existsSync(file));
+  const visited = new Set();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    const content = fs.readFileSync(current, 'utf-8');
+    const requirePattern = /require\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+    let match;
+    while ((match = requirePattern.exec(content)) !== null) {
+      const request = match[1];
+      const resolved = resolveLocalRequire(current, request);
+      if (!resolved) {
+        fail(`${label} missing local dependency ${request} from ${path.relative(pluginRoot, current).replace(/\\/g, '/')}`);
+        continue;
+      }
+      queue.push(resolved);
+    }
+  }
+
+  ok(`${label} local require closure resolved`);
 }
 
 function readJson(file) {
@@ -207,22 +279,19 @@ const commandsDir = path.join(pluginRoot, 'commands');
 if (isDirectory(commandsDir, 'commands dir')) {
   const commandEntries = fs
     .readdirSync(commandsDir)
-    .filter((name) => name.endsWith('.md'));
-  if (commandEntries.length !== expectedCommands.length) {
-    fail(`commands dir must contain exactly ${expectedCommands.length} .md files`);
-  }
+    .filter((name) => name.endsWith('.md'))
+    .sort();
+  validateInventory('commands dir', commandEntries, expectedCommands);
   expectedCommands.forEach((name) => isFile(path.join(commandsDir, name), `command ${name}`));
-  validateNoClaudeOnlyText(commandsDir, 'commands dir');
 }
 
 const skillsDir = path.join(pluginRoot, 'skills');
 if (isDirectory(skillsDir, 'skills dir')) {
-  const skillEntries = fs.readdirSync(skillsDir).filter((name) =>
-    fs.existsSync(path.join(skillsDir, name)) && fs.lstatSync(path.join(skillsDir, name)).isDirectory()
-  );
-  if (skillEntries.length !== expectedCodexSkills.length) {
-    fail(`skills dir must contain exactly ${expectedCodexSkills.length} skill directories`);
-  }
+  const skillEntries = fs
+    .readdirSync(skillsDir)
+    .filter((name) => fs.existsSync(path.join(skillsDir, name)) && fs.lstatSync(path.join(skillsDir, name)).isDirectory())
+    .sort();
+  validateInventory('skills dir', skillEntries, expectedCodexSkills);
   expectedCodexSkills.forEach((name) => {
     const skillDir = path.join(skillsDir, name);
     if (isDirectory(skillDir, `skill ${name}`)) {
@@ -256,14 +325,47 @@ if (isFile(hooksPath, 'hooks/hooks.json')) {
   }
 }
 
-['caveman-activate.js', 'inject-context.js', 'observe.js', 'evaluate-session.js'].forEach((script) => {
+expectedHookScripts.forEach((script) => {
   isFile(path.join(pluginRoot, 'hooks', script), `hook script ${script}`);
+  validateGeneratedFileParity(
+    path.join(root, 'scripts', script),
+    path.join(pluginRoot, 'hooks', script),
+    `hook script ${script}`
+  );
 });
 
-isFile(path.join(pluginRoot, 'hooks', 'lib', 'runtime-paths.js'), 'hook script lib/runtime-paths.js');
-isFile(path.join(pluginRoot, 'hooks', 'lib', 'memory-v5.js'), 'hook script lib/memory-v5.js');
+const hooksLibDir = path.join(pluginRoot, 'hooks', 'lib');
+if (isDirectory(hooksLibDir, 'hook script lib dir')) {
+  const hookLibEntries = fs
+    .readdirSync(hooksLibDir)
+    .filter((name) => name.endsWith('.js'))
+    .sort();
+  validateInventory('hook script lib dir', hookLibEntries, expectedHookLibs);
+  expectedHookLibs.forEach((script) => {
+    isFile(path.join(hooksLibDir, script), `hook script lib/${script}`);
+    validateGeneratedFileParity(
+      path.join(root, 'scripts', 'lib', script),
+      path.join(hooksLibDir, script),
+      `hook script lib/${script}`
+    );
+  });
+}
 isFile(path.join(pluginRoot, 'hooks', 'run-hook.cmd'), 'hook script run-hook.cmd');
 isFile(path.join(pluginRoot, 'hooks', 'run-hook.js'), 'hook script run-hook.js');
+const runHookPath = path.join(pluginRoot, 'hooks', 'run-hook.js');
+if (fs.existsSync(runHookPath)) {
+  const content = fs.readFileSync(runHookPath, 'utf-8');
+  if (!content.includes('function inferRuntime()')) {
+    fail('hook script run-hook.js must infer Claude/Codex runtime');
+  }
+  if (content.includes("process.env.TECH_PERSISTENCE_RUNTIME = 'codex';")) {
+    fail('hook script run-hook.js must not hard-code Codex runtime');
+  }
+}
+validateLocalRequireClosure(
+  expectedHookScripts.map((script) => path.join(pluginRoot, 'hooks', script)),
+  'hook scripts'
+);
 validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence-small.svg'), 'asset tech-persistence-small.svg');
 validateOptionalFile(path.join(pluginRoot, 'assets', 'tech-persistence.svg'), 'asset tech-persistence.svg');
 validateAgentLoopAutoFlagParity();
@@ -320,7 +422,7 @@ if (fs.existsSync(injectContextPath)) {
   }
 }
 
-['caveman-activate.js', 'inject-context.js', 'observe.js', 'evaluate-session.js'].forEach((script) => {
+expectedHookScripts.forEach((script) => {
   const scriptPath = path.join(pluginRoot, 'hooks', script);
   if (!fs.existsSync(scriptPath)) return;
   const content = fs.readFileSync(scriptPath, 'utf-8');

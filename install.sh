@@ -55,6 +55,28 @@ safe_copy_no_overwrite() {
   cp "$src" "$dst"
 }
 
+install_hook_libs() {
+  local hooks_dir="$1"
+  local source_lib_dir="${SCRIPT_DIR}/scripts/lib"
+  local target_lib_dir="$hooks_dir/lib"
+
+  if [[ -L "$target_lib_dir" ]]; then
+    rm "$target_lib_dir"
+  elif [[ -d "$target_lib_dir" ]]; then
+    rm -f "$target_lib_dir"/*.js
+    rmdir "$target_lib_dir" 2>/dev/null || true
+  fi
+
+  if ln -s "$source_lib_dir" "$target_lib_dir" 2>/dev/null; then
+    log_ok "hook lib/ → scripts/lib symlink（新增 lib 自动生效）"
+    return
+  fi
+
+  mkdir -p "$target_lib_dir"
+  cp "$source_lib_dir/"*.js "$target_lib_dir/"
+  log_warn "当前环境不支持 hook lib symlink，已复制 lib；新增 lib 后需重新运行 install.sh --hooks-only"
+}
+
 resolve_user_path() {
   node -e "const path=require('path'); const home=process.env.HOME||process.env.USERPROFILE; let value=process.argv[1]; if (value==='~') value=home; else if (value.startsWith('~/')||value.startsWith('~\\\\')) value=path.join(home,value.slice(2)); console.log(path.resolve(value));" "$1"
 }
@@ -85,7 +107,6 @@ install_hooks() {
 
   local hooks_dir="${CLAUDE_HOME}/skills/continuous-learning/hooks"
   mkdir -p "$hooks_dir"
-  mkdir -p "$hooks_dir/lib"
 
   cp "${SCRIPT_DIR}/scripts/observe.js" "$hooks_dir/observe.js"
   log_ok "observe.js → PreToolUse/PostToolUse 观察捕获"
@@ -96,8 +117,7 @@ install_hooks() {
   cp "${SCRIPT_DIR}/scripts/inject-context.js" "$hooks_dir/inject-context.js"
   log_ok "inject-context.js → SessionStart 上下文注入"
 
-  cp "${SCRIPT_DIR}/scripts/lib/"*.js "$hooks_dir/lib/"
-  log_ok "hook lib/ → runtime paths + memory v5"
+  install_hook_libs "$hooks_dir"
 
   chmod +x "$hooks_dir"/*.js
   chmod +x "$hooks_dir"/lib/*.js

@@ -5,7 +5,7 @@
  *
  * 灵感来源：
  *   - ECC continuous-learning-v2: 100% 确定性 Hook 捕获
- *   - Codex-Mem: PostToolUse 观察 + 异步压缩
+ *   - Claude-Mem: PostToolUse 观察 + 异步压缩
  *
  * 工作原理：
  *   1. Hook 触发时立即将原始事件追加到 observations.jsonl
@@ -37,7 +37,7 @@ function main() {
   const project = detectProjectIdentity();
   const obsPath = getObservationPath(project);
 
-  // 从 stdin 读取 hook payload (Codex 通过 stdin 传入 JSON)
+  // 从 stdin 读取 hook payload (Claude Code 通过 stdin 传入 JSON)
   let input = '';
   try {
     // 跨平台读取 stdin：Windows 无 /dev/stdin
@@ -76,7 +76,7 @@ function main() {
   try {
     fs.appendFileSync(obsPath, JSON.stringify(observation) + '\n');
   } catch (err) {
-    // 写入失败时静默退出，不影响 Codex 主流程
+    // 写入失败时静默退出，不影响 Claude Code 主流程
     process.exit(0);
   }
 

@@ -72,7 +72,7 @@ function resolveBaseDir() {
     const codexHome = process.env.CODEX_HOME || path.join(homeDir(), '.codex');
     return path.join(codexHome, 'homunculus');
   }
-  return path.join(homeDir(), '.codex', 'homunculus');
+  return path.join(homeDir(), '.claude', 'homunculus');
 }
 
 function uniqueDirs(dirs) {
@@ -88,7 +88,7 @@ function uniqueDirs(dirs) {
 function resolveCompatReadDirs() {
   const home = homeDir();
   const dirs = [resolveBaseDir()];
-  const claudeDir = path.join(homeDir(), '.codex', 'homunculus');
+  const claudeDir = path.join(homeDir(), '.claude', 'homunculus');
   const codexDir = path.join(home, '.codex', 'homunculus');
   if (!dirs.includes(claudeDir)) dirs.push(claudeDir);
   if (!dirs.includes(codexDir)) dirs.push(codexDir);
@@ -96,7 +96,7 @@ function resolveCompatReadDirs() {
 }
 
 function resolveProjectDirName() {
-  return runtimeFromEnvironment() === 'codex' ? '.codex' : '.codex';
+  return runtimeFromEnvironment() === 'codex' ? '.codex' : '.claude';
 }
 
 function resolveProjectPlansDir(cwd = process.cwd()) {
@@ -110,7 +110,7 @@ function resolveProjectRulesDir(cwd = process.cwd()) {
 function resolveProjectInstructionFile(cwd = process.cwd()) {
   return runtimeFromEnvironment() === 'codex'
     ? path.join(cwd, 'AGENTS.md')
-    : path.join(cwd, 'AGENTS.md');
+    : path.join(cwd, 'CLAUDE.md');
 }
 
 function resolveSessionId(options = {}) {
