@@ -243,15 +243,15 @@ if (isDirectory(skillsDir, 'skills dir')) {
 const readmePath = path.join(pluginRoot, 'README.md');
 isFile(readmePath, 'README.md');
 
-const hooksPath = path.join(pluginRoot, 'hooks.json');
-if (isFile(hooksPath, 'hooks.json')) {
+const hooksPath = path.join(pluginRoot, 'hooks', 'hooks.json');
+if (isFile(hooksPath, 'hooks/hooks.json')) {
   const hooksConfig = readJson(hooksPath);
   const hooks = hooksConfig ? hooksConfig.hooks : null;
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
-    fail('hooks.json missing hooks object');
+    fail('hooks/hooks.json missing hooks object');
   } else {
     ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop'].forEach((hook) => {
-      if (!Array.isArray(hooks[hook])) fail(`hooks.json missing ${hook}`);
+      if (!Array.isArray(hooks[hook])) fail(`hooks/hooks.json missing ${hook}`);
     });
   }
 }
