@@ -152,6 +152,7 @@ function main() {
       prompt,
       projectId: project.id,
       baseDirs,
+      cwd: process.cwd(),
       touchedFiles,
       sprintTags,
       limits: { budgetChars: DEFAULT_BUDGET_CHARS },

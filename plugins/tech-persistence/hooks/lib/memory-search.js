@@ -28,9 +28,13 @@ const DEFAULT_LIMITS = {
   memoryTop: 5,
   sessionTop: 2,
   instinctTop: 3,
+  solutionTop: 3,
   budgetChars: 3000,
   minScore: 1.2,
 };
+
+// solution body 摘要 cap (单条不超过此长度，避免挤占 budget)
+const SOLUTION_BODY_CAP = 800;
 
 const ASCII_TOKEN_MIN_LEN = 2;
 const CJK_RANGE = /[㐀-鿿豈-﫿]/;
@@ -261,6 +265,77 @@ function collectInstinctFiles(instinctsDir, minConfidence = 0.5) {
   }
 }
 
+function collectSolutionFiles(solutionsDir) {
+  if (!solutionsDir || !fs.existsSync(solutionsDir)) return [];
+  try {
+    return fs
+      .readdirSync(solutionsDir)
+      .filter((name) => name.endsWith('.md'))
+      .map((name) => {
+        const file = path.join(solutionsDir, name);
+        let content;
+        try {
+          content = fs.readFileSync(file, 'utf-8');
+        } catch {
+          return null;
+        }
+        const { meta, body } = parseFrontmatter(content);
+        // date 优先级：frontmatter date → filename YYYY-MM-DD → 空
+        const dateMatch = name.match(/^(\d{4}-\d{2}-\d{2})/);
+        const metaDate = String(meta.date || '').slice(0, 10);
+        const date = metaDate || (dateMatch ? dateMatch[1] : '');
+        // title 优先级：frontmatter title → h1 (首个 # 行) → filename without .md
+        const h1Match = String(body || '').match(/^#\s+(.+)$/m);
+        const fallbackTitle = name.replace(/\.md$/, '').replace(/^\d{4}-\d{2}-\d{2}-/, '');
+        const title = String(meta.title || (h1Match ? h1Match[1].trim() : fallbackTitle));
+        // tags 兼容 inline array / list / 字符串
+        let tags = '';
+        if (Array.isArray(meta.tags)) tags = meta.tags.join(',');
+        else if (typeof meta.tags === 'string') tags = meta.tags;
+        return {
+          file,
+          name,
+          topic: 'solution',
+          date,
+          confidence: 0.7,
+          line: `[Solution] ${date} ${title}`,
+          note: String(body || '').slice(0, SOLUTION_BODY_CAP),
+          tags,
+          title,
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function scoreSolution(entry, query) {
+  const text = `${entry.line || ''} ${entry.note || ''} ${entry.tags || ''} ${entry.title || ''}`;
+  const ascii = tokenizeAscii(text);
+  const cjk = tokenizeCjk(text);
+  const paths = extractPathTokens(text);
+
+  const asciiHits = countMatches(ascii, query.ascii);
+  const cjkHits = countMatches(cjk, query.cjk);
+  const pathHits = countMatches(paths, query.paths);
+
+  const queryAsciiSize = query.ascii.size || 1;
+  const queryCjkSize = query.cjk.size || 1;
+  const queryPathSize = query.paths.size || 1;
+
+  // solution = 手写高密度精炼内容，keyword 权重比 memory entry 高 (2.0 vs 1.5)
+  const keyword = (asciiHits / queryAsciiSize) * 0.6 + (cjkHits / queryCjkSize) * 0.4;
+  const pathScore = pathHits / queryPathSize;
+  const recency = recencyBoost(entry.date);
+  const confidenceFixed = 0.7;
+
+  return {
+    total: keyword * 2.0 + pathScore * 1.5 + recency * 0.5 + confidenceFixed * 0.4,
+    components: { keyword, path: pathScore, recency, confidence: confidenceFixed },
+  };
+}
+
 function scoreInstinct(instinct, query) {
   const text = `${instinct.trigger} ${instinct.body}`;
   const ascii = tokenizeAscii(text);
@@ -291,20 +366,26 @@ function searchMemory(options = {}) {
     baseDirs = [],
     touchedFiles = [],
     sprintTags = [],
+    cwd,
+    solutionsDir: explicitSolutionsDir,
     limits = {},
   } = options;
+  // solutionsDir 优先级：显式传入 > cwd/docs/solutions > 不读
+  const solutionsDir = explicitSolutionsDir
+    || (cwd ? path.join(cwd, 'docs', 'solutions') : null);
 
   const finalLimits = { ...DEFAULT_LIMITS, ...limits };
   const enrichedPrompt = `${prompt} ${touchedFiles.join(' ')}`;
   const query = tokenizeQuery(enrichedPrompt);
 
   if (query.all.size === 0) {
-    return { memory: [], sessions: [], instincts: [], query, limits: finalLimits };
+    return { memory: [], sessions: [], instincts: [], solutions: [], query, limits: finalLimits };
   }
 
   const memoryEntries = [];
   const sessionFiles = [];
   const instinctFiles = [];
+  const solutionFiles = solutionsDir ? collectSolutionFiles(solutionsDir) : [];
 
   for (const baseDir of baseDirs) {
     if (!projectId) continue;
@@ -353,10 +434,23 @@ function searchMemory(options = {}) {
     .sort((a, b) => b.score.total - a.score.total)
     .slice(0, finalLimits.instinctTop);
 
+  const seenSolutions = new Set();
+  const scoredSolutions = solutionFiles
+    .filter((sol) => {
+      if (seenSolutions.has(sol.name)) return false;
+      seenSolutions.add(sol.name);
+      return true;
+    })
+    .map((sol) => ({ solution: sol, score: scoreSolution(sol, query) }))
+    .filter((item) => item.score.total >= finalLimits.minScore)
+    .sort((a, b) => b.score.total - a.score.total)
+    .slice(0, finalLimits.solutionTop);
+
   return {
     memory: scoredMemory,
     sessions: scoredSessions,
     instincts: scoredInstincts,
+    solutions: scoredSolutions,
     query,
     limits: finalLimits,
   };
@@ -383,6 +477,12 @@ function formatSessionSnippet(session) {
   return `- ${session.date}: ${redactSensitive(snippet)}`;
 }
 
+function formatSolutionLine(solution) {
+  const relFile = String(solution.file || '').replace(/\\/g, '/').replace(/^.*?docs\//, 'docs/');
+  const conf = Number.isFinite(solution.confidence) ? solution.confidence.toFixed(2) : '0.70';
+  return `- ${solution.date} [${conf}] ${redactSensitive(solution.title)} — ${relFile}`;
+}
+
 function formatRecallContext(result, options = {}) {
   const budgetChars = options.budgetChars ?? result.limits?.budgetChars ?? DEFAULT_LIMITS.budgetChars;
   const lines = [];
@@ -401,9 +501,15 @@ function formatRecallContext(result, options = {}) {
     lines.push('');
   }
 
-  if (result.sessions.length > 0) {
+  if (result.sessions && result.sessions.length > 0) {
     lines.push('### Recent Sessions');
     result.sessions.forEach((item) => lines.push(formatSessionSnippet(item.session)));
+    lines.push('');
+  }
+
+  if (result.solutions && result.solutions.length > 0) {
+    lines.push('### Solutions');
+    result.solutions.forEach((item) => lines.push(formatSolutionLine(item.solution)));
     lines.push('');
   }
 
@@ -418,22 +524,27 @@ function formatRecallContext(result, options = {}) {
 
 function hasUsefulResults(result) {
   return (
-    (result.memory && result.memory.length > 0) ||
-    (result.instincts && result.instincts.length > 0) ||
-    (result.sessions && result.sessions.length > 0)
+    (result.memory?.length > 0) ||
+    (result.instincts?.length > 0) ||
+    (result.sessions?.length > 0) ||
+    (result.solutions?.length > 0)
   );
 }
 
 module.exports = {
   DEFAULT_LIMITS,
+  SOLUTION_BODY_CAP,
   collectInstinctFiles,
   collectSessionFiles,
+  collectSolutionFiles,
   extractPathTokens,
   formatRecallContext,
+  formatSolutionLine,
   hasUsefulResults,
   scoreEntry,
   scoreInstinct,
   scoreSession,
+  scoreSolution,
   searchMemory,
   tokenizeAscii,
   tokenizeCjk,
