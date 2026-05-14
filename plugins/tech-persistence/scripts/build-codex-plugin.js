@@ -332,13 +332,14 @@ function copyHooks() {
     'inject-context.js',
     'observe.js',
     'evaluate-session.js',
+    'prompt-submit.js',
   ].forEach((name) => {
     copyTextFile(path.join(repoRoot, 'scripts', name), path.join(targetDir, name), false);
   });
   const hookLibCount = copyHookLibs(targetDir);
   writeTextFile(path.join(targetDir, 'run-hook.js'), runHookJs);
   writeTextFile(path.join(targetDir, 'run-hook.cmd'), runHookCmd);
-  return 4 + hookLibCount + 2;
+  return 5 + hookLibCount + 2;
 }
 
 function copyHomunculusTemplate() {
@@ -349,6 +350,18 @@ function copyHomunculusTemplate() {
     path.join(targetDir, 'config.json')
   );
   return 1;
+}
+
+function copyMcpRuntime() {
+  const targetDir = path.join(pluginRoot, 'mcp');
+  emptyDir(targetDir);
+  copyTextFile(
+    path.join(repoRoot, 'scripts', 'memory-mcp-server.js'),
+    path.join(targetDir, 'memory-mcp-server.js'),
+    false
+  );
+  const libCount = copyHookLibs(targetDir);
+  return 1 + libCount;
 }
 
 function copyUtilityScripts() {
@@ -400,6 +413,7 @@ function main() {
   const commandCount = copyCommands();
   const skillCount = copySkills();
   const hookCount = copyHooks();
+  const mcpCount = copyMcpRuntime();
   const utilityCount = copyUtilityScripts();
   const schemaCount = copySchemas();
   copyHomunculusTemplate();
@@ -407,6 +421,7 @@ function main() {
   console.log(`[OK] generated ${commandCount} commands`);
   console.log(`[OK] generated ${skillCount} skills`);
   console.log(`[OK] generated ${hookCount} hook files`);
+  console.log(`[OK] generated ${mcpCount} mcp runtime files`);
   console.log(`[OK] generated ${utilityCount} utility scripts`);
   console.log(`[OK] generated ${schemaCount} schemas`);
   console.log('[OK] generated codex homunculus template');

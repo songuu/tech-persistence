@@ -422,9 +422,47 @@ Skill 优化:       /skill diagnose → /skill-improve → /skill-eval → /skil
 | Hook | 脚本 | 作用 |
 |------|------|------|
 | SessionStart | inject-context.js | 注入 Memory v5 索引、本能、会话摘要 + 检测 handoff/prototype 状态 |
+| UserPromptSubmit | prompt-submit.js | 按当前 prompt 召回相关 Memory v5 entries / sessions / instincts（query-aware recall，ASCII + CJK 2-gram + 路径切分） |
 | PreToolUse | observe.js pre | 规范化并脱敏工具输入 |
 | PostToolUse | observe.js post | 捕获工具结果、命令状态、文件路径 |
 | Stop | evaluate-session.js | 模式检测 + Memory v5 写入 + 本能提取 + 衰减 |
+
+环境变量 `TECH_PERSISTENCE_DISABLE_PROMPT_RECALL=1` 可关闭 UserPromptSubmit recall（兜底）。
+
+---
+
+## Memory MCP（5 工具）
+
+Plugin 安装后自动注册 `tech-persistence-memory` MCP server，暴露：
+
+| Tool | 作用 |
+|------|------|
+| `tp_memory_search` | 按 query / files / sprint tags 召回 Memory v5 / sessions / instincts |
+| `tp_memory_recent` | 列出当前项目最近的 session 摘要 |
+| `tp_memory_save` | 手动写一条 durable note 到当前项目 topic 文件 |
+| `tp_memory_file_history` | 查某文件路径或 basename 在 memory 中的引用记录 |
+| `tp_memory_project_profile` | 当前项目 memory 概览（按 topic 计数 / top confidence / 最新日期） |
+
+Agent 可主动调用，无需被动等待 SessionStart 注入。手动调试：
+```bash
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | node scripts/memory-mcp-server.js
+```
+
+---
+
+## agentmemory 桥接（可选 P2）
+
+`scripts/memory-export.js` 把当前 Memory v5 导出为 agentmemory-compatible 格式（不替换主存储）：
+
+```bash
+node scripts/memory-export.js --format=jsonl --output=memory.jsonl
+node scripts/memory-export.js --format=markdown --output=./export-dir
+node scripts/memory-export.js --format=jsonl --output=memory.jsonl --push=agentmemory  # 需 env AGENTMEMORY_URL
+```
+
+每条记录带稳定 id `tech-persistence:v5:<project-id>:<memory-id>` + provenance metadata，round-trip 安全（同一 entry 多次导出 id 不变）。
 
 ---
 

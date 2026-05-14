@@ -46,6 +46,7 @@ const expectedHookScripts = [
   'evaluate-session.js',
   'inject-context.js',
   'observe.js',
+  'prompt-submit.js',
 ];
 const expectedHookLibs = listTopLevelJsNames(path.join(root, 'scripts', 'lib'));
 
@@ -268,12 +269,58 @@ const manifestPath = path.join(pluginRoot, '.codex-plugin', 'plugin.json');
 if (isFile(manifestPath, 'plugin manifest')) {
   const manifest = readJson(manifestPath);
   if (manifest) {
-    ['name', 'version', 'description', 'skills', 'hooks', 'interface'].forEach((key) => {
+    ['name', 'version', 'description', 'skills', 'hooks', 'mcpServers', 'interface'].forEach((key) => {
       if (!manifest[key]) fail(`manifest missing ${key}`);
     });
     if (manifest.name !== 'tech-persistence') fail('manifest name must be tech-persistence');
   }
 }
+
+const mcpManifestPath = path.join(pluginRoot, '.codex-plugin', '.mcp.json');
+if (isFile(mcpManifestPath, 'mcp manifest .mcp.json')) {
+  const mcpManifest = readJson(mcpManifestPath);
+  if (mcpManifest) {
+    if (!mcpManifest.mcpServers || typeof mcpManifest.mcpServers !== 'object') {
+      fail('.mcp.json missing mcpServers object');
+    } else {
+      const memorySpec = mcpManifest.mcpServers['tech-persistence-memory'];
+      if (!memorySpec) fail('.mcp.json missing tech-persistence-memory server');
+      else {
+        if (memorySpec.command !== 'node') fail('.mcp.json memory server must use node');
+        if (!Array.isArray(memorySpec.args) || memorySpec.args.length < 1) {
+          fail('.mcp.json memory server missing args');
+        } else {
+          const arg = memorySpec.args[0];
+          if (!arg.includes('${CLAUDE_PLUGIN_ROOT}')) {
+            fail('.mcp.json memory server args must reference ${CLAUDE_PLUGIN_ROOT} for cross-runtime portability');
+          }
+          if (!arg.endsWith('/memory-mcp-server.js')) {
+            fail('.mcp.json memory server args must point to memory-mcp-server.js');
+          }
+        }
+      }
+    }
+  }
+}
+
+const mcpRuntimePath = path.join(pluginRoot, 'mcp', 'memory-mcp-server.js');
+isFile(mcpRuntimePath, 'mcp runtime memory-mcp-server.js');
+validateGeneratedFileParity(
+  path.join(root, 'scripts', 'memory-mcp-server.js'),
+  mcpRuntimePath,
+  'mcp runtime memory-mcp-server.js'
+);
+
+const mcpLibDir = path.join(pluginRoot, 'mcp', 'lib');
+if (isDirectory(mcpLibDir, 'mcp lib dir')) {
+  ['memory-tools.js', 'memory-search.js', 'memory-v5.js', 'runtime-paths.js'].forEach((dep) => {
+    isFile(path.join(mcpLibDir, dep), `mcp lib/${dep}`);
+  });
+}
+validateLocalRequireClosure(
+  [mcpRuntimePath],
+  'mcp runtime'
+);
 
 const commandsDir = path.join(pluginRoot, 'commands');
 if (isDirectory(commandsDir, 'commands dir')) {
@@ -319,7 +366,7 @@ if (isFile(hooksPath, 'hooks/hooks.json')) {
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
     fail('hooks/hooks.json missing hooks object');
   } else {
-    ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop'].forEach((hook) => {
+    ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].forEach((hook) => {
       if (!Array.isArray(hooks[hook])) fail(`hooks/hooks.json missing ${hook}`);
     });
   }

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tech-persistence-memory": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/memory-mcp-server.js"],
+      "description": "Query Tech Persistence Memory v5: search, recent sessions, save notes, file history, project profile."
+    }
+  }
+}

@@ -20,6 +20,20 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" prompt-submit.js",
+            "async": false,
+            "timeout": 1800,
+            "statusMessage": "Recalling relevant memory"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "*",

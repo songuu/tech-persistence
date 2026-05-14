@@ -20,6 +20,7 @@
   ],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.codex-plugin/.mcp.json",
   "interface": {
     "displayName": "Tech Persistence",
     "shortDescription": "Self-evolving workflows and memory for Codex",
