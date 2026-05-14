@@ -217,6 +217,13 @@ aliases: ["两天审计", "5月12-14审计"]
 - 2026-05-14: **新发现 R9** — `install.ps1` line 3 含中文 "自进化工程系统" 但文件**无 UTF-8 BOM**（`head -c 3` 返回 `<#\r` 不是 BOM）。GBK locale 用户跑 install.ps1 可能乱码（已踩 2 次 [[ps1-needs-utf8-bom]] 第 3 次潜在回归）。R2 banner 故意用纯 ASCII 避免触发，但 BOM 缺失本身是定时炸弹。优先级 MEDIUM。
 - 2026-05-14: **R9 已处置** — `install.ps1` 添加 UTF-8 BOM（`efbbbf` 前缀），`file` 报告 "UTF-8 (with BOM)"，`pwsh [scriptblock]::Create()` parse 仍 OK；扫描全部 3 个 .ps1 文件确认 `install-codex.ps1` 无中文不触发（暂安全）、`install-plugin.ps1` 已有 BOM。
 - 2026-05-14: **R10 提议（不在本 sprint 范围）** — 建议下一个 sprint 上 `checkPS1Bom` pre-commit checker：扫描 `*.ps1` 含中文则要求 BOM；按 ADR-013 §B 需枚举边界产物（3 个现存 PS1 + 提交时遇到的所有 PS1 路径）+ 负样本验证（无 BOM + 中文 → 拒；加 BOM → 通过）。理由：已踩 2 次 + R9 是潜在第 3 次，符合 [[mechanism-over-discipline]] 升级条件。本 sprint 不实施以避免 scope creep。
+- 2026-05-14: **R4 + R5 已处置 (full lineage)** —
+  - Phase A 勘察：22 active cmd + 44 .bak（R4 范围）；用户态 17 skills 中**仅 5 个**在 TP plugin cache 有等价副本 (`context-handoff` / `continuous-learning` / `memory` / `prototype-workflow` / `test-strategy`)；**12 个 unknown skill 绝对不动**（不在任何 plugin cache，可能用户独有 — `biome-developer` / `design-*` / `find-skills` / `learned` / `handoff-session` / `parser-development` / `prettier-compare` / `rule-options` / `formatter-development` / `deep-research` 等）
+  - Phase B 备份：`tar -czf ~/.claude-backups/2026-05-14-r4-r5-pre-cleanup.tar.gz` 含 104 entries / 135KB（commands 全 + 5 TP skills 全）
+  - Phase C 失败尝试：rename in-place 为 `*.deprecated-2026-05-14` —— **Claude Code 仍把后缀目录当 skill name 注册并 listed** (`continuous-learning.deprecated-2026-05-14` 出现在 skills picker)。**新发现**：rename-in-place 不阻断扫描，目录必须**移出 `~/.claude/` 子树**。
+  - Phase C 修正：mv 全部 6 个目录到 `~/.claude-backups/2026-05-14-deprecated/`（含 `commands` + 5 个 `skills-*`）。验证：(1) `~/.claude/skills/` `grep -c deprecated` = 0，(2) `~/.claude/commands*` 不存在，(3) system-reminder skills 列表无 `*.deprecated*` 污染，(4) `tech-persistence:*` plugin skill 全可见可调，(5) `claude plugin validate` ✔，(6) pre-commit-check exit 0
+  - 回滚：`mv ~/.claude-backups/2026-05-14-deprecated/commands ~/.claude/commands; for s in context-handoff continuous-learning memory prototype-workflow test-strategy; do mv ~/.claude-backups/2026-05-14-deprecated/skills-$s ~/.claude/skills/$s; done`
+- 2026-05-14: **新发现 R11** — Claude Code 2.x 的 skill scanner 把任意 `~/.claude/skills/<name>/` 当作 skill name（不区分 `.deprecated-*` / `.legacy-*` / `.old` 等后缀模式）。元本能候选：[[claude-skills-name-suffix-regex-permissive]] N=1 confidence 0.5。处置规则：必须**移出子树**而非改名，rename in-place 是反模式。
 
 ---
 
