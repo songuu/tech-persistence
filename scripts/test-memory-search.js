@@ -414,6 +414,128 @@ test('formatRecallContext redacts secrets in entry line', () => {
   assert.ok(output.includes('[REDACTED]'));
 });
 
+// ---------- T8 新增：Solution recall scenarios ----------
+
+const {
+  collectSolutionFiles,
+  scoreSolution,
+} = require('./lib/memory-search');
+
+function writeSolution(solutionsDir, name, frontmatter, body) {
+  fs.mkdirSync(solutionsDir, { recursive: true });
+  let content;
+  if (frontmatter) {
+    const fm = Object.entries(frontmatter)
+      .map(([k, v]) => `${k}: ${typeof v === 'string' ? `"${v}"` : v}`)
+      .join('\n');
+    content = `---\n${fm}\n---\n\n${body}\n`;
+  } else {
+    content = body;
+  }
+  fs.writeFileSync(path.join(solutionsDir, name), content);
+}
+
+test('S22 collectSolutionFiles reads solutions with frontmatter', () => {
+  const { root } = makeTempProject();
+  const solutionsDir = path.join(root, 'docs', 'solutions');
+  writeSolution(
+    solutionsDir,
+    '2026-05-14-foo-bar.md',
+    { title: 'Foo Bar Solution', date: '2026-05-14', tags: '[solution, foo]' },
+    '# Foo Bar Solution\n\nProblem solved.'
+  );
+  const entries = collectSolutionFiles(solutionsDir);
+  assert.strictEqual(entries.length, 1, 'one entry expected');
+  assert.strictEqual(entries[0].topic, 'solution');
+  assert.strictEqual(entries[0].date, '2026-05-14');
+  assert.strictEqual(entries[0].title, 'Foo Bar Solution');
+  assert.strictEqual(entries[0].confidence, 0.7);
+});
+
+test('S23 collectSolutionFiles fallback for solution without frontmatter', () => {
+  const { root } = makeTempProject();
+  const solutionsDir = path.join(root, 'docs', 'solutions');
+  writeSolution(
+    solutionsDir,
+    '2026-04-30-legacy-fix.md',
+    null,
+    '# Legacy Caveman Fix\n\nProblem and root cause.'
+  );
+  const entries = collectSolutionFiles(solutionsDir);
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].date, '2026-04-30', 'date from filename');
+  assert.strictEqual(entries[0].title, 'Legacy Caveman Fix', 'title from h1');
+});
+
+test('S24 searchMemory with cwd returns solutions array', () => {
+  const { root, projectId } = makeTempProject();
+  const solutionsDir = path.join(root, 'docs', 'solutions');
+  writeSolution(
+    solutionsDir,
+    '2026-05-14-plugin-migration.md',
+    { title: 'Plugin migration cascade', date: '2026-05-14', tags: 'solution,plugin-migration,hook' },
+    '# Plugin migration cascade\n\nhook double-fire fix.'
+  );
+  const result = searchMemory({
+    prompt: 'plugin-migration hook double-fire',
+    projectId,
+    baseDirs: [root],
+    cwd: root,
+    limits: { minScore: 0.5 },
+  });
+  assert.ok(Array.isArray(result.solutions), 'solutions key present');
+  assert.ok(result.solutions.length >= 1, 'at least 1 solution matched');
+  assert.strictEqual(result.solutions[0].solution.title, 'Plugin migration cascade');
+});
+
+test('S25 scoreSolution keyword weight is 2.0 (vs memory 1.5)', () => {
+  const query = {
+    ascii: new Set(['plugin', 'migration']),
+    cjk: new Set(),
+    paths: new Set(),
+    all: new Set(['plugin', 'migration']),
+  };
+  const solutionEntry = {
+    line: '[Solution] 2026-05-14 plugin migration cascade',
+    note: 'plugin migration content',
+    tags: 'plugin,migration',
+    title: 'plugin migration',
+    date: '2026-05-14',
+  };
+  const score = scoreSolution(solutionEntry, query);
+  // keyword 因 2.0 系数 + path/recency/confidence 累加，应明显高
+  assert.ok(score.total > 1.5, `score.total ${score.total} > 1.5`);
+  assert.ok(score.components.keyword > 0, 'keyword component positive');
+  // 同样 query 在 scoreEntry 上系数 1.5，理论 scoreSolution 应高于 scoreEntry
+  // （不严格比对，因为两者还有 sprint-tag / confidence 等差异）
+});
+
+test('S26 solution merges into top-k with topK truncation', () => {
+  const { root, projectId } = makeTempProject();
+  const solutionsDir = path.join(root, 'docs', 'solutions');
+  for (let i = 0; i < 5; i++) {
+    writeSolution(
+      solutionsDir,
+      `2026-05-1${i}-doc-${i}.md`,
+      { title: `Doc keyword Solution ${i}`, date: `2026-05-1${i}` },
+      `# Doc keyword Solution ${i}\n\nkeyword keyword keyword`
+    );
+  }
+  const result = searchMemory({
+    prompt: 'keyword',
+    projectId,
+    baseDirs: [root],
+    cwd: root,
+    limits: { minScore: 0.3, solutionTop: 3 },
+  });
+  assert.ok(result.solutions.length <= 3, `solutionTop=3 enforced, got ${result.solutions.length}`);
+  assert.ok(result.solutions.length >= 1, 'at least 1 match');
+  // 降序：第一条 score >= 第二条
+  if (result.solutions.length >= 2) {
+    assert.ok(result.solutions[0].score.total >= result.solutions[1].score.total, 'descending order');
+  }
+});
+
 // ---------- Summary ----------
 
 console.log('');

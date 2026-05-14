@@ -58,6 +58,22 @@ aliases: ["问题的别名"]
 
 在 CLAUDE.md 解决方案索引追加一行。
 
+### 步骤 2.5: CLAUDE.md 索引段尺寸维护
+
+写完新索引行后，检查 `### 解决方案索引` 段是否 > 5 条：
+
+```bash
+node scripts/archive-claude-solutions-index.js  # idempotent；≤5 条时 noop
+```
+
+效果：
+- 老条目（超出最近 5 条）移到 `docs/archives/CLAUDE-solutions-index-<YYYY-MM-DD>.md`
+- CLAUDE.md 始终保留**最近 5 条** + archive pointer
+- always-on 注入恒定，不再线性增长（设计参考 `docs/plans/2026-05-14-claude-md-index-via-prompt-recall.md`）
+- 老条目仍可被 **prompt recall hook**（UserPromptSubmit）按用户当轮 prompt 召回（数据源是 `docs/solutions/*.md`，不依赖 CLAUDE.md 索引）
+
+报告中加一行 `Archive: <N> 条 → docs/archives/CLAUDE-solutions-index-*.md`（若 noop 则 `Archive: noop`）。
+
 ### 步骤 3: 提取经验到 rules
 项目特有 → `.claude/rules/`，跨项目 → `~/.claude/CLAUDE.md`
 
