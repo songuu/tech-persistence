@@ -9,6 +9,12 @@ const { normalizeLf } = require(path.join(
   'scripts',
   'build-codex-plugin.js'
 ));
+const {
+  HOOK_TARGETS,
+  buildPluginHookConfig,
+  getHookEventNames,
+  getHookScriptNames,
+} = require('./lib/hook-registry');
 
 function listTopLevelMarkdownNames(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -41,13 +47,7 @@ const expectedCommands = listTopLevelMarkdownNames(path.join(root, 'user-level',
 const expectedSkills = listSkillNames(path.join(root, 'user-level', 'skills'));
 const expectedCommandSkills = expectedCommands.map((name) => path.basename(name, '.md'));
 const expectedCodexSkills = Array.from(new Set([...expectedSkills, ...expectedCommandSkills])).sort();
-const expectedHookScripts = [
-  'caveman-activate.js',
-  'evaluate-session.js',
-  'inject-context.js',
-  'observe.js',
-  'prompt-submit.js',
-];
+const expectedHookScripts = getHookScriptNames(HOOK_TARGETS.PLUGIN_RUNTIME);
 const expectedHookLibs = listTopLevelJsNames(path.join(root, 'scripts', 'lib'));
 
 function fail(message) {
@@ -366,9 +366,16 @@ if (isFile(hooksPath, 'hooks/hooks.json')) {
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) {
     fail('hooks/hooks.json missing hooks object');
   } else {
-    ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].forEach((hook) => {
+    getHookEventNames(HOOK_TARGETS.PLUGIN_RUNTIME).forEach((hook) => {
       if (!Array.isArray(hooks[hook])) fail(`hooks/hooks.json missing ${hook}`);
     });
+    const expected = JSON.stringify(buildPluginHookConfig(), null, 2);
+    const actual = JSON.stringify(hooksConfig, null, 2);
+    if (actual !== expected) {
+      fail('hooks/hooks.json must be generated from scripts/lib/hook-registry.js');
+    } else {
+      ok('hooks/hooks.json matches hook registry');
+    }
   }
 }
 

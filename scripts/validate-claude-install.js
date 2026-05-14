@@ -8,6 +8,11 @@ const userClaudeRoot = process.env.CLAUDE_CONFIG_DIR || path.join(homeDir, '.cla
 const projectRoot = process.cwd();
 const projectClaudeRoot = path.join(projectRoot, '.claude');
 const args = new Set(process.argv.slice(2));
+const {
+  HOOK_TARGETS,
+  getHookScriptNames,
+  getHookSettingsExpectations,
+} = require('./lib/hook-registry');
 
 let hasFailure = false;
 
@@ -142,19 +147,12 @@ function validateSettingsHooks(file, label) {
   const settings = readJson(file, label);
   if (!settings) return;
 
-  const expected = [
-    ['SessionStart', /inject-context\.js/],
-    ['PreToolUse', /observe\.js\b.*\bpre\b/],
-    ['PostToolUse', /observe\.js\b.*\bpost\b/],
-    ['Stop', /evaluate-session\.js/],
-  ];
-
-  for (const [hookName, pattern] of expected) {
-    const commands = collectHookCommands(settings, hookName);
-    if (!commands.some((command) => pattern.test(command))) {
-      fail(`${label} missing ${hookName} hook command matching ${pattern}`);
+  for (const expected of getHookSettingsExpectations(HOOK_TARGETS.CLAUDE_CLASSIC)) {
+    const commands = collectHookCommands(settings, expected.event);
+    if (!commands.some((command) => expected.scriptPattern.test(command))) {
+      fail(`${label} missing ${expected.event} hook command matching ${expected.scriptPattern}`);
     } else {
-      ok(`${label} has ${hookName} hook`);
+      ok(`${label} has ${expected.event} hook`);
     }
   }
 }
@@ -162,9 +160,7 @@ function validateSettingsHooks(file, label) {
 function validateHookScripts(hooksDir, label) {
   if (!isDirectory(hooksDir, label)) return;
   [
-    'inject-context.js',
-    'observe.js',
-    'evaluate-session.js',
+    ...getHookScriptNames(HOOK_TARGETS.CLAUDE_CLASSIC),
     path.join('lib', 'runtime-paths.js'),
     path.join('lib', 'memory-v5.js'),
   ].forEach((name) => {

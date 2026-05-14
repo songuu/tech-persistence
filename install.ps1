@@ -78,19 +78,18 @@ function Configure-SharedHomunculus {
 }
 
 function Build-SettingsJson {
-    $hp = (Join-Path $ClaudeHome "skills/continuous-learning/hooks") -replace '\\','/'
-    $o = [ordered]@{
-        '$schema'='https://code.claude.com/schemas/settings.json'; autoMemoryEnabled=$true
-        hooks=[ordered]@{
-            # Claude Code on Windows executes hooks via Git Bash. `2>nul` in bash creates a
-            # literal file named `nul` in cwd; use POSIX `2>/dev/null || true` for portability.
-            SessionStart=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/inject-context.js`" 2>/dev/null || true";timeout=5000})})
-            PreToolUse=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/observe.js`" pre 2>/dev/null || true";timeout=2000})})
-            PostToolUse=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/observe.js`" post 2>/dev/null || true";timeout=2000})})
-            Stop=@([ordered]@{matcher='*';hooks=@([ordered]@{type='command';command="node `"$hp/evaluate-session.js`" 2>/dev/null || true";timeout=10000})})
-        }
+    $tmp = [System.IO.Path]::GetTempFileName()
+    try {
+        Set-Content $tmp "{}" -Encoding UTF8
+        $hp = (Join-Path $ClaudeHome "skills/continuous-learning/hooks") -replace '\\','/'
+        $mergeScript = Join-Path $ScriptDir "scripts/merge-claude-settings-hooks.js"
+        if (-not (Test-Path $mergeScript)) { throw "Missing Claude settings hook merger: $mergeScript" }
+        & node $mergeScript $tmp "--hook-root" $hp "--shell" "windows" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Claude settings hook template generation failed" }
+        return (Get-Content $tmp -Raw)
+    } finally {
+        if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
     }
-    return ($o | ConvertTo-Json -Depth 10)
 }
 
 function Merge-SettingsHooks($settingsPath) {
@@ -154,7 +153,7 @@ function Install-User {
     $us = Join-Path $ClaudeHome "settings.json"
     if (-not (Test-Path $us)) {
         Set-Content $us (Build-SettingsJson) -Encoding UTF8
-        Write-OK "settings.json (4 hooks)"
+        Write-OK "settings.json hooks generated"
     } else {
         Merge-SettingsHooks $us
         Write-OK "settings.json hooks merged"

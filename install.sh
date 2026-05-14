@@ -122,6 +122,11 @@ merge_claude_settings_hooks() {
     --shell posix
 }
 
+classic_hook_scripts() {
+  node -e "const r=require(process.argv[1]); console.log(r.getHookScriptNames(r.HOOK_TARGETS.CLAUDE_CLASSIC).join('\n'))" \
+    "${SCRIPT_DIR}/scripts/lib/hook-registry.js"
+}
+
 # ──────────────────────────────────────────────
 # 安装自学习 Hook 脚本
 # ──────────────────────────────────────────────
@@ -131,14 +136,11 @@ install_hooks() {
   local hooks_dir="${CLAUDE_HOME}/skills/continuous-learning/hooks"
   mkdir -p "$hooks_dir"
 
-  cp "${SCRIPT_DIR}/scripts/observe.js" "$hooks_dir/observe.js"
-  log_ok "observe.js → PreToolUse/PostToolUse 观察捕获"
-
-  cp "${SCRIPT_DIR}/scripts/evaluate-session.js" "$hooks_dir/evaluate-session.js"
-  log_ok "evaluate-session.js → Stop 会话评估 + 本能提取"
-
-  cp "${SCRIPT_DIR}/scripts/inject-context.js" "$hooks_dir/inject-context.js"
-  log_ok "inject-context.js → SessionStart 上下文注入"
+  while IFS= read -r script_name; do
+    [[ -n "$script_name" ]] || continue
+    cp "${SCRIPT_DIR}/scripts/${script_name}" "$hooks_dir/${script_name}"
+    log_ok "hook ${script_name}"
+  done < <(classic_hook_scripts)
 
   install_hook_libs "$hooks_dir"
 

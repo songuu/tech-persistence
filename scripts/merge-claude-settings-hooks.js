@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
+const { buildClaudeClassicHookSpecs } = require('./lib/hook-registry');
 
 const args = process.argv.slice(2);
 
@@ -40,70 +41,6 @@ function readSettings(settingsPath) {
   const content = fs.readFileSync(settingsPath, 'utf8').trim();
   if (!content) return {};
   return JSON.parse(content);
-}
-
-function quoteForWindows(value) {
-  return `"${value.replace(/\\/g, '/').replace(/"/g, '\\"')}"`;
-}
-
-function quoteForPosix(value) {
-  if (value.startsWith('~/') || value.startsWith('~\\')) {
-    return value.replace(/\\/g, '/');
-  }
-  return `"${value.replace(/\\/g, '/').replace(/"/g, '\\"')}"`;
-}
-
-function hookCommand(hookRoot, script, suffix, shell) {
-  const scriptPath = `${hookRoot.replace(/\\/g, '/')}/${script}`;
-  const commandPath = shell === 'windows' ? quoteForWindows(scriptPath) : quoteForPosix(scriptPath);
-  const argSuffix = suffix ? ` ${suffix}` : '';
-  // Claude Code on Windows executes hook command strings via Git Bash (MSYS2), not cmd.exe.
-  // `2>nul` in bash creates a literal file named `nul` in cwd; `exit /b 0` is invalid syntax.
-  // POSIX-style suppression works in bash and in any future cmd path (cmd would treat
-  // `/dev/null` as a literal path, but our hooks would still succeed via `|| true` short-circuit
-  // on the unrelated failure mode). The `shell` arg is preserved for future hard-cmd splits.
-  return `node ${commandPath}${argSuffix} 2>/dev/null || true`;
-}
-
-function hookSpec(hookRoot, shell) {
-  return {
-    SessionStart: {
-      matcher: '*',
-      scriptPattern: /inject-context\.js/,
-      hook: {
-        type: 'command',
-        command: hookCommand(hookRoot, 'inject-context.js', '', shell),
-        timeout: 5000,
-      },
-    },
-    PreToolUse: {
-      matcher: '*',
-      scriptPattern: /observe\.js\b.*\bpre\b/,
-      hook: {
-        type: 'command',
-        command: hookCommand(hookRoot, 'observe.js', 'pre', shell),
-        timeout: 2000,
-      },
-    },
-    PostToolUse: {
-      matcher: '*',
-      scriptPattern: /observe\.js\b.*\bpost\b/,
-      hook: {
-        type: 'command',
-        command: hookCommand(hookRoot, 'observe.js', 'post', shell),
-        timeout: 2000,
-      },
-    },
-    Stop: {
-      matcher: '*',
-      scriptPattern: /evaluate-session\.js/,
-      hook: {
-        type: 'command',
-        command: hookCommand(hookRoot, 'evaluate-session.js', '', shell),
-        timeout: 10000,
-      },
-    },
-  };
 }
 
 function hookCommands(entries) {
@@ -146,7 +83,10 @@ function main() {
   }
 
   let changed = false;
-  const specs = hookSpec(options.hookRoot, options.shell);
+  const specs = buildClaudeClassicHookSpecs({
+    hookRoot: options.hookRoot,
+    shell: options.shell,
+  });
   Object.entries(specs).forEach(([hookName, spec]) => {
     if (mergeHook(settings, hookName, spec)) changed = true;
   });

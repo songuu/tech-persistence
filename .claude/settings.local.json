@@ -73,7 +73,16 @@
       "Bash(awk '{print length}')",
       "Bash(awk '{sum+=$1; n++} END {print \"条数=\"n, \"平均=\"int\\(sum/n\\)\"字符\", \"总=\"sum\"字符\"}')",
       "Bash(TECH_PERSISTENCE_DISABLE_PROMPT_RECALL=1 echo '{\"prompt\":\"runtime-paths boundary issue\"}')",
-      "Bash(TECH_PERSISTENCE_DISABLE_PROMPT_RECALL=1 node scripts/prompt-submit.js)"
+      "Bash(TECH_PERSISTENCE_DISABLE_PROMPT_RECALL=1 node scripts/prompt-submit.js)",
+      "Bash(awk '/^### 解决方案索引/,/^### /' CLAUDE.md)",
+      "Bash(awk '/^### 解决方案索引/{flag=1; next} /^### /{if\\(flag\\){flag=0}} flag' CLAUDE.md)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(rm -f /tmp/fake.md)",
+      "Bash(echo \"# fake\")",
+      "Bash(node scripts/archive-claude-solutions-index.js --claude-md /tmp/fake.md)",
+      "Bash(echo \"exit code: $?\")",
+      "Read(//tmp/**)",
+      "Bash(rm -f /tmp/fake.md /tmp/out)"
     ]
   }
 }

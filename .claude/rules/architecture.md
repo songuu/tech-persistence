@@ -17,6 +17,14 @@
 
 ## 决策列表
 
+### ADR-014: Hook 架构统一语义源头，按运行时生成配置 (2026-05-14)
+- **状态**：已采纳
+- **上下文**：Tech Persistence 同时支持 Claude Code classic、Claude Code plugin 与 Codex plugin。直接共享同一份 hook 配置会把事件名、matcher、路径占位符、async/timeout 语义混在一起，容易造成某一运行时看似通过、另一运行时实际未注册或双触发。
+- **决策**：维护 `scripts/lib/hook-registry.js` 作为逻辑 hook registry，统一 `memory-session-context`、`observe-tool-*`、`evaluate-session`、`prompt-memory-recall` 等业务语义；各运行时只消费自己的 projection。Claude classic 继续只启用其兼容的 4 hook，plugin runtime 额外启用 `UserPromptSubmit` 和 `caveman-activate`。
+- **原因**：统一语义能避免安装器、plugin build、validator 各自硬编码漂移；分运行时 projection 能保留 Claude Code 与 Codex 的事件、路径和输出语义差异。
+- **备选**：直接把 `hooks/hooks.json` 复制给所有运行时；继续在每个 installer/validator 内硬编码 hook 表。前者不兼容 classic 配置，后者已经出现 drift。
+- **影响**：新增或调整 hook 必须先改 registry，再让 installer/build/validator 从 registry 派生；不得把 runtime-specific matcher 或路径写成全局规则。
+
 ### ADR-013: 关键规则必须从文档协议下沉为工具拒绝（mechanism over discipline） (2026-05-12)
 - **状态**：已采纳
 - **上下文**：`docs/plans/2026-05-11-sprint-speed-layer1.md` Compound 阶段实证两次失败：(1) 我自己漏跑 `build-codex-plugin`，validate 才暴露；(2) Plan 阶段两次基于错误假设（`CONTEXT_BUDGET_CHARS=25KB`、`pipeline.js` 是 /sprint 代码），work 阶段才发现，催生 ADR-012。两次失败的共同根因：**关键规则只活在 .md 里**——propagate 纪律在 `debugging-gotchas.md`，plan 勘察规则在 ADR-012，靠模型每次读 context 时记得遵守。上下文压缩 / 压力下 / 重要时刻会被悄悄省略。文档协议级 enforcement 有 3 个失效模式：(a) **遗忘**——上下文压缩后规则不在 active context；(b) **省略**——压力下模型主动跳过 self-check；(c) **漂移**——多次修订后文档与实际期望偏移，但没有客观信号验证。

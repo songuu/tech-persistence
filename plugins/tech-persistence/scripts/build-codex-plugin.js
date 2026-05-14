@@ -5,6 +5,7 @@ const path = require('path');
 
 const pluginRoot = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(pluginRoot, '..', '..');
+const { buildPluginHookConfig } = require(path.join(repoRoot, 'scripts', 'lib', 'hook-registry'));
 
 const expectedCommands = [
   'agent-loop.md',
@@ -317,16 +318,11 @@ function copySkills() {
 
 function copyHooks() {
   const targetDir = path.join(pluginRoot, 'hooks');
-  // hooks.json 是 Claude Code 2.x plugin 系统的 hook 注册清单 (手维护 source),
-  // 不是 build 输出. emptyDir 前先 stash 它, 清完再写回, 避免 git delete.
-  const hooksJsonPath = path.join(targetDir, 'hooks.json');
-  const hooksJsonContent = fs.existsSync(hooksJsonPath)
-    ? fs.readFileSync(hooksJsonPath, 'utf-8')
-    : null;
   emptyDir(targetDir);
-  if (hooksJsonContent !== null) {
-    fs.writeFileSync(hooksJsonPath, hooksJsonContent);
-  }
+  writeTextFile(
+    path.join(targetDir, 'hooks.json'),
+    `${JSON.stringify(buildPluginHookConfig(), null, 2)}\n`
+  );
   [
     'caveman-activate.js',
     'inject-context.js',
@@ -339,7 +335,7 @@ function copyHooks() {
   const hookLibCount = copyHookLibs(targetDir);
   writeTextFile(path.join(targetDir, 'run-hook.js'), runHookJs);
   writeTextFile(path.join(targetDir, 'run-hook.cmd'), runHookCmd);
-  return 5 + hookLibCount + 2;
+  return 5 + hookLibCount + 3;
 }
 
 function copyHomunculusTemplate() {
