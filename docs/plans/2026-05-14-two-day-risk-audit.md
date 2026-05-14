@@ -215,6 +215,8 @@ aliases: ["两天审计", "5月12-14审计"]
 - 2026-05-14: **R2 已处置** — `install.sh` line 5-12 + `install.ps1` SYNOPSIS 段加 deprecation banner 警告 Claude Code 2.1+ 用户改用 `install-plugin.sh/.ps1`；明示双触发后果；保留旧 installer 作为 Claude Code 2.0 / Codex-only / legacy 场景 fallback。
 - 2026-05-14: **R3 已处置** — `docs/plans/2026-04-23-codex-plugin-support.md` 顶部加 errata 块，明示 line 470-474 是 .cmd 文件内部合法语法（cmd.exe 执行），**禁止**用于 hook command（Git Bash 执行），并指向 `debugging-gotchas.md` 详细规则。
 - 2026-05-14: **新发现 R9** — `install.ps1` line 3 含中文 "自进化工程系统" 但文件**无 UTF-8 BOM**（`head -c 3` 返回 `<#\r` 不是 BOM）。GBK locale 用户跑 install.ps1 可能乱码（已踩 2 次 [[ps1-needs-utf8-bom]] 第 3 次潜在回归）。R2 banner 故意用纯 ASCII 避免触发，但 BOM 缺失本身是定时炸弹。优先级 MEDIUM。
+- 2026-05-14: **R9 已处置** — `install.ps1` 添加 UTF-8 BOM（`efbbbf` 前缀），`file` 报告 "UTF-8 (with BOM)"，`pwsh [scriptblock]::Create()` parse 仍 OK；扫描全部 3 个 .ps1 文件确认 `install-codex.ps1` 无中文不触发（暂安全）、`install-plugin.ps1` 已有 BOM。
+- 2026-05-14: **R10 提议（不在本 sprint 范围）** — 建议下一个 sprint 上 `checkPS1Bom` pre-commit checker：扫描 `*.ps1` 含中文则要求 BOM；按 ADR-013 §B 需枚举边界产物（3 个现存 PS1 + 提交时遇到的所有 PS1 路径）+ 负样本验证（无 BOM + 中文 → 拒；加 BOM → 通过）。理由：已踩 2 次 + R9 是潜在第 3 次，符合 [[mechanism-over-discipline]] 升级条件。本 sprint 不实施以避免 scope creep。
 
 ---
 

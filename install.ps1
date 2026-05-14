@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Claude Code 自进化工程系统 — 完整安装脚本
 
