@@ -1,7 +1,7 @@
 ---
 title: "两天更新内容风险审计 (2026-05-12 → 2026-05-14)"
 type: sprint
-status: in-progress
+status: completed
 created: "2026-05-14"
 updated: "2026-05-14"
 checkpoints: 0
