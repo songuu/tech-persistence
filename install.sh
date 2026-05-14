@@ -4,8 +4,23 @@ set -euo pipefail
 # ============================================================
 # Claude Code 技术沉淀系统 v2 — 安装脚本（自学习增强版）
 #
+# ⚠️ DEPRECATED FOR CLAUDE CODE 2.1+ USERS ⚠️
+#
+# Claude Code 2.1+ 使用 plugin system，本 installer 写入的
+# ~/.claude/commands/ 路径已废弃，并且写入 ~/.claude/settings.json
+# 的 hooks 字段会与 plugin hooks 双触发（observations.jsonl 双写、
+# evaluate-session 10s timeout × 2、Memory v5 数据膨胀）。
+#
+# 新用户请改用：
+#   bash install-plugin.sh
+#
+# 本 installer 仅适用于：
+#   - Claude Code 2.0 及以下版本
+#   - 仅用 Codex 运行时（~/.codex/）的安装
+#   - 用户明确需要旧路径行为
+#
 # 用法:
-#   bash install.sh --user       安装用户级别配置
+#   bash install.sh --user       安装用户级别配置（⚠️ 见上方警告）
 #   bash install.sh --project    在当前项目安装项目级别配置
 #   bash install.sh --all        同时安装两者
 #   bash install.sh --hooks-only 只安装 Hook 脚本（已有 v1 升级用）

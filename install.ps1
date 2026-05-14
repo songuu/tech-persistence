@@ -1,6 +1,23 @@
 <#
 .SYNOPSIS
     Claude Code 自进化工程系统 — 完整安装脚本
+
+.DESCRIPTION
+    DEPRECATED FOR CLAUDE CODE 2.1+ USERS.
+
+    Claude Code 2.1+ uses plugin system. This installer writes to
+    ~/.claude/commands/ (deprecated path) and merges hooks into
+    ~/.claude/settings.json which causes double-fire with plugin hooks
+    (observations.jsonl double-write, Memory v5 inflation).
+
+    New users should run:
+      .\install-plugin.ps1
+
+    Use this script ONLY if:
+      - Running Claude Code 2.0 or older
+      - Codex runtime only (~/.codex/ paths)
+      - Explicitly need legacy path behavior
+
 .EXAMPLE
     .\install.ps1 -All
 #>

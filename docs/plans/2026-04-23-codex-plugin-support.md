@@ -1,5 +1,12 @@
 # Codex Plugin Support Implementation Plan
 
+> **⚠️ ERRATA (2026-05-14)**:
+> Line 470-474 在本文档展示了一段 Windows `.cmd` 包装脚本设计（`%SCRIPT_DIR%`, `shift /1`, `set "VAR=..."`, `exit /b 0`）。
+> 这是 **`.cmd` 文件内部合法语法**（cmd.exe 执行），用于早期 Codex 包装器设计。
+> **禁止**将该段语法用于 Claude Code / Codex 的 hook command —— hook command 在 Windows 上通过 Git Bash 执行（不是 cmd.exe），
+> `2>nul` 在 bash 中创建名为 `nul` 的真实文件（已踩 2 次回归，见 `.claude/rules/debugging-gotchas.md` "hooks, shell-mismatch, windows" 条目）。
+> Hook command 必须用 POSIX 语法：`2>/dev/null || true`。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add a Codex-native `tech-persistence` plugin that preserves the complete Claude Code feature set in Codex.
