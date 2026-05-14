@@ -57,6 +57,14 @@ safe_copy() {
   if [[ -f "$dst" ]]; then
     log_warn "$(basename "$dst") 已存在，创建备份"
     cp "$dst" "${dst}.bak.$(date +%Y%m%d%H%M)"
+    # 保留最近 N 个 .bak（默认 3），prune 旧的 — 防止 R4 类污染
+    # `|| true` 兜底：无 .bak 时 ls exit=2 与 set -e + pipefail 不兼容
+    local retention="${INSTALL_BAK_RETENTION:-3}"
+    local existing
+    existing=$(ls -1t "${dst}.bak."* 2>/dev/null | tail -n +$((retention + 1)) || true)
+    if [[ -n "$existing" ]]; then
+      echo "$existing" | xargs rm -f 2>/dev/null || true
+    fi
   fi
   cp "$src" "$dst"
 }

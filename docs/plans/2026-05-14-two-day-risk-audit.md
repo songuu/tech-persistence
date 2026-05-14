@@ -224,6 +224,7 @@ aliases: ["两天审计", "5月12-14审计"]
   - Phase C 修正：mv 全部 6 个目录到 `~/.claude-backups/2026-05-14-deprecated/`（含 `commands` + 5 个 `skills-*`）。验证：(1) `~/.claude/skills/` `grep -c deprecated` = 0，(2) `~/.claude/commands*` 不存在，(3) system-reminder skills 列表无 `*.deprecated*` 污染，(4) `tech-persistence:*` plugin skill 全可见可调，(5) `claude plugin validate` ✔，(6) pre-commit-check exit 0
   - 回滚：`mv ~/.claude-backups/2026-05-14-deprecated/commands ~/.claude/commands; for s in context-handoff continuous-learning memory prototype-workflow test-strategy; do mv ~/.claude-backups/2026-05-14-deprecated/skills-$s ~/.claude/skills/$s; done`
 - 2026-05-14: **新发现 R11** — Claude Code 2.x 的 skill scanner 把任意 `~/.claude/skills/<name>/` 当作 skill name（不区分 `.deprecated-*` / `.legacy-*` / `.old` 等后缀模式）。元本能候选：[[claude-skills-name-suffix-regex-permissive]] N=1 confidence 0.5。处置规则：必须**移出子树**而非改名，rename in-place 是反模式。
+- 2026-05-14: **R6 已处置** — `install.sh::safe_copy()` + `install.ps1::Safe-Copy` 加 retention（默认 N=3，可 `INSTALL_BAK_RETENTION` env 覆盖）；每次 `cp $dst $dst.bak.YYYYMMDDhhmm` 后立刻 prune 超出 retention 的最老 .bak。修复过程暴露 1 个 bug：`set -e + pipefail` 不兼容 `ls $glob 2>/dev/null` 无匹配的 exit=2（[[bash-pipefail-vs-ls-no-match]] 新候选 N=1）；解决方式 `existing=$(... || true)`。Smoke 4 场景全过（S1 prune 5→3 / S2 set -e 兼容空 .bak / S3 数量 < retention 不动 / S4 env override），两侧 syntax 通过。**注**：仅修了 `install.sh` / `install.ps1`，`install-codex.sh` (line 87/180/268) 和 `install-codex.ps1` (line 119/248/310) 的 .bak 创建仍无 retention，留作 follow-up（codex 路径 scope 独立）。
 
 ---
 

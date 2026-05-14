@@ -43,7 +43,15 @@ function Write-Warn($msg)  { Write-Host "  [!!] $msg" -ForegroundColor Yellow }
 function Write-Section($msg) { Write-Host "`n=== $msg ===`n" -ForegroundColor Cyan }
 function Ensure-Dir($p) { if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null } }
 function Safe-Copy($s,$d) {
-    if (Test-Path $d) { Copy-Item $d "$d.bak.$(Get-Date -Format 'yyyyMMddHHmm')" -Force }
+    if (Test-Path $d) {
+        Copy-Item $d "$d.bak.$(Get-Date -Format 'yyyyMMddHHmm')" -Force
+        # Keep latest N .bak (default 3), prune older — prevents R4-style accumulation
+        $retention = if ($env:INSTALL_BAK_RETENTION) { [int]$env:INSTALL_BAK_RETENTION } else { 3 }
+        $baks = Get-ChildItem "$d.bak.*" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+        if ($baks -and $baks.Count -gt $retention) {
+            $baks | Select-Object -Skip $retention | Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+    }
     Copy-Item $s $d -Force
 }
 function Safe-CopyNew($s,$d) { if (-not (Test-Path $d)) { Copy-Item $s $d -Force } else { Write-Warn "$(Split-Path -Leaf $d) exists, skip" } }
