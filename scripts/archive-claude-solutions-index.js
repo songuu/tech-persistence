@@ -139,27 +139,41 @@ function mergeArchiveContent(existing, oldEntries, today) {
   // 已有当日 archive：识别 "## 归档条目" 后所有 ENTRY_RE 行，合并去重
   const existingLines = existing.split('\n');
   const headerIdx = existingLines.findIndex((l) => l.trim() === '## 归档条目');
+
+  // 决定要新加的条目集合 + 追加位置
+  let newToAdd;
+  let appendStyle; // 'normal' | 'fallback'
   if (headerIdx < 0) {
-    // 文件结构异常，追加到末尾
-    return existing + '\n## 归档条目（追加）\n' + oldEntries.map((e) => e.line).join('\n') + '\n';
+    // 文件结构异常：不知道既有条目位置，无法去重，全部视为新增
+    newToAdd = oldEntries;
+    appendStyle = 'fallback';
+  } else {
+    const existingDateStrs = new Set();
+    for (let i = headerIdx + 1; i < existingLines.length; i++) {
+      const m = existingLines[i].match(ENTRY_RE);
+      if (m) existingDateStrs.add(existingLines[i]);  // 用全行作为唯一性 key
+    }
+    newToAdd = oldEntries.filter((e) => !existingDateStrs.has(e.line));
+    appendStyle = 'normal';
   }
-  const existingDateStrs = new Set();
-  for (let i = headerIdx + 1; i < existingLines.length; i++) {
-    const m = existingLines[i].match(ENTRY_RE);
-    if (m) existingDateStrs.add(existingLines[i]);  // 用全行作为唯一性 key
-  }
-  const newToAdd = oldEntries.filter((e) => !existingDateStrs.has(e.line));
+
   if (newToAdd.length === 0) return existing;
-  // 在文件末尾追加新条目，并更新 frontmatter count
+
   const newLines = [...existingLines];
-  // 更新 frontmatter archived_count
+  // 共享 — frontmatter archived_count 更新（正常 & fallback 都执行，修复 C2 bug）
   const cntIdx = newLines.findIndex((l) => /^archived_count:/.test(l));
   if (cntIdx >= 0) {
     const currentCount = parseInt(newLines[cntIdx].match(/(\d+)/)?.[1] || '0', 10);
     newLines[cntIdx] = `archived_count: ${currentCount + newToAdd.length}`;
   }
-  newLines.push(...newToAdd.map((e) => e.line));
-  if (newLines[newLines.length - 1] !== '') newLines.push('');
+
+  if (appendStyle === 'fallback') {
+    // 异常 fallback：追加一个新的"归档条目（追加）"段
+    newLines.push('', '## 归档条目（追加）', '', ...newToAdd.map((e) => e.line), '');
+  } else {
+    newLines.push(...newToAdd.map((e) => e.line));
+    if (newLines[newLines.length - 1] !== '') newLines.push('');
+  }
   return newLines.join('\n');
 }
 
