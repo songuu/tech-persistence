@@ -1,12 +1,12 @@
 ---
 title: "CLAUDE.md 解决方案索引膨胀治理 — 复用 prompt recall + 归档"
 type: sprint
-status: planning
+status: completed
 created: "2026-05-14"
 updated: "2026-05-14"
-checkpoints: 0
+checkpoints: 1
 tasks_total: 10
-tasks_completed: 0
+tasks_completed: 10
 tags: [sprint, memory, prompt-recall, claude-md, scope-trimming]
 aliases: ["claude-md-index-trim", "prompt-recall-solutions"]
 ---
@@ -327,16 +327,16 @@ echo '{"prompt":"auto-mode 双触发是 plugin migration 的什么风险"}' | \
 
 ## 8. 任务执行（Phase 3 待 'go'）
 
-- [ ] T1: 加 `collectSolutionFiles()` + `scoreSolution()`
-- [ ] T2: `searchMemory()` 接受 `cwd` + 调 `collectSolutionFiles`
-- [ ] T3: `formatRecallContext()` 加 solution 段输出
-- [ ] T4: `prompt-submit.js` 传 `cwd: process.cwd()`
-- [ ] T5: 跑 build 同步 plugin 副本 + 确认 mcp/lib
-- [ ] T6: 新增归档脚本 + dogfood
-- [ ] T7: 修订 /compound skill + command（含 propagate）
-- [ ] T8: 扩展 test-memory-search.js 加 5 self-test
-- [ ] T9: 端到端 smoke
-- [ ] T10: 最终 pre-commit + propagate 验证
+- [x] T1: 加 `collectSolutionFiles()` + `scoreSolution()`
+- [x] T2: `searchMemory()` 接受 `cwd` + 调 `collectSolutionFiles`
+- [x] T3: `formatRecallContext()` 加 solution 段输出
+- [x] T4: `prompt-submit.js` 传 `cwd: process.cwd()`
+- [x] T5: 跑 build 同步 plugin 副本 + 确认 mcp/lib
+- [x] T6: 新增归档脚本 + dogfood
+- [x] T7: 修订 /compound skill + command（含 propagate）
+- [x] T8: 扩展 test-memory-search.js 加 5 self-test
+- [x] T9: 端到端 smoke
+- [x] T10: 最终 pre-commit + propagate 验证
 
 ---
 
@@ -357,6 +357,10 @@ echo '{"prompt":"auto-mode 双触发是 plugin migration 的什么风险"}' | \
 
 - 2026-05-14: Phase 1 评估完成（"是否还有必要"判断 = 需要但 scope 修订）
 - 2026-05-14: Phase 2 plan 完成，10 任务拆解，关键假设 10 项验证（7 ✅ 3 ⚠️ Phase 3 复核）
+- 2026-05-14: Phase 3 完成，T1-T10 全跑，commit 08f6bd1 (T1-T5) + 698123e (T6-T10)。CLAUDE.md 11907→7005 chars (-41%)；26/26 self-test + 3/3 smoke pass
+- 2026-05-14: Phase 4 review 完成，6 findings 处理：C2 修 (commit 6d9c05a) + T1 加 self-test (15/15 含 U7 C2 负样本) + Sc1/Sc2/T2/C1 接受 known weakness
+- 2026-05-14: Phase 5 compound 完成，写 solution doc + 2 新本能 ([[linear-growing-always-on-must-be-bounded]] + [[reuse-existing-infra-before-building-new]])。**Reflexive validation 成功**：step 2.5 协议在我（LLM）身上自动触发，索引段 6→5 + archive 1 条
+- 2026-05-14: 3 项 Phase 3 待复核假设全 ✅ — mcp/lib build 自动同步 / docs/solutions/ 15+1 fallback / 3000 chars budget 充裕
 
 ---
 

@@ -3,7 +3,7 @@ type: archive
 archived_from: CLAUDE.md
 archived_section: "解决方案索引"
 archived_at: "2026-05-14"
-archived_count: 10
+archived_count: 11
 tags: [archive, solutions-index]
 ---
 
@@ -25,3 +25,5 @@ tags: [archive, solutions-index]
 - [2026-05-11] [claude/hooks/installer] 已有 Claude Code settings 缺 hooks 会让学习层静默失效；新增结构化 hook merger + Claude 安装态 validator，项目态和用户态均复验通过 → `docs/solutions/2026-05-11-claude-settings-hook-merge.md`
 - [2026-05-09] [audit/agent-loop/caveman/auto-mode] 修复 9 个 agent-loop / caveman 漏洞（CLI 分派缺、state 向后兼容、静默吞错、多副本漂移），新增全局 `--auto` 协议（单 rule + 三档决策矩阵 + orchestrator 双层 freeze），propagation 脚本机械同步 4 副本 × N 命令 → `docs/solutions/2026-05-09-agent-loop-caveman-audit.md`
 - [2026-04-27] [architecture/agent-loop/v6] 外部 orchestrator 统一调 `claude -p` 和 `codex exec`，用冻结 spec + handoff + review loop 取代命令内互相模拟 → `docs/solutions/2026-04-27-agent-orchestrator-v6.md`
+
+- [2026-05-12] [infrastructure/pre-commit/enforcement] propagate 纪律 + ADR-012 plan 勘察从文档协议下沉为 pre-commit hook 拒绝（mechanism over discipline）：`scripts/pre-commit-check.js` 复用 propagate / build transform 函数做 sha256 比对，plan lint 用 filename date 做 grandfather（独立于 frontmatter）；3 层 fail-open 防御 + MISSING_TRANSFORMERS 专用诊断；reviewer 抓出 7 P0 全修（含 6+ 无-FM 旧 plan dogfood blocker）；smoke 7 场景全过；新增 ADR-013 "dogfood 必须枚举边界产物" → `docs/solutions/2026-05-12-pre-commit-defense.md`
