@@ -52,11 +52,12 @@ description: "架构师视角生成结构化实现计划，含任务拆解、风
 [1-2 段描述整体方案]
 
 ### 任务拆解
-按实现顺序排列，每个任务应在 1 次 agent 执行中可完成：
+按实现顺序排列，每个任务应在 1 次 agent 执行中可完成。
+对每个 task 显式评估是否标 `[P]` 可并行（即使决定不标也是显式决策）。
 
-- [ ] **Task 1**: [描述] — 文件: `path/to/file`
-- [ ] **Task 2**: [描述] — 依赖 Task 1
-- [ ] **Task 3**: [描述]
+- [ ] **Task 1 [P]**: [描述] — 文件: `path/a.md` — 风险: L?
+- [ ] **Task 2 [P]**: [描述] — 文件: `path/b.md` — 风险: L?
+- [ ] **Task 3**: [描述] — 依赖 Task 1+2 — 风险: L?
 
 ### 测试策略
 - 单元测试: [覆盖什么]
@@ -70,6 +71,51 @@ description: "架构师视角生成结构化实现计划，含任务拆解、风
 ### 涉及文件
 [列出会新建/修改的文件清单]
 ```
+
+### 2.5 [P] 并行标记判定
+
+对每个 task 评估是否标 `[P]`：
+
+**满足全部 3 条 → 标 `[P]`**：
+1. **不同文件**：本 task 涉及文件集合与其他 `[P]` task 涉及文件集合的**交集 = ∅**（单 task 改多文件时按集合比对，不是按"似乎相关"判断）
+2. **无未完成依赖**：不依赖任何前置 task 的产物（如 T1 写 `lib/foo.js`，T2 写 `test/foo.test.js` 引用 T1 导出 → T2 不标 [P]）
+3. **风险 ≤ L2**：L3/L4 task 即使无冲突也强制串行，便于人工逐 task 把关
+
+**默认不标 `[P]`**：拿不准时不标，遵循"少标比误标好"。`[P]` 漏标只是损失连续处理优化机会；误标会让 work 阶段绕过质量门或产生文件冲突。
+
+**与 `agent-loop --pipeline` 的边界**：`[P]` 是 LLM 协议层标注 + 连续处理提示，**不是**真实多 worker 调度。真正需要跨 agent 异步并发（spec → implementation → review 流水线）请用 `agent-loop --pipeline`，不要把 sprint `[P]` 升级成轻量 orchestrator。
+
+**正反例参考**：
+
+| 场景 | 标记 | 理由 |
+|------|------|------|
+| 3 个独立文档修改（不同文件、无依赖、全 L1） | 全部 [P] | 无冲突、无依赖、低风险 |
+| T1 改 SoT command + T2 跑 propagate | T1 [P] / T2 串行 | T2 依赖 T1 产物 |
+| T1 改 package.json + T2 改 package.json | 全部串行 | 同文件并发会后写覆盖 |
+| T1 L4 (认证) + T2 L1 (文档) | 全部串行 | L4 强制串行 |
+
+### 2.6 契约边界标注（条件性，触发即必填）
+
+当 plan 涉及以下任一类型的变更时，技术方案段**必须**包含「契约接口」段（before/after 表）：
+
+1. **多运行时 projection 契约**：`scripts/lib/hook-registry.js` 等定义 Claude/Codex 双副本事件、matcher、路径占位的逻辑 registry（[[ADR-014]] 单一语义源头）
+2. **Spec-implementation-review 契约**：`scripts/agent-orchestrator/schemas/*.json` 等 orchestrator 状态机消费的 JSON Schema
+3. **SoT-projection transform**：`scripts/propagate-*.js`、`build-codex-plugin.js` 等把源 SoT 转换为派生副本的脚本
+4. **Git tracked 派生文件的 transform 规则**：任何被 `pre-commit-check.js` 强制 sha256 校验的派生关系
+
+**契约接口段格式**：
+
+```markdown
+### 契约接口
+
+| 契约名 | Before | After | 影响副本 / 消费者 |
+|--------|--------|-------|------------------|
+| <契约名> | <旧形态> | <新形态> | <受影响的副本/脚本/测试列表> |
+```
+
+**为什么必填**：本项目 4 不可妥协原则之一是"多运行时 parity"。变更上述契约 = 跨副本影响 = 必须前置显式列清楚 before/after + 受影响消费者，否则 work 阶段易漏改某副本（典型踩坑：[[plugin-migration-cascade-cleanup]]）。
+
+**未触发场景**：纯文档修改、单 SoT 命令调整（如本 sprint 的 `[P]` 协议加入）、独立 feature 实现等，无需填写此段。
 
 ### 3. 置信度检查
 

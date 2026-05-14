@@ -3,7 +3,7 @@ type: archive
 archived_from: CLAUDE.md
 archived_section: "解决方案索引"
 archived_at: "2026-05-14"
-archived_count: 11
+archived_count: 12
 tags: [archive, solutions-index]
 ---
 
@@ -27,3 +27,5 @@ tags: [archive, solutions-index]
 - [2026-04-27] [architecture/agent-loop/v6] 外部 orchestrator 统一调 `claude -p` 和 `codex exec`，用冻结 spec + handoff + review loop 取代命令内互相模拟 → `docs/solutions/2026-04-27-agent-orchestrator-v6.md`
 
 - [2026-05-12] [infrastructure/pre-commit/enforcement] propagate 纪律 + ADR-012 plan 勘察从文档协议下沉为 pre-commit hook 拒绝（mechanism over discipline）：`scripts/pre-commit-check.js` 复用 propagate / build transform 函数做 sha256 比对，plan lint 用 filename date 做 grandfather（独立于 frontmatter）；3 层 fail-open 防御 + MISSING_TRANSFORMERS 专用诊断；reviewer 抓出 7 P0 全修（含 6+ 无-FM 旧 plan dogfood blocker）；smoke 7 场景全过；新增 ADR-013 "dogfood 必须枚举边界产物" → `docs/solutions/2026-05-12-pre-commit-defense.md`
+
+- [2026-05-13] [enforcement/plan-completion-verify/c7] 吸收 gstack `/ship` 「extracts actionable items from any associated plan file and verifies each is addressed in the diff」内核：`scripts/pre-commit-check.js` 新增 `checkPlanCompletion()`，对 `type:sprint + status:completed` plan 验证勾选 task 行内 inline-code 路径在 `git log --since=<filename-date>` ∪ `git diff --cached` 中至少 1 个命中；扩展名白名单（.js/.ts/.md/.sh/.ps1/.json/.jsonl/.yml/.yaml/.toml/.py/.rb/.css/.html）+ regex 拒空格（避免命令形式 `\`node scripts/foo.js\`` 误匹配，本次实施暴露的 FP）+ 跳过 `~/` 与绝对路径（仓库外路径不参与）+ endsWith 双向 fuzzy match；smoke S13a-f 6 场景 + 全 12 个现有 `status:completed` sprint dogfood 0 误拒；2 次 false-positive 修复（fixture 关键假设验证段太薄导致跨 checker stderr 污染；命令形式 inline-code 误匹配）→ `docs/plans/2026-05-13-plan-completion-verify.md`

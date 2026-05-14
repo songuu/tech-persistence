@@ -82,7 +82,8 @@
       "Bash(node scripts/archive-claude-solutions-index.js --claude-md /tmp/fake.md)",
       "Bash(echo \"exit code: $?\")",
       "Read(//tmp/**)",
-      "Bash(rm -f /tmp/fake.md /tmp/out)"
+      "Bash(rm -f /tmp/fake.md /tmp/out)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }
