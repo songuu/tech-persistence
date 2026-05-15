@@ -45,6 +45,29 @@ function loadInstincts(dir, minConfidence) {
     .sort((a, b) => parseFloat(b.confidence) - parseFloat(a.confidence));
 }
 
+/**
+ * 加载 persona.md（用户统一画像）— first-hit 模式
+ *
+ * Persona 是项目级单文件，5 字段结构（role / preferences / non-negotiables /
+ * communication-style / known-context）。不合并多个 compat dir，避免同字段冲突。
+ *
+ * 跨项目复用：用户可在 OS 层 symlink `~/.claude/persona.md` 到任一项目的 persona.md，
+ * 或反向 symlink。代码不感知 symlink，按普通文件读取即可。
+ *
+ * @param {string[]} memoryDirs - 候选 memory 目录列表
+ * @returns {string} persona body（去除 frontmatter），无文件时返回 ''
+ */
+function loadPersonaBody(memoryDirs) {
+  for (const dir of memoryDirs) {
+    const personaPath = path.join(dir, 'persona.md');
+    if (!fs.existsSync(personaPath)) continue;
+    const content = fs.readFileSync(personaPath, 'utf-8');
+    const { body } = parseFrontmatter(content);
+    if (body) return body;
+  }
+  return '';
+}
+
 function loadRecentSessions(sessionsDir, limit = 5) {
   if (!fs.existsSync(sessionsDir)) return [];
   return fs.readdirSync(sessionsDir)
@@ -248,7 +271,16 @@ function main() {
     );
   }
 
-  // 0c. Memory v5: merge compatible runtime stores instead of shadowing by first hit
+  // 0c. Persona（用户统一画像）— 500 字节单独预算，先于 memory index 注入
+  // Why: persona 是跨会话稳定的低频信号，不应被 memory index 的 entry 排挤
+  const personaBody = loadPersonaBody(
+    compatReadDirs.map(baseDir => path.join(baseDir, 'projects', project.id, 'memory'))
+  );
+  if (personaBody) {
+    addSection(sections, 'Persona (用户画像)', personaBody, 900);
+  }
+
+  // 0d. Memory v5: merge compatible runtime stores instead of shadowing by first hit
   // 按当前活跃 sprint 的 tags 重排 entries — 命中条目排前，与 sprint 主题更相关的经验先进入上下文
   const sprintTags = detectActiveSprintTags();
   const memoryIndex = loadUnifiedMemoryIndex(

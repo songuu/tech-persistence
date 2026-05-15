@@ -59,33 +59,158 @@ When the command instructions below mention `/work`, interpret that as this `$wo
        (最多 3 轮，仍失败则暂停报告)
 ```
 
-## 消费 [P] 标记的协议
+## Worker spawn 协议（[P] 真并行）
 
-当 plan §4 任务清单中存在 `[P]` 标记时：
+**目的**：用 Codex Agent tool 真 spawn N 个独立 worker 子进程并行实施 `[P]` 同批 task，达成 3 个核心目标 —— 分工明确（每 worker 单一 task 单一文件清单）+ 减少总时间（N×T → 1×T）+ 提高效率（独立 worktree 隔离 + 模型分层）。
 
-**连续处理（推荐）**：可在同一轮回复中连续完成多个 `[P]` task 的代码修改（如多个 Edit / Write 工具调用），但每个 task 仍需：
-- 独立做风险等级评估
-- 按风险等级写测试 / 跑测试
-- 勾选 §4 task checkbox
-- 在变更日志记录
+> 以下"真并行 spawn"仅对 Codex runtime 生效。Codex CLI 见下方「Multi-runtime fallback」段。
 
-**冲突检测（必须，按算法执行）**：开始 `[P]` 批量处理前：
+### 触发条件
+
+当 plan §4 任务清单中存在 `[P]` 标记时，按以下规则决定 spawn 还是 batch：
+
+| 条件 | spawn 模式（Codex）| batch 模式（fallback）|
+|------|------------------------|---------------------|
+| `[P]` task 数 ≥ 2 | ✅ 真 spawn N worker 并行 | ❌（单 task 无并行收益）|
+| 所有 `[P]` task 风险 ≤ L2 | ✅ | ❌（L3+ 必须 batch，不 spawn）|
+| runtime 是 Codex | ✅ | ❌ |
+| 通过冲突检测算法 | ✅ | ❌ → 降级 batch + 记 "plan [P] 标错" |
+
+### 冲突检测算法（必须，spawn 前执行）
+
 1. 从 plan §4 抽取本批 `[P]` task 的 `文件:` 字段，构造路径集合
 2. 集合 size 必须等于 task 数 — 任何重叠路径都需降级为串行
 3. 单 task 改多文件时按文件集合的**交集**判断（∩ = ∅ 才算无冲突）
-4. 发现 plan 标 `[P]` 但实际冲突 → 立刻降级为串行 + 在变更日志记"plan [P] 标错"
+4. 发现 plan 标 `[P]` 但实际冲突 → 立刻降级为串行 batch + 在变更日志记 "plan [P] 标错"
 
-**失败传播（必须）**：任何 `[P]` task 测试失败 → **立刻停止本批剩余 `[P]` task**，转入 3 轮调试循环修复该 task；不得跳过失败 task 继续后续 `[P]`。失败 task 修复后可继续本批；3 轮仍失败按"偏差处理"协议暂停报告。
+### Spawn 调用语法
 
-**禁止行为**：
+通过冲突检测的 `[P]` 同批 task，**单条 message 内** spawn N 个 Agent：
+
+```
+Agent(
+  subagent_type: "general-purpose",
+  model: "<haiku | sonnet>",
+  isolation: "worktree",      // 必须！每 worker 独立 git worktree
+  prompt: "<下方 Worker prompt template>"
+)
+Agent(...) // N 个 worker 并发
+```
+
+**`isolation: "worktree"` 是强制要求**：Agent tool 自动创建临时 git worktree，每 worker 在独立 working tree 工作，避免共享文件 race condition。worker 无 changes 或失败时 worktree 自动清理。
+
+### 模型分层
+
+| 任务风险 | 模型层级 |
+|---------|---------|
+| L0 / L1（纯样式 / 低风险新增）| `haiku` |
+| L2（常规开发）| `sonnet` |
+| L3+ | 不 spawn（必须串行 batch）|
+
+### 4 status 返回契约（与 reviewer 共享）
+
+每个 worker 输出末尾必须含且仅含一行：
+
+```
+STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
+```
+
+状态定义：
+- `DONE`：task 实施完成，测试全过
+- `DONE_WITH_CONCERNS`：task 实施完成，但有偏离 plan 描述 / lint 警告 / 测试 flaky 等
+- `NEEDS_CONTEXT`：worker 无法完成 task，需主 LLM 补充上下文（必须说明缺什么）
+- `BLOCKED`：结构性阻塞（如 task 描述矛盾 / 依赖未完成 / 测试基线失败）
+
+**兜底**：worker 漏输出 STATUS 行 → 主 LLM 视为 `DONE_WITH_CONCERNS`。
+
+## Worker prompt template
+
+```
+你是 worker subagent，负责实施单一 task。
+
+Task: <task 描述>
+涉及文件: <file list（来自 plan §4 文件字段）>
+风险: <L?>
+测试要求（按风险等级）:
+  - L0: 跳过测试
+  - L1: 1-3 个冒烟测试
+  - L2: 5-10 个标准测试
+
+约束：
+- 仅修改 task 涉及的文件
+- 在本 worktree 内实施 + 跑测试 + 验证通过
+- **必须用相对路径写文件**（相对于本 worktree 根 = 当前 CWD），禁止用绝对路径（绝对路径会绕过 worktree 隔离，写到主 repo 污染父进程）
+- **实施完成后必须 `git add <files> && git commit -m "[worker] <task 摘要>"`**，否则 worktree branch 与 main 等价，主 LLM 无法 cherry-pick / merge
+- 不勾选 sprint.md checkbox（主 LLM 串行 apply 后才勾）
+
+输出格式：
+1. 实施摘要：哪些文件改了（必须列相对路径），关键变更（≤ 200 字），git commit hash
+2. 测试结果：跑的命令 + pass/fail + 用例数
+3. 末尾必须一行: STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
+
+约束（重申）：
+- 不写文件超出 task 涉及清单
+- 必须 commit 改动（否则 patch 收集失败）
+- 必须用相对路径（否则破坏 worktree 隔离）
+- NEEDS_CONTEXT 必须说明缺什么
+- BLOCKED 必须说明结构性阻塞原因
+```
+
+### Patch 收集与 apply（主 LLM 责任）
+
+worker 完成后，Agent tool 返回 worktree path + branch（有 changes 时）或自动清理（无 changes / 失败时）。
+
+主 LLM 按以下顺序处理：
+
+1. **收集**：N 个 worker 完成后，按返回顺序收集每 worker 的 worktree branch
+2. **审视**：每 worker 的实施摘要 + STATUS 一一审查
+3. **串行 apply**：
+   - 所有 STATUS=DONE/DONE_WITH_CONCERNS → 依次 cherry-pick 或 merge worktree branch 到主分支
+   - 任一 STATUS=NEEDS_CONTEXT → retry 流程（≤ 1 次硬限）
+   - 任一 STATUS=BLOCKED → escalation 流程（强制人工 gate）
+4. **回归测试**：apply 完所有 patch 后，跑一次整套测试验证组合效果
+5. **勾选 + 变更日志**：每 task 单独勾 sprint.md checkbox + 单独记变更日志
+
+### NEEDS_CONTEXT retry / BLOCKED escalation（与 reviewer 共享）
+
+- **NEEDS_CONTEXT retry**：主 LLM 补 context → 重 spawn 该 worker（≤ 1 次硬限）→ 第 2 次仍 NEEDS → 视为 DONE_WITH_CONCERNS 并报告
+- **BLOCKED escalation**：强制人工 gate，即使 `--auto` 也必须问
+
+### 失败传播（保留原 [P] 协议规则）
+
+任何 worker 测试失败 → **立刻停止本批剩余 worker 的 apply**，转入 3 轮调试循环修复该 task；不得跳过失败 worker 继续后续 apply。失败 task 修复后可继续本批 apply；3 轮仍失败按"偏差处理"协议暂停报告。
+
+### 禁止行为
+
+- ❌ spawn 没带 `isolation: "worktree"`（race condition 必现）
+- ❌ worker 用绝对路径写文件（如 `C:\project\...` / `/c/project/...`）— 会绕过 worktree 隔离写到主 repo（2026-05-15 dogfood 实证 worker B 失败 case）
+- ❌ worker 完成后未 `git commit`（branch 与 main 等价，cherry-pick 为空 — 2026-05-15 dogfood 实证 worker A 失败 case）
 - ❌ 把多个 `[P]` task 合并成一个 checkbox 勾选
 - ❌ 跳过单个 task 的测试因为"反正同批 [P]"
 - ❌ 把 `[P]` 当作"批量略过 review"的借口
-- ❌ 跳过失败 task 继续后续 `[P]`（违反"失败传播"）
+- ❌ 跳过失败 worker 的 patch 继续后续 apply（违反"失败传播"）
+- ❌ worker 在自己 worktree 外写文件（违反 task 涉及文件约束）
 
-**checkpoint 处理**：如果 `[P]` 批中途需要 checkpoint，handoff 文件必须列出"本批 [P] 已完成 X 个，剩余 Y 个"，恢复时按剩余继续。
+### Checkpoint 处理
 
-**与 `agent-loop --pipeline` 的区别**：`[P]` 是单 LLM 连续处理提示，**不是**多进程调度。真正需要跨 agent 并发请用 `agent-loop --pipeline`。
+如果 `[P]` 批中途需要 checkpoint，handoff 文件必须列出：
+- 本批 `[P]` 已 apply 几个 worker patch
+- 还有几个 worker 在跑 / 已完成待 apply
+- 失败 worker 列表
+- 恢复时按剩余 patch 继续 apply
+
+## Multi-runtime fallback
+
+| runtime | spawn 机制 | 行为 |
+|---------|----------|------|
+| **Codex** | Agent tool + `isolation: "worktree"` | 上述真 worker spawn 协议生效 |
+| **Codex CLI** | 不可用（无 Agent tool 等价物）| 主 LLM 在单 context 内连续处理 `[P]` 同批 task（保留旧 batch 行为，但仍遵守冲突检测 + 失败传播 + 禁止行为）|
+
+**Codex 端 batch 模式**：主 LLM 在同一轮回复中连续完成多个 `[P]` task 的代码修改（如多个 Edit/Write 工具调用），每个 task 仍需独立做风险评估 / 写测试 / 跑测试 / 勾 checkbox / 记变更日志。本批所有 task 完成后再进入下一批 / 下一 Phase。
+
+### 与 `agent-loop --pipeline` 的区别
+
+`[P]` 是 sprint 内多 task 的并行实施模式（Codex 端用 Agent tool 在主 sprint 同一对话内 spawn worker 并行；Codex 端 batch fallback）。`agent-loop --pipeline` 是跨 sprint 跨 agent 的流水线（spec → impl → review），是不同抽象层级，**不要混用**。
 
 ## 质量门（每个 Task 完成时检查）
 - [ ] 代码能编译/运行

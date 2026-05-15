@@ -28,6 +28,104 @@ When the command instructions below mention `/review`, interpret that as this `$
 
 - `--auto`：自动审查模式。obvious P0（typo / 缺 import / null check / 类型不匹配 / 简单重命名）直接修复并继续；语义级 P0、destructive 改动相关 P0、auth/数据迁移相关 P0 仍保留人工 gate；P1 默认跳过确认。详见 `~/.codex/rules/auto-mode.md`。
 
+## Spawn 协议（Codex 真并行）
+
+**目的**：用 Codex Agent tool 真 spawn N 个独立 reviewer 子进程并行审查，达成 3 个核心目标 —— 分工明确（每 reviewer 单一视角）+ 减少总时间（5×T → 1×T）+ 提高效率（独立 context + 模型分层）。
+
+> 以下仅对 Codex runtime 生效。Codex CLI 见下方「Multi-runtime fallback」段。
+
+### 调用语法
+
+按 Dispatch Matrix 选定的 reviewer 子集，**单条 message 内**发起多个 Agent tool 调用（重要：多调用必须在同一条 message 内才并发；分散到多条 message 会被串行化）：
+
+```
+Agent(subagent_type: "general-purpose", model: "<层级>", prompt: "<下方 Reviewer prompt template>")
+Agent(subagent_type: "general-purpose", model: "<层级>", prompt: "...")
+...（N 个 reviewer 并发）
+```
+
+### 4 status 返回契约
+
+每个 reviewer 输出末尾必须含且仅含一行：
+
+```
+STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
+```
+
+状态定义：
+- `DONE`：审查完成，无 P0/P1/P2 findings
+- `DONE_WITH_CONCERNS`：审查完成，有至少 1 个 P1+ finding（含 P0）
+- `NEEDS_CONTEXT`：reviewer 无法在当前 context 内完成审查，需主 LLM 补充上下文（必须说明缺什么）
+- `BLOCKED`：结构性阻塞（如审查目标矛盾 / spec 不明确 / 测试基线失败），主 LLM 必须人工 escalation
+
+**兜底规则**：reviewer 漏输出 STATUS 行 → 主 LLM 视为 `DONE_WITH_CONCERNS`（不报错，派遣记录的 status 分布字段会暴露漏判）。
+
+### 模型分层（Agent tool `model` 参数可指定）
+
+| 视角 | 模型层级 |
+|------|---------|
+| security 🔒 | `sonnet`（**永远不用 haiku**，安全锁死） |
+| perf ⚡ | `sonnet` |
+| arch 🏗️ | `sonnet` |
+| quality 📝 | `haiku` |
+| test 🧪 | `haiku` |
+
+**为什么这么分**：security/perf/arch 需要深度推理（潜在漏洞 / 性能瓶颈 / 架构耦合），用 sonnet；quality/test 是模式化检查（命名 / 测试覆盖），haiku 足够且成本低。
+
+## Reviewer prompt template
+
+每个 reviewer Agent 调用的 prompt 都遵循以下结构：
+
+```
+你是 <视角名> reviewer，本次审查仅聚焦 <视角> 维度。
+
+变更范围：
+<git diff 摘要 + 改动文件列表>
+
+项目上下文：
+<必要的 ADR / 本能 / 规则引用，最多 3 条>
+
+审查任务：
+按本视角检查上述变更，给出 P0/P1/P2 findings。
+
+输出格式：
+1. 派遣记录复述（视角名 + 评估 risk + 模型层级）
+2. Findings table:
+   | # | 文件:行 | severity | 问题 | 修复建议 |
+   |---|---------|---------|------|---------|
+3. 末尾必须一行: STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
+
+约束：
+- 仅关注 <视角> 维度；其他视角的问题不报
+- NEEDS_CONTEXT 必须说明缺什么（"缺 X 文件" / "缺 Y 测试基线" 等）
+- BLOCKED 必须说明结构性阻塞原因
+```
+
+视角维度（对照下方「5 个审查视角」段填空）。
+
+### NEEDS_CONTEXT retry 流程（≤ 1 次硬限）
+
+1. 主 LLM 收到某 reviewer `STATUS: NEEDS_CONTEXT` + 缺失项描述
+2. 主 LLM 补充上下文（Read 缺失文件 / 跑 grep 等）
+3. 重新 spawn 该 reviewer（同视角同模型 + augmented prompt）
+4. **第 2 次仍 NEEDS_CONTEXT** → 视为 `DONE_WITH_CONCERNS` + 标 P1（避免死循环）
+
+### BLOCKED escalation 流程
+
+1. 主 LLM 收到某 reviewer `STATUS: BLOCKED` + 阻塞原因
+2. 立刻打印 BLOCKED 报告（reviewer 视角 + 阻塞原因）
+3. **强制人工 gate**：即使 `--auto` 模式也必须问用户（与 `~/.codex/rules/auto-mode.md` 强制人工边界一致：destructive / L4 / scope creep / **BLOCKED**）
+4. 用户选择继续 / 修复阻塞 / 跳过该视角
+
+## Multi-runtime fallback
+
+| runtime | spawn 机制 | 行为 |
+|---------|----------|------|
+| **Codex** | Agent tool + subagent_type + model + prompt | 上述真并行 spawn 协议生效 |
+| **Codex CLI** | 不可用（无 Agent tool 等价物）| 主 LLM 在单 context 内 inline 扮演 N 视角（保留旧行为）|
+
+**Codex 端 advisory**：上述 STATUS 契约对 Codex 端是建议而非强制。Codex 端主 LLM 仍可在 5 段审查文本末尾各加 STATUS 行以保持文档一致性，但缺失不视为协议违反。
+
 ## 风险驱动派遣（risk-aware dispatch）
 
 **审查不是"5 视角全跑"，而是按 risk 选 reviewer 子集**，避免低风险变更被高成本审查拖慢。
@@ -40,42 +138,66 @@ When the command instructions below mention `/review`, interpret that as this `$
 
 ### Dispatch Matrix
 
-| Risk | 跑的视角 | 跳过 |
-|------|---------|------|
-| L0 / L1 | 4 (quality) | 1 / 2 / 3 / 5 |
-| L2 | 4 + 5 (quality + test) | 1 / 2 / 3 |
-| L3 | 1 + 3 + 4 + 5 (security + arch + quality + test) | 2 (perf) |
-| L4 | 全套 5 个视角 | — |
+| Risk | 跑的视角 | Spawn 数 | 模型层级 | 跳过 |
+|------|---------|---------|---------|------|
+| L0 / L1 | 4 (quality) | 1 | haiku | 1 / 2 / 3 / 5 |
+| L2 | 4 + 5 (quality + test) | 2 | haiku × 2 | 1 / 2 / 3 |
+| L3 | 1 + 3 + 4 + 5 (security + arch + quality + test) | 4 | sonnet × 2 + haiku × 2 | 2 (perf) |
+| L4 | 全套 5 个视角 | 5 | sonnet × 3 + haiku × 2 | — |
 
 **不确定 risk 时**：**保守按 L3 处理**，不要默认 L1/L2。可疑信号包括但不限于：触及 auth / 鉴权 / 数据迁移 / 跨服务调用 / 公共 API / 用户输入边界 / 持久化层。
 
-### Reviewer 模型分层
+**Spawn 数与成本权衡**：L4 dispatch ≈ 5× Agent 调用（约 3 Sonnet + 2 Haiku）；如 token budget 紧张，可手动按 L3 跑（牺牲 perf 视角）。Codex 端无 spawn 成本概念（单 LLM context 内连续扮演 N 视角，总成本约等于 1× 主 LLM 调用 + 上下文膨胀）。
+
+### Reviewer 模型分层（与 Spawn 协议「模型分层」段一致，此处为视角中心视图）
 
 | 视角 | 默认模型 | 强制最低 |
 |------|---------|---------|
-| 1. security 🔒 | Sonnet 4.6 | **永远不用 Haiku** |
-| 2. perf ⚡ | Sonnet 4.6 | Sonnet 4.6 |
-| 3. arch 🏗️ | Sonnet 4.6 | Sonnet 4.6 |
-| 4. quality 📝 | Haiku 4.5 | Haiku 4.5 |
-| 5. test 🧪 | Haiku 4.5 | Haiku 4.5 |
+| 1. security 🔒 | sonnet | **永远不用 haiku** |
+| 2. perf ⚡ | sonnet | sonnet |
+| 3. arch 🏗️ | sonnet | sonnet |
+| 4. quality 📝 | haiku | haiku |
+| 5. test 🧪 | haiku | haiku |
 
-**security 锁死规则**：无论 risk 等级或速度需求，security 视角永远使用 Sonnet 或更强模型。这是不可妥协的安全底线。
+**security 锁死规则**：无论 risk 等级或速度需求，security 视角永远使用 sonnet 或更强模型。这是不可妥协的安全底线（即使主 LLM 跑 haiku 也不能让 security reviewer 跑 haiku）。
 
 ### 派遣记录（必须输出，放审查报告开头）
+
+**Codex spawn 模式**（含 spawn 数 / status 分布 / retry / blocked 字段）：
+
+```markdown
+## 派遣记录
+- 评估 risk: L3
+- Spawn 数量: 4 reviewer (security/sonnet, arch/sonnet, quality/haiku, test/haiku)
+- 跳过的视角: 2 perf
+- 跳过原因: 本次变更不涉及性能关键路径
+- Status 分布: 2 DONE_WITH_CONCERNS, 1 DONE, 1 NEEDS_CONTEXT (已 retry)
+- Retry 计数: 1 (test reviewer NEEDS_CONTEXT → 补 test/ 目录 → retry → DONE)
+- Blocked 计数: 0
+```
+
+**Codex inline fallback 模式**（不含 spawn 字段，保留旧格式）：
 
 ```markdown
 ## 派遣记录
 - 评估 risk: L2
-- 跑的视角: 4 quality (Haiku), 5 test (Haiku)
+- 跑的视角: 4 quality, 5 test
 - 跳过的视角: 1 security / 2 perf / 3 arch
 - 跳过原因: 本次变更不涉及 auth / 跨服务调用 / 性能关键路径
 ```
 
-若 risk 评估存疑而升级到 L3，必须额外打印：
+若 risk 评估存疑而升级到 L3，必须额外打印（两种模式都适用）：
 
 ```markdown
 - 升级路径: 不确定 → 保守按 L3
 - 可疑信号: [具体描述，如"修改了 db 迁移脚本"]
+```
+
+若任何 reviewer 报 `STATUS: BLOCKED`，必须额外打印：
+
+```markdown
+- ⚠ BLOCKED 升级人工 gate: <视角名> 报告"<阻塞原因>"
+- 等待用户决策（即使 --auto 模式也不跳过此 gate）
 ```
 
 ## 5 个审查视角（视角定义，按 dispatch 选用）

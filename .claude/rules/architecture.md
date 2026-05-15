@@ -17,6 +17,15 @@
 
 ## 决策列表
 
+### ADR-015: Memory v5 引入 Persona 顶层独立维度（5 字段固定结构）+ 显式区分双 memory 系统 (2026-05-15)
+- **状态**：已采纳
+- **上下文**：TDAI sibling eval（[[2026-05-15-tencentdb-agent-memory-analysis]]）§4 借鉴点 1 提议 TP Memory v5 缺少"用户长期画像"维度——`feedback_*` / `user_*` 散落多个文件，SessionStart 每次靠模型从散链聚合，跨会话稳定性差；同时实施中发现 TP **同时有两套 memory 系统**（Claude Code auto memory at `~/.claude/projects/C--<cwdpath>/memory/` vs Tech-persistence v5 at `~/.claude/homunculus/projects/<gitHash>/memory/`），写入侧 vs 读取侧默认分离——所有现有 `feedback_*`/`user_*` 在 Codex 端**完全不可见**（违反 [[ADR-011]] multi-runtime parity 但此前未发现）。
+- **决策**：(1) Memory v5 引入 `persona.md` 单文件，5 固定字段（Role / Preferences / Non-negotiables / Communication style / Known context），位于 v5 memory dir 顶层；(2) `inject-context.js` 加 `loadPersonaBody()` first-hit 函数 + section 0c（位于 Memory v5 index 之前，900 chars 预算），让 persona 不被 index entry 排挤；(3) **persona.md 只写 v5 dir，不写 auto-memory dir**——双运行时 parity（Codex 通过 `~/.codex/homunculus/` compat dir 读到）+ 避免 Claude Code core 与 tech-persistence hook 双重注入；(4) **未来涉及"memory/" 的设计文档必须明示是 `auto-memory` 还是 `v5`**，否则歧义会再次导致写错路径。
+- **原因**：(1) Persona 是跨会话稳定的低频信号，不应与变频的 instinct/topic entry 共享预算；(2) 5 字段固定结构使新 user-type 观察沉淀有明确归属（不再每次问"这条应该建新文件还是塞 user_workflow_preferences"）；(3) v5 dir 是双运行时唯一可达路径（[[ADR-008]] compatReadDirs 涵盖 `~/.claude/homunculus/` + `~/.codex/homunculus/`），auto-memory dir 是 Claude Code 私有；(4) 双 memory 系统并存是历史事实（不会短期合并），文档明示比"代码 grep 才知道"友好。
+- **备选**：(a) 自动从 `feedback_*`/`user_*` 聚合 persona——脆弱且时序耦合；(b) 把 persona 放 auto-memory dir——破坏 Codex parity；(c) symlink `~/.claude/persona.md` 到项目 persona.md——跨项目场景未出现，YAGNI；(d) 重构两套 memory 为单一系统——超出本 sprint 范围，且 Claude Code core auto-memory 不受 tech-persistence 控制。
+- **影响**：(1) 新增 `memory/persona.md` 文件约定，其他消费方（`/sprint` / `/compound` / `/work`）可读但本次不强制改动；(2) `inject-context.js` section 编号 0c→Persona、0d→Memory v5（原 0c），所有未来 section 注入需注意编号；(3) Codex 端通过 plugin 副本 hook 同步获得 persona 可见性；(4) `feedback_*`/`user_*` 在 auto-memory dir 仍可继续写（不强制迁移），但**新的高频通用 user-type 观察应优先沉到 persona.md 5 字段**或在 v5 dir 新建对应文件；(5) Codex 端"找不到用户偏好"如成为具体痛点，再考虑让 `inject-context.js` 也读 auto-memory dir（P1 backlog，本次未实施）。
+- **来源**：`docs/solutions/2026-05-15-persona-top-level-dimension.md`，`docs/plans/2026-05-15-tencentdb-agent-memory-analysis.md` §9 P2 提前执行。
+
 ### ADR-014: Hook 架构统一语义源头，按运行时生成配置 (2026-05-14)
 - **状态**：已采纳
 - **上下文**：Tech Persistence 同时支持 Claude Code classic、Claude Code plugin 与 Codex plugin。直接共享同一份 hook 配置会把事件名、matcher、路径占位符、async/timeout 语义混在一起，容易造成某一运行时看似通过、另一运行时实际未注册或双触发。
