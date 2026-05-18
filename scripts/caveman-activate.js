@@ -60,16 +60,28 @@ Manual off: user says "stop caveman" or "normal mode".
 
   console.log(JSON.stringify({
     hookSpecificOutput: {
+      hookEventName: 'SessionStart',
       additionalContext: context,
     },
   }));
 }
 
-try {
-  main();
-} catch (error) {
+if (require.main === module) {
   try {
-    process.stderr.write(`[caveman-activate] hook failed: ${error && error.message ? error.message : error}\n`);
-  } catch {}
-  process.exit(0);
+    main();
+  } catch (error) {
+    try {
+      process.stderr.write(`[caveman-activate] hook failed: ${error && error.message ? error.message : error}\n`);
+    } catch {}
+    process.exit(0);
+  }
 }
+
+module.exports = {
+  DEFAULT_MODE,
+  VALID_MODES,
+  readConfigMode,
+  resolveMode,
+  modeRules,
+  main,
+};

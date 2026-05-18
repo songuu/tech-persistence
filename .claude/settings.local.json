@@ -83,7 +83,9 @@
       "Bash(echo \"exit code: $?\")",
       "Read(//tmp/**)",
       "Bash(rm -f /tmp/fake.md /tmp/out)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(cp /tmp/th.bak.js scripts/test-hook-entries.js)",
+      "Bash(rm /tmp/th.bak.js)"
     ]
   }
 }

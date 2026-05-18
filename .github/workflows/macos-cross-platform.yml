@@ -1,4 +1,4 @@
-name: macOS cross-platform smoke
+name: cross-platform CI
 
 on:
   pull_request:
@@ -8,14 +8,22 @@ on:
   workflow_dispatch:
 
 jobs:
-  macos-smoke:
-    runs-on: macos-latest
+  ci:
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
         node-version:
           - '18'
           - '24'
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout
@@ -31,8 +39,10 @@ jobs:
           node --version
           bash --version
           git --version
+          echo "OS: ${{ matrix.os }}"
 
       - name: Check POSIX installer syntax
+        if: matrix.os != 'windows-latest'
         run: |
           bash -n install.sh
           bash -n install-codex.sh
@@ -48,27 +58,33 @@ jobs:
           node scripts/smoke-pre-commit.js
           node scripts/smoke-cross-platform.js
 
+      - name: Run unit tests
+        run: |
+          node scripts/run-tests.js
+
       - name: Probe Claude project install
+        if: matrix.os != 'windows-latest'
         run: |
           probe_dir="$(mktemp -d)"
           home_dir="$(mktemp -d)"
           git init -q "$probe_dir"
           cd "$probe_dir"
-          git config user.email "macos-smoke@example.invalid"
-          git config user.name "macOS Smoke"
+          git config user.email "ci-smoke@example.invalid"
+          git config user.name "CI Smoke"
           HOME="$home_dir" bash "$GITHUB_WORKSPACE/install.sh" --project
           test -f ".claude/settings.json"
           test -d ".claude/plans"
           test -f "CLAUDE.md"
 
       - name: Probe Codex project install
+        if: matrix.os != 'windows-latest'
         run: |
           probe_dir="$(mktemp -d)"
           home_dir="$(mktemp -d)"
           git init -q "$probe_dir"
           cd "$probe_dir"
-          git config user.email "macos-smoke@example.invalid"
-          git config user.name "macOS Smoke"
+          git config user.email "ci-smoke@example.invalid"
+          git config user.name "CI Smoke"
           HOME="$home_dir" bash "$GITHUB_WORKSPACE/install-codex.sh" --project
           test -f ".codex/commands/agent-loop.md"
           test -f ".codex/skills/agent-loop/SKILL.md"

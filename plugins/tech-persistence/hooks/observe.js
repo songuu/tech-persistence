@@ -92,4 +92,15 @@ function main() {
   } catch {}
 }
 
-try { main(); } catch { process.exit(0); }
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    try {
+      process.stderr.write(`[observe] hook failed: ${error && error.message ? error.message : error}\n`);
+    } catch {}
+    process.exit(0);
+  }
+}
+
+module.exports = { main, getObservationPath };

@@ -75,14 +75,18 @@ function testCodexInstallStillHasNodePreflight() {
   assertIncludes(script, 'install_user() {', 'install-codex.sh');
 }
 
-function testMacosWorkflowExists() {
+function testCiWorkflowExists() {
   const workflowPath = '.github/workflows/macos-cross-platform.yml';
   const workflowAbs = path.join(repoRoot, workflowPath);
   assert(fs.existsSync(workflowAbs), `${workflowPath} does not exist`);
 
   const workflow = read(workflowPath);
   for (const needle of [
-    'runs-on: macos-latest',
+    'runs-on: ${{ matrix.os }}',
+    'ubuntu-latest',
+    'macos-latest',
+    'windows-latest',
+    'shell: bash',
     'bash -n install.sh',
     'bash -n install-codex.sh',
     'node scripts/agent-orchestrator.js self-test',
@@ -93,6 +97,8 @@ function testMacosWorkflowExists() {
     'node scripts/smoke-memory-parity.js',
     'node scripts/smoke-relevance.js',
     'node scripts/smoke-cross-platform.js',
+    'node scripts/run-tests.js',
+    "if: matrix.os != 'windows-latest'",
     'bash "$GITHUB_WORKSPACE/install.sh" --project',
     'bash "$GITHUB_WORKSPACE/install-codex.sh" --project',
   ]) {
@@ -140,7 +146,7 @@ function testClaudeProjectInstallCreatesPlansDirectory() {
 process.stdout.write('\nsmoke: cross-platform install and macOS CI\n');
 run('install.sh fails fast when Node.js is missing or too old', testInstallShNodePreflight);
 run('install-codex.sh keeps Node.js preflight', testCodexInstallStillHasNodePreflight);
-run('macOS workflow covers POSIX install and core smoke checks', testMacosWorkflowExists);
+run('cross-platform CI workflow covers matrix os, smoke checks, and unit tests', testCiWorkflowExists);
 run('project plans directories survive clean checkouts', testProjectPlanDirectoriesAreTracked);
 run('unset shared homunculus is a successful no-op', testSharedHomunculusNoopDoesNotAbortInstall);
 run('Claude project install creates plans directory', testClaudeProjectInstallCreatesPlansDirectory);

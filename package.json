@@ -1,0 +1,12 @@
+{
+  "name": "tech-persistence",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Self-evolving engineering toolchain (Claude Code + Codex multi-runtime parity). Zero npm dependencies by design (see ADR-011 lightweight principle).",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.js"
+  }
+}
