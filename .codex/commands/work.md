@@ -212,6 +212,33 @@ worker 完成后，Agent tool 返回 worktree path + branch（有 changes 时）
 - 发现更好的实现方式 → 记录为备注，按原计划实现，/review 时讨论
 - 遇到计划外的 blocker → 立即暂停并报告
 
+## 非平凡 bug 调试入口规则（反馈环优先）
+
+**触发条件**（满足任一即适用）：
+- Task 测试连续失败 ≥ 2 轮且根因不明
+- 用户报告 bug 但行为偏差与 root cause 不直接对应
+- `/sprint` 外的临时调试场景（同样适用，本规则不限于 `/work` 内）
+
+**核心规则**：进入单假设修复前，必须先建立**最小反馈环**——一个快速、确定、agent 可运行的 pass/fail signal。可选形式（按优先级）：
+
+1. 失败测试（最常用，最确定）
+2. curl / CLI fixture
+3. 浏览器脚本 / DevTools snippet / trace replay
+4. throwaway harness（一次性可执行复现器）
+5. git bisect / differential loop（已知好版本 vs 坏版本）
+
+**没有反馈环时禁止进入单假设修复**。必须显式报告：
+- 已尝试构建反馈环的手段
+- 为什么当前手段不构成确定的 pass/fail signal
+- 需要主 LLM / 用户补充什么才能建立反馈环
+
+**不适用**：
+- 已知根因的简单 fix（typo / 缺 import / 语义清楚的 null check / 类型不匹配）
+- L0 样式 / 文案修改
+- 反馈环已存在（如 task 测试已写好且能稳定复现失败）
+
+**为什么这条是 entry rule 而非 tactical lesson**：`debugging-gotchas.md` 是 lessons archive（注入时被读），但反馈环优先是 *修 bug 入口时* 才需要触发的判断。落在 `/work` 这里保证在 bug 修复开始那一刻生效，而不是事后才被记起。
+
 ## 进度报告
 每完成 1 个 Task：
 ```
