@@ -319,27 +319,39 @@ function validateAgentLoopAssets() {
   });
 }
 
-const allowedArgs = new Set(['--help', '--user', '--project']);
-const unknownArgs = [...args].filter((arg) => !allowedArgs.has(arg));
-if (unknownArgs.length > 0) {
-  fail(`unknown arguments: ${unknownArgs.join(', ')}`);
+function main() {
+  const allowedArgs = new Set(['--help', '--user', '--project']);
+  const unknownArgs = [...args].filter((arg) => !allowedArgs.has(arg));
+  if (unknownArgs.length > 0) {
+    fail(`unknown arguments: ${unknownArgs.join(', ')}`);
+  }
+
+  if (args.has('--help')) {
+    console.log('Usage: node scripts/validate-codex-install.js [--user] [--project]');
+    return 0;
+  }
+
+  const validateUser = args.size === 0 || args.has('--user');
+  const validateProject = args.size === 0 || args.has('--project');
+
+  if (validateUser) validateUserInstall();
+  if (validateProject) {
+    validateProjectInstall();
+    validateRepoMarketplace();
+    validateAgentLoopAssets();
+  }
+  validateSharedHomunculusConfig();
+
+  if (hasFailure) return 1;
+  console.log('\n[OK] Codex install validation passed');
+  return 0;
 }
 
-if (args.has('--help')) {
-  console.log('Usage: node scripts/validate-codex-install.js [--user] [--project]');
-  process.exit(0);
+if (require.main === module) {
+  process.exit(main());
 }
 
-const validateUser = args.size === 0 || args.has('--user');
-const validateProject = args.size === 0 || args.has('--project');
-
-if (validateUser) validateUserInstall();
-if (validateProject) {
-  validateProjectInstall();
-  validateRepoMarketplace();
-  validateAgentLoopAssets();
-}
-validateSharedHomunculusConfig();
-
-if (hasFailure) process.exit(1);
-console.log('\n[OK] Codex install validation passed');
+module.exports = {
+  stripManagedSolutionIndex,
+  main,
+};

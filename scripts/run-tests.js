@@ -43,6 +43,8 @@ function runOne(file) {
     file: rel,
     ok,
     code: result.status ?? -1,
+    signal: result.signal || null,
+    error: result.error ? result.error.message : '',
     ms,
     stdout: result.stdout || '',
     stderr: result.stderr || '',
@@ -90,6 +92,7 @@ function main() {
     const r = runOne(file);
     if (r.stdout) process.stdout.write(r.stdout);
     if (r.stderr) process.stderr.write(r.stderr);
+    if (!r.ok && r.error) process.stderr.write(`[run-tests] ${rel} spawn error: ${r.error}\n`);
     console.log(`${r.ok ? '[PASS]' : '[FAIL]'} ${rel} (${r.ms}ms, code=${r.code})\n`);
     results.push(r);
   }
@@ -102,8 +105,9 @@ function main() {
   if (failed > 0) {
     console.log('failed files:');
     results.filter((r) => !r.ok).forEach((r) => {
-      const signal = r.code === null ? ' (signal=' + (r.signal || 'unknown') + ')' : '';
-      console.log(`  - ${r.file} (code=${r.code}${signal})`);
+      const signal = r.signal ? `, signal=${r.signal}` : '';
+      const error = r.error ? `, error=${r.error}` : '';
+      console.log(`  - ${r.file} (code=${r.code}${signal}${error})`);
     });
   }
 
