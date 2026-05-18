@@ -346,6 +346,7 @@ ${renderSections(sections)}
 
   const output = JSON.stringify({
     hookSpecificOutput: {
+      hookEventName: 'SessionStart',
       additionalContext: context
     }
   });

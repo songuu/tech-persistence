@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * archive-claude-solutions-index.js — CLAUDE.md 解决方案索引段归档
+ * archive-claude-solutions-index.js — runtime doc 解决方案索引段归档
  *
- * 把 CLAUDE.md 的「### 解决方案索引」段截断为最近 N 条（默认 5），
- * 老条目移到 docs/archives/CLAUDE-solutions-index-<YYYY-MM-DD>.md。
+ * 把 runtime doc（默认 CLAUDE.md）的「### 解决方案索引」段截断为最近 N 条，
+ * 老条目移到 docs/archives/<DOC>-solutions-index-<YYYY-MM-DD>.md。
  *
  * 用法：
  *   node scripts/archive-claude-solutions-index.js
@@ -17,7 +17,7 @@
  *   - 同日重跑：合并到当日 archive（按 archived_at 判重），不创建多份
  *
  * 设计原则：
- *   - destructive on CLAUDE.md → 先 backup 到 CLAUDE.md.bak.<ts>
+ *   - destructive on runtime doc → 先 backup 到 <DOC>.bak.<ts>
  *   - sentinel 严格 match `### 解决方案索引` + 下一 `### ` 或 EOF
  *   - sentinel 缺失 → exit 1（防误删其他段）
  *   - 仅匹配 `- [YYYY-MM-DD]` 开头的索引条目，其他行（说明 / 空行）保留
@@ -110,22 +110,22 @@ function loadExistingArchive(archivePath) {
  * 合并到已存在的当日 archive 文件，按条目 dateStr 去重。
  * 返回更新后的文件内容。
  */
-function mergeArchiveContent(existing, oldEntries, today) {
+function mergeArchiveContent(existing, oldEntries, today, sourceDocument = 'CLAUDE.md') {
   if (!existing) {
     // 全新文件
     const lines = [
       '---',
       `type: archive`,
-      `archived_from: CLAUDE.md`,
+      `archived_from: ${sourceDocument}`,
       `archived_section: "解决方案索引"`,
       `archived_at: "${today}"`,
       `archived_count: ${oldEntries.length}`,
       'tags: [archive, solutions-index]',
       '---',
       '',
-      `# CLAUDE.md 解决方案索引归档（${today}）`,
+      `# ${sourceDocument} 解决方案索引归档（${today}）`,
       '',
-      `本文件存放 ${today} 由 \`scripts/archive-claude-solutions-index.js\` 从 \`CLAUDE.md\` 归档出的 ${oldEntries.length} 条旧索引条目。`,
+      `本文件存放 ${today} 由 \`scripts/archive-claude-solutions-index.js\` 从 \`${sourceDocument}\` 归档出的 ${oldEntries.length} 条旧索引条目。`,
       '',
       '完整 solution 文档仍在 `docs/solutions/`，本文件仅留索引行作历史回溯。',
       '',
@@ -181,9 +181,11 @@ function main() {
   const args = parseArgs(process.argv);
   const claudeMdPath = path.resolve(args.claudeMd);
   const archiveDir = path.resolve(args.archiveDir);
+  const sourceDocument = path.basename(claudeMdPath);
+  const archivePrefix = path.basename(sourceDocument, path.extname(sourceDocument));
 
   if (!fs.existsSync(claudeMdPath)) {
-    console.error(`[fail] CLAUDE.md not found: ${claudeMdPath}`);
+    console.error(`[fail] ${sourceDocument} not found: ${claudeMdPath}`);
     process.exit(1);
   }
 
@@ -193,7 +195,7 @@ function main() {
   const bounds = findSectionBounds(lines);
   if (!bounds) {
     console.error(`[fail] section anchor not found: "${SECTION_ANCHOR}"`);
-    console.error('       refuse to modify CLAUDE.md without safe sentinel');
+    console.error(`       refuse to modify ${sourceDocument} without safe sentinel`);
     process.exit(1);
   }
 
@@ -219,17 +221,17 @@ function main() {
   });
 
   // 在 anchor 后插入 archive pointer（如果尚无）
-  const pointerLine = `> 老条目（> ${args.keep} 条）已归档至 \`docs/archives/CLAUDE-solutions-index-*.md\``;
-  const hasPointer = newSectionLines.some((l) => l.includes('docs/archives/CLAUDE-solutions-index'));
+  const pointerLine = `> 老条目（> ${args.keep} 条）已归档至 \`docs/archives/${archivePrefix}-solutions-index-*.md\``;
+  const hasPointer = newSectionLines.some((l) => l.includes(`docs/archives/${archivePrefix}-solutions-index`));
   if (!hasPointer) {
     // 在 anchor (newSectionLines[0]) 后插入 pointer + 空行
     newSectionLines.splice(1, 0, '', pointerLine, '');
   }
 
   const today = todayIso();
-  const archivePath = path.join(archiveDir, `CLAUDE-solutions-index-${today}.md`);
+  const archivePath = path.join(archiveDir, `${archivePrefix}-solutions-index-${today}.md`);
   const existingArchive = loadExistingArchive(archivePath);
-  const newArchiveContent = mergeArchiveContent(existingArchive, oldEntries, today);
+  const newArchiveContent = mergeArchiveContent(existingArchive, oldEntries, today, sourceDocument);
 
   const newClaudeMd = [
     ...lines.slice(0, bounds.startIdx),
@@ -240,11 +242,11 @@ function main() {
   if (args.dryRun) {
     console.log(`[dry-run] would archive ${oldEntries.length} entries → ${archivePath}`);
     console.log(`[dry-run] would keep ${keepEntries.length} entries in ${claudeMdPath}`);
-    console.log(`[dry-run] CLAUDE.md size: ${content.length} → ${newClaudeMd.length} chars`);
+    console.log(`[dry-run] ${sourceDocument} size: ${content.length} → ${newClaudeMd.length} chars`);
     process.exit(0);
   }
 
-  // backup CLAUDE.md
+  // backup runtime doc
   const bakPath = `${claudeMdPath}.bak.${backupTimestamp()}`;
   fs.copyFileSync(claudeMdPath, bakPath);
 
@@ -252,13 +254,13 @@ function main() {
   fs.mkdirSync(archiveDir, { recursive: true });
   fs.writeFileSync(archivePath, newArchiveContent, 'utf-8');
 
-  // write CLAUDE.md
+  // write runtime doc
   fs.writeFileSync(claudeMdPath, newClaudeMd, 'utf-8');
 
   console.log(`[ok] archived ${oldEntries.length} entries → ${archivePath}`);
   console.log(`[ok] kept ${keepEntries.length} latest in ${claudeMdPath}`);
   console.log(`[ok] backup: ${bakPath}`);
-  console.log(`[ok] CLAUDE.md: ${content.length} → ${newClaudeMd.length} chars (-${content.length - newClaudeMd.length})`);
+  console.log(`[ok] ${sourceDocument}: ${content.length} → ${newClaudeMd.length} chars (-${content.length - newClaudeMd.length})`);
 }
 
 if (require.main === module) {

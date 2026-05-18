@@ -228,6 +228,11 @@ function testIntegrationInjectContext() {
   if (result.trim()) {
     const parsed = JSON.parse(result);
     assert.ok(parsed.hookSpecificOutput, '应输出 hookSpecificOutput');
+    assert.strictEqual(
+      parsed.hookSpecificOutput.hookEventName,
+      'SessionStart',
+      'SessionStart JSON output must include hookEventName'
+    );
   }
   console.log('[ok] inject-context.js runs cleanly with detectActiveSprintTags');
 }

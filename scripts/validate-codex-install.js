@@ -227,10 +227,17 @@ function validateCodexText(dir, label, options = {}) {
   });
 }
 
+function stripManagedSolutionIndex(content) {
+  return content.replace(
+    /<!-- BEGIN TECH_PERSISTENCE_SOLUTIONS_INDEX -->[\s\S]*?<!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->/g,
+    ''
+  );
+}
+
 function validateCodexFile(file, label) {
   if (!fs.existsSync(file)) return;
   const forbidden = /CLAUDE\.md|Claude Code|~\/\.claude|\.claude\/|Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/;
-  const content = fs.readFileSync(file, 'utf8');
+  const content = stripManagedSolutionIndex(fs.readFileSync(file, 'utf8'));
   if (forbidden.test(content)) {
     fail(`${label} contains unconverted or mojibake text`);
   }

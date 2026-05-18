@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const [, , scriptName, ...scriptArgs] = process.argv;
 
@@ -29,5 +30,20 @@ function inferRuntime() {
 process.env.TECH_PERSISTENCE_RUNTIME = inferRuntime();
 
 const scriptPath = path.join(__dirname, scriptName);
-process.argv = [process.argv[0], scriptPath, ...scriptArgs];
-require(scriptPath);
+const result = spawnSync(process.execPath, [scriptPath, ...scriptArgs], {
+  stdio: 'inherit',
+  env: process.env,
+});
+
+if (result.error) {
+  try {
+    process.stderr.write(`[run-hook] failed to launch ${scriptName}: ${result.error.message}\n`);
+  } catch {}
+  process.exit(0);
+}
+
+if (typeof result.status === 'number') {
+  process.exit(result.status);
+}
+
+process.exit(result.signal ? 1 : 0);

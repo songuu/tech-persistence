@@ -22,6 +22,14 @@ const path = require('path');
 const repoRoot = path.resolve(__dirname, '..');
 
 const codexReplacements = [
+  [/在 Claude Code runtime 下/g, '在支持 Agent spawn 的 runtime 下'],
+  [/Claude Code runtime 下/g, '支持 Agent spawn 的 runtime 下'],
+  [/仅对 Claude Code runtime 生效/g, '仅对支持 Agent spawn 的 runtime 生效'],
+  [/Claude Code SlashCommand/g, 'non-Codex slash command'],
+  [/CLAUDE\.md \/ AGENTS\.md/g, 'runtime instruction docs'],
+  [/CLAUDE\.md \+ AGENTS\.md/g, 'runtime instruction docs'],
+  [/CLAUDE-solutions-index/g, 'AGENTS-solutions-index'],
+  [/node scripts\/archive-claude-solutions-index\.js/g, 'node scripts/archive-claude-solutions-index.js --claude-md AGENTS.md'],
   [/~\/\.claude\/homunculus/g, '~/.codex/homunculus'],
   [/~\/\.claude\/CLAUDE\.md/g, '~/.codex/AGENTS.md'],
   [/~\/\.claude\/rules/g, '~/.codex/rules'],
@@ -100,7 +108,10 @@ function propagateCommand(name) {
     {
       label: 'plugin skill',
       path: path.join(repoRoot, 'plugins', 'tech-persistence', 'skills', name, 'SKILL.md'),
-      transform: (skill, body) => injectIntoSkillWrapper(skill, body),
+      transform: (skill, body) => {
+        const merged = injectIntoSkillWrapper(skill, body);
+        return merged ? applyCodexRegex(merged) : null;
+      },
     },
     {
       label: 'codex skill',

@@ -46,6 +46,14 @@ const expectedSkills = [
 ];
 
 const replacements = [
+  [/在 Claude Code runtime 下/g, '在支持 Agent spawn 的 runtime 下'],
+  [/Claude Code runtime 下/g, '支持 Agent spawn 的 runtime 下'],
+  [/仅对 Claude Code runtime 生效/g, '仅对支持 Agent spawn 的 runtime 生效'],
+  [/Claude Code SlashCommand/g, 'non-Codex slash command'],
+  [/CLAUDE\.md \/ AGENTS\.md/g, 'runtime instruction docs'],
+  [/CLAUDE\.md \+ AGENTS\.md/g, 'runtime instruction docs'],
+  [/CLAUDE-solutions-index/g, 'AGENTS-solutions-index'],
+  [/node scripts\/archive-claude-solutions-index\.js/g, 'node scripts/archive-claude-solutions-index.js --claude-md AGENTS.md'],
   [/~\/\.claude\/homunculus/g, '~/.codex/homunculus'],
   [/~\/\.claude\/CLAUDE\.md/g, '~/.codex/AGENTS.md'],
   [/`~\/\.claude\/homunculus/g, '`~/.codex/homunculus'],
@@ -66,6 +74,7 @@ const replacements = [
 const runHookJs = `#!/usr/bin/env node
 
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const [, , scriptName, ...scriptArgs] = process.argv;
 
@@ -94,8 +103,23 @@ function inferRuntime() {
 process.env.TECH_PERSISTENCE_RUNTIME = inferRuntime();
 
 const scriptPath = path.join(__dirname, scriptName);
-process.argv = [process.argv[0], scriptPath, ...scriptArgs];
-require(scriptPath);
+const result = spawnSync(process.execPath, [scriptPath, ...scriptArgs], {
+  stdio: 'inherit',
+  env: process.env,
+});
+
+if (result.error) {
+  try {
+    process.stderr.write(\`[run-hook] failed to launch \${scriptName}: \${result.error.message}\\n\`);
+  } catch {}
+  process.exit(0);
+}
+
+if (typeof result.status === 'number') {
+  process.exit(result.status);
+}
+
+process.exit(result.signal ? 1 : 0);
 `;
 
 const runHookCmd = [
@@ -364,6 +388,7 @@ function copyUtilityScripts() {
   [
     'configure-shared-homunculus.js',
     'agent-orchestrator.js',
+    'sync-solution-index.js',
   ].forEach((name) => {
     copyTextFile(
       path.join(repoRoot, 'scripts', name),
@@ -372,7 +397,7 @@ function copyUtilityScripts() {
     );
   });
   copyAgentOrchestratorSubmodules();
-  return 3;
+  return 4;
 }
 
 function copyAgentOrchestratorSubmodules() {

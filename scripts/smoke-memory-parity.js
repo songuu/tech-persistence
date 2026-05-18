@@ -61,6 +61,9 @@ function runInject(runtime, tempHome) {
   }
 
   const payload = JSON.parse(result.stdout);
+  if (payload.hookSpecificOutput?.hookEventName !== 'SessionStart') {
+    throw new Error(`${runtime} inject missing hookSpecificOutput.hookEventName=SessionStart`);
+  }
   return payload.hookSpecificOutput.additionalContext;
 }
 

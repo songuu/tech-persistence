@@ -439,6 +439,10 @@ isFile(
   path.join(pluginRoot, 'scripts', 'agent-orchestrator.js'),
   'agent-loop utility agent-orchestrator.js'
 );
+isFile(
+  path.join(pluginRoot, 'scripts', 'sync-solution-index.js'),
+  'solution-index utility sync-solution-index.js'
+);
 [
   'requirement-spec.schema.json',
   'task-breakdown.schema.json',

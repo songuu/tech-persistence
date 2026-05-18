@@ -45,7 +45,7 @@ function makeTempClaudeMd(content) {
 }
 
 function runScript(args, opts = {}) {
-  const result = spawnSync('node', [SCRIPT_PATH, ...args], {
+  const result = spawnSync(process.execPath, [SCRIPT_PATH, ...args], {
     encoding: 'utf-8',
     ...opts,
   });

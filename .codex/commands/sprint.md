@@ -79,12 +79,14 @@ Phase 5 → 填写「复利记录」               → status: completed
 - review finding 展示
 - compound 收尾报告
 
-compact handoff 文件：
+compact handoff 文件（统一写入 `docs/plans/.handoff/` 子目录，已 gitignore）：
 
 ```text
-docs/plans/YYYY-MM-DD-xxx-handoff-N.md          # 完整交接
-docs/plans/YYYY-MM-DD-xxx-handoff-N-compact.md  # 压缩恢复摘要
+docs/plans/.handoff/YYYY-MM-DD-xxx-handoff-N.md          # 完整交接
+docs/plans/.handoff/YYYY-MM-DD-xxx-handoff-N-compact.md  # 压缩恢复摘要
 ```
+
+> `/checkpoint` 命令负责创建 `.handoff/` 目录（首次）并滚动保留最近 3 个；详见 `checkpoint.md` 的「执行步骤」段。
 
 compact handoff 必须包含：
 
@@ -150,7 +152,7 @@ Caveman mode 输出只展示任务表和验证策略；完整方案写入 sprint
 
 ### Phase 3: Work (含自动 checkpoint)
 
-> 同批 `[P]` task 在 Codex runtime 下通过 `/work` 的 **Worker spawn 协议**真并行实施（用 Agent tool 的 `isolation: "worktree"` 隔离）；Codex CLI 端保留 batch fallback。详见 `work.md` 的「Worker spawn 协议」段。
+> 同批 `[P]` task 在支持 Agent spawn 的 runtime 下通过 `/work` 的 **Worker spawn 协议**真并行实施（用 Agent tool 的 `isolation: "worktree"` 隔离）；Codex CLI 端保留 batch fallback。详见 `work.md` 的「Worker spawn 协议」段。
 
 ```
 Phase 3/5: Work
@@ -189,7 +191,7 @@ Next: Task N+1
 
 📋 检测到 Checkpoint:
   Sprint: 用户导出功能
-  文件: docs/plans/2026-06-20-user-export-handoff-1.md
+  文件: docs/plans/.handoff/2026-06-20-user-export-handoff-1.md
   进度: 5/8 Task
   下一步: Task 6 — 异步大文件导出
 
@@ -198,14 +200,15 @@ Next: Task N+1
 ```
 
 恢复时做的事：
-1. 如果是 caveman mode，先读取最新 `*-handoff-*-compact.md`
-2. compact 信息不足时，读取完整 handoff 和 sprint 主文档
-3. 读取相关测试文件 → 确认测试状态
-4. 从下一个未完成 Task 继续
+1. 在 `docs/plans/.handoff/` 下查找最近的 handoff 文件（按 mtime 排序；该目录已 gitignore）
+2. 如果是 caveman mode，先读取最新 `*-handoff-*-compact.md`
+3. compact 信息不足时，读取完整 handoff 和 sprint 主文档（主文档仍在 `docs/plans/` 顶层）
+4. 读取相关测试文件 → 确认测试状态
+5. 从下一个未完成 Task 继续
 
 ### Phase 4: Review (暂停确认)
 
-> Codex runtime 下 `/review` 通过 **Spawn 协议**真并行 spawn 5 reviewer 子进程（按 risk-aware dispatch matrix 选定子集），共享 4 status 返回契约（DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED）。任一 reviewer 报 `BLOCKED` 即使 `--auto` 也强制人工 gate。Codex CLI 端保留 inline 5 视角 fallback。详见 `review.md` 的「Spawn 协议」段。
+> 支持 Agent spawn 的 runtime 下 `/review` 通过 **Spawn 协议**真并行 spawn 5 reviewer 子进程（按 risk-aware dispatch matrix 选定子集），共享 4 status 返回契约（DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED）。任一 reviewer 报 `BLOCKED` 即使 `--auto` 也强制人工 gate。Codex CLI 端保留 inline 5 视角 fallback。详见 `review.md` 的「Spawn 协议」段。
 
 ```
 Phase 4/5: Review

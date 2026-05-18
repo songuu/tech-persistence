@@ -182,6 +182,7 @@ ${body}
 
   const output = safeStringify({
     hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
       additionalContext: context,
     },
   });

@@ -12,7 +12,7 @@ description: "复利步骤：提取经验→写入本能+rules+解决方案+skil
 ### 步骤 1: 扫描会话，提取 7 类知识
 | 类型 | 写入位置 |
 |------|---------|
-| 解决方案 | `docs/solutions/` + CLAUDE.md 索引 |
+| 解决方案 | `docs/solutions/` + `docs/solutions/index.jsonl` + CLAUDE.md / AGENTS.md 投影 |
 | 踩坑记录 | `.claude/rules/debugging-gotchas.md` |
 | 架构决策 | `.claude/rules/architecture.md` |
 | 行为本能 | `~/.claude/homunculus/instincts/` |
@@ -56,23 +56,24 @@ aliases: ["问题的别名"]
 - [[session-YYYY-MM-DD]] — 发现此问题的会话
 ```
 
-在 CLAUDE.md 解决方案索引追加一行。
+`docs/solutions/*.md` 是唯一详情源；`docs/solutions/index.jsonl` 是唯一摘要索引缓存。CLAUDE.md / AGENTS.md 只是 runtime 注入投影，不允许分别手工维护总结。
 
-### 步骤 2.5: CLAUDE.md 索引段尺寸维护
+### 步骤 2.5: 统一同步 solution index
 
-写完新索引行后，检查 `### 解决方案索引` 段是否 > 5 条：
+写完 solution 文档后运行统一 renderer：
 
 ```bash
-node scripts/archive-claude-solutions-index.js  # idempotent；≤5 条时 noop
+node scripts/sync-solution-index.js --all  # idempotent；同步 canonical index + 两个 runtime projection
 ```
 
 效果：
-- 老条目（超出最近 5 条）移到 `docs/archives/CLAUDE-solutions-index-<YYYY-MM-DD>.md`
-- CLAUDE.md 始终保留**最近 5 条** + archive pointer
+- `docs/solutions/index.jsonl` 从 `docs/solutions/*.md` 重建（canonical summary cache）
+- CLAUDE.md / AGENTS.md 的 `### 解决方案索引` managed block 始终保留**最近 5 条**
 - always-on 注入恒定，不再线性增长（设计参考 `docs/plans/2026-05-14-claude-md-index-via-prompt-recall.md`）
-- 老条目仍可被 **prompt recall hook**（UserPromptSubmit）按用户当轮 prompt 召回（数据源是 `docs/solutions/*.md`，不依赖 CLAUDE.md 索引）
+- 老条目仍可被 **prompt recall hook**（UserPromptSubmit）按用户当轮 prompt 召回（数据源是 `docs/solutions/*.md`，不依赖 CLAUDE.md / AGENTS.md 索引）
+- 两个 runtime 共享同一套总结内容，只做路径和入口外壳投影
 
-报告中加一行 `Archive: <N> 条 → docs/archives/CLAUDE-solutions-index-*.md`（若 noop 则 `Archive: noop`）。
+报告中加一行 `Solution index: synced <N> entries → docs/solutions/index.jsonl + CLAUDE.md + AGENTS.md`。
 
 ### 步骤 3: 提取经验到 rules
 项目特有 → `.claude/rules/`，跨项目 → `~/.claude/CLAUDE.md`

@@ -1,3 +1,4 @@
 .worktrees/
 .agent-runs/
 *.bak.*
+docs/plans/.handoff/

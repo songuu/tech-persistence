@@ -32,7 +32,7 @@ When the command instructions below mention `/review`, interpret that as this `$
 
 **目的**：用 Codex Agent tool 真 spawn N 个独立 reviewer 子进程并行审查，达成 3 个核心目标 —— 分工明确（每 reviewer 单一视角）+ 减少总时间（5×T → 1×T）+ 提高效率（独立 context + 模型分层）。
 
-> 以下仅对 Codex runtime 生效。Codex CLI 见下方「Multi-runtime fallback」段。
+> 以下仅对支持 Agent spawn 的 runtime 生效。Codex CLI 见下方「Multi-runtime fallback」段。
 
 ### 调用语法
 

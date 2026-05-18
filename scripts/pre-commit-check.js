@@ -402,6 +402,49 @@ function checkPlanCompletion(stagedFiles, repoRoot) {
   return failures;
 }
 
+function checkSolutionIndexSync(stagedFiles, repoRoot) {
+  const relevant = stagedFiles.some((f) =>
+    f === 'CLAUDE.md'
+    || f === 'AGENTS.md'
+    || f === 'docs/solutions/index.jsonl'
+    || f === 'scripts/sync-solution-index.js'
+    || f === 'user-level/commands/compound.md'
+    || f.startsWith('docs/solutions/') && f.endsWith('.md')
+  );
+  if (!relevant) return [];
+
+  const syncPath = path.join(repoRoot, 'scripts', 'sync-solution-index.js');
+  if (!fs.existsSync(syncPath)) {
+    return [{
+      path: 'scripts/sync-solution-index.js',
+      reason: 'missing canonical solution index renderer',
+    }];
+  }
+
+  const sync = require(syncPath);
+  const state = sync.buildExpectedState(repoRoot, { targets: ['claude', 'codex'] });
+  const failures = [];
+
+  const currentIndex = readIfExists(state.indexPath) || '';
+  if (sync.normalizeLf(currentIndex) !== sync.normalizeLf(state.indexContent)) {
+    failures.push({
+      path: path.relative(repoRoot, state.indexPath).replace(/\\/g, '/'),
+      reason: 'canonical index cache is out of sync with docs/solutions/*.md',
+    });
+  }
+
+  for (const doc of state.docs) {
+    if (sync.normalizeLf(doc.currentContent) !== sync.normalizeLf(doc.expectedContent)) {
+      failures.push({
+        path: path.relative(repoRoot, doc.path).replace(/\\/g, '/'),
+        reason: `${doc.target} projection is out of sync with canonical solution index`,
+      });
+    }
+  }
+
+  return failures;
+}
+
 function formatPlanCompletionError(failures) {
   const lines = [
     '',
@@ -422,6 +465,25 @@ function formatPlanCompletionError(failures) {
   lines.push('    B. 真完成 task 工作 → commit 改动 → 重新 stage plan');
   lines.push('    C. 修正 plan 中的 inline-code 路径以指向真实改动的文件');
   lines.push('  绕过: git commit --no-verify (不推荐, 失去 drift 检测)');
+  lines.push('');
+  return lines.join('\n');
+}
+
+function formatSolutionIndexError(failures) {
+  const lines = [
+    '',
+    '✗ Solution index sync 失败: docs/solutions 是唯一总结源，runtime projection 需要由同一 renderer 生成',
+    '',
+  ];
+  for (const f of failures) {
+    lines.push(`  ${f.path}`);
+    lines.push(`    × ${f.reason}`);
+  }
+  lines.push('');
+  lines.push('  修复（按顺序执行）:');
+  lines.push('    node scripts/sync-solution-index.js --all');
+  lines.push('    git add docs/solutions/index.jsonl CLAUDE.md AGENTS.md');
+  lines.push('  绕过: git commit --no-verify (不推荐, 会让 Claude/Codex 总结漂移)');
   lines.push('');
   return lines.join('\n');
 }
@@ -512,14 +574,21 @@ function main() {
   ];
   const failures = checkPlanScope(stagedFiles, repoRoot);
   const completionFailures = checkPlanCompletion(stagedFiles, repoRoot);
+  const solutionIndexFailures = checkSolutionIndexSync(stagedFiles, repoRoot);
 
-  if (mismatches.length === 0 && failures.length === 0 && completionFailures.length === 0) {
+  if (
+    mismatches.length === 0
+    && failures.length === 0
+    && completionFailures.length === 0
+    && solutionIndexFailures.length === 0
+  ) {
     process.exit(0);
   }
 
   if (mismatches.length > 0) process.stderr.write(formatPropagateError(mismatches));
   if (failures.length > 0) process.stderr.write(formatPlanError(failures));
   if (completionFailures.length > 0) process.stderr.write(formatPlanCompletionError(completionFailures));
+  if (solutionIndexFailures.length > 0) process.stderr.write(formatSolutionIndexError(solutionIndexFailures));
 
   process.exit(1);
 }
@@ -548,11 +617,13 @@ module.exports = {
   checkOrchestratorSync,
   checkPlanScope,
   checkPlanCompletion,
+  checkSolutionIndexSync,
   parseFrontmatter,
   deriveRepairCommand,
   formatPropagateError,
   formatPlanError,
   formatPlanCompletionError,
+  formatSolutionIndexError,
   GRANDFATHER_BEFORE,
   PLAN_PATH_RE,
   ORCHESTRATOR_PATH_RE,

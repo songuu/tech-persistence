@@ -64,7 +64,7 @@ Codex 同义：`$skill <action> <name>`
 - 🟡 observe:   累计 < 5（保持观察，未达分析阈值）
 - 🔴 recommend: 累计 ≥ 20（建议跑 /skill diagnose <name>）
 
-💡 仅显示 Codex 端调用；Codex SlashCommand 不在统计内
+💡 仅显示 Codex 端调用；non-Codex slash command 不在统计内
 ```
 
 ### `/skill diagnose <name>`

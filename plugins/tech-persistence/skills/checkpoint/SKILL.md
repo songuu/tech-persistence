@@ -35,9 +35,18 @@ When the command instructions below mention `/checkpoint`, interpret that as thi
    - 已修改的文件列表
    - 当前测试状态
    - 阻塞项
-3. 生成交接文件 `docs/plans/{name}-handoff-{N}.md`（Obsidian 兼容 frontmatter）
-4. 如果当前 sprint 启用了 caveman/token 压缩模式，额外生成 `docs/plans/{name}-handoff-{N}-compact.md`
-5. 更新 sprint 主文档的 status
+3. 生成交接文件 `docs/plans/.handoff/{name}-handoff-{N}.md`（Obsidian 兼容 frontmatter；目录不存在时自动创建）
+4. 如果当前 sprint 启用了 caveman/token 压缩模式，额外生成 `docs/plans/.handoff/{name}-handoff-{N}-compact.md`
+5. 滚动保留协议：写入新 handoff 后，列同一 sprint name 的全部 handoff（按 mtime 倒序），删除超出保留数的最早项
+   - 保留数默认 3，可通过环境变量 `TECH_PERSISTENCE_CHECKPOINT_RETENTION` 覆盖
+   - 完整 handoff 与 compact handoff 视为同一组（一对 `-N.md` + `-N-compact.md` 算 1 个）
+   - 删除前在控制台打印 `[checkpoint] retention: removed <name>-handoff-X.md` 便于审计
+6. 更新 sprint 主文档的 status
+
+**为何用 `.handoff/` 子目录 + gitignore**：
+- handoff 是 ephemeral context bridge（仅供 /compact 后 resume），不是 durable artifact
+- 已通过 `.gitignore` 排除 `docs/plans/.handoff/` 避免污染 git 历史（11ddfae 历史教训：单 sprint 跑出 123+ handoff 文件全进 git）
+- `.` 前缀目录在多数 Obsidian vault 配置中默认隐藏，主文档列表保持干净
 
 ## Compact handoff
 
@@ -69,18 +78,19 @@ Need full doc if: <何时必须回读完整 sprint 文档>
 ```
 ⚡ Checkpoint #N 已保存
 
-  文件: docs/plans/xxx-handoff-1.md
-  Compact: docs/plans/xxx-handoff-1-compact.md
+  文件: docs/plans/.handoff/xxx-handoff-1.md
+  Compact: docs/plans/.handoff/xxx-handoff-1-compact.md
   进度: 5/8 Task
   关键决策: 3 条
+  保留: 3 个最近 handoff（旧的已滚动删除）
 
   现在可以安全地 /compact 或关闭会话。
-  下次说 "继续 sprint" 即可恢复。
+  下次说 "继续 sprint" 即可恢复（resume 会从 .handoff/ 找最近一个）。
 ```
 
 ## 不在 sprint 中时
 
-如果没有活跃 sprint，生成通用交接文件：
+如果没有活跃 sprint，生成通用交接文件 `docs/plans/.handoff/session-{YYYY-MM-DDTHHMM}-handoff.md`：
 
 ```yaml
 ---
@@ -91,4 +101,5 @@ tags: [handoff, session]
 ```
 
 记录：当前在做什么、做到哪里了、下一步是什么、关键上下文。
+同样适用滚动保留协议（默认 3，按 mtime）。
 
