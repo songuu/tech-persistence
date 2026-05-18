@@ -42,17 +42,44 @@ function Write-OK($msg)   { Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Warn($msg)  { Write-Host "  [!!] $msg" -ForegroundColor Yellow }
 function Write-Section($msg) { Write-Host "`n=== $msg ===`n" -ForegroundColor Cyan }
 function Ensure-Dir($p) { if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null } }
-function Safe-Copy($s,$d) {
-    if (Test-Path $d) {
-        Copy-Item $d "$d.bak.$(Get-Date -Format 'yyyyMMddHHmm')" -Force
-        # Keep latest N .bak (default 3), prune older — prevents R4-style accumulation
-        $retention = if ($env:INSTALL_BAK_RETENTION) { [int]$env:INSTALL_BAK_RETENTION } else { 3 }
-        $baks = Get-ChildItem "$d.bak.*" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
-        if ($baks -and $baks.Count -gt $retention) {
-            $baks | Select-Object -Skip $retention | Remove-Item -Force -ErrorAction SilentlyContinue
+function Get-BackupRetention {
+    if ($env:INSTALL_BAK_RETENTION) {
+        $parsed = 0
+        if ([int]::TryParse($env:INSTALL_BAK_RETENTION, [ref]$parsed) -and $parsed -ge 0) {
+            return $parsed
         }
     }
-    Copy-Item $s $d -Force
+    return 3
+}
+function Get-BackupFiles($path) {
+    $parent = Split-Path -Parent $path
+    $leaf = Split-Path -Leaf $path
+    if (-not (Test-Path $parent)) { return @() }
+    return @(Get-ChildItem -LiteralPath $parent -Filter "$leaf.bak.*" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+}
+function Prune-InstallBackups($path) {
+    $retention = Get-BackupRetention
+    $backups = Get-BackupFiles $path
+    if ($backups.Count -gt $retention) {
+        $backups | Select-Object -Skip $retention | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+function Test-SameFileContent($left,$right) {
+    if (-not (Test-Path $left) -or -not (Test-Path $right)) { return $false }
+    $leftHash = (Get-FileHash -LiteralPath $left -Algorithm SHA256).Hash
+    $rightHash = (Get-FileHash -LiteralPath $right -Algorithm SHA256).Hash
+    return $leftHash -eq $rightHash
+}
+function Safe-Copy($s,$d) {
+    if (Test-Path $d) {
+        if (Test-SameFileContent $s $d) {
+            Prune-InstallBackups $d
+            return
+        }
+        Copy-Item -LiteralPath $d -Destination "$d.bak.$(Get-Date -Format 'yyyyMMddHHmmss')" -Force
+        Prune-InstallBackups $d
+    }
+    Copy-Item -LiteralPath $s -Destination $d -Force
 }
 function Safe-CopyNew($s,$d) { if (-not (Test-Path $d)) { Copy-Item $s $d -Force } else { Write-Warn "$(Split-Path -Leaf $d) exists, skip" } }
 

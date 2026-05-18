@@ -174,6 +174,21 @@ flowchart LR
 ### 环境要求
 Node.js >= 18 · Git · Claude Code CLI 或 Codex CLI
 
+### 统一安装（Windows 推荐）
+
+同时覆盖 legacy Claude Code、Codex、Claude Code plugin 三个安装面：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-all.ps1 -All
+```
+
+排查时可以只跳过某个安装面：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-all.ps1 -All -SkipPlugin
+powershell -ExecutionPolicy Bypass -File .\install-all.ps1 -All -DryRun
+```
+
 ### Claude Code
 
 Windows:

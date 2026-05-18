@@ -6,10 +6,34 @@
 #
 # 旧版 Claude Code 用户仍用 install.ps1.
 
+param(
+  [switch]$All,
+  [switch]$Help
+)
+
 $ErrorActionPreference = 'Stop'
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginDir = Join-Path $ScriptDir 'plugins\tech-persistence'
+
+function Show-Help {
+  Write-Host @"
+Usage:
+  powershell -ExecutionPolicy Bypass -File .\install-plugin.ps1 -All
+
+Options:
+  -All   Install the Tech Persistence Claude Code plugin.
+  -Help  Show this help.
+"@
+}
+
+if ($Help) {
+  Show-Help
+  exit 0
+}
+
+# -All is accepted to keep the Windows installer surface consistent. The
+# plugin installer has only one install target, so no narrower mode is needed.
 
 # ─────────────────────────────────────────────────────────────
 # 前置检查

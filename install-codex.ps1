@@ -70,6 +70,55 @@ function Write-Utf8NoBom($path, $content) {
     [System.IO.File]::WriteAllText($path, $content, $encoding)
 }
 
+function Get-BackupRetention {
+    if ($env:INSTALL_BAK_RETENTION) {
+        $parsed = 0
+        if ([int]::TryParse($env:INSTALL_BAK_RETENTION, [ref]$parsed) -and $parsed -ge 0) {
+            return $parsed
+        }
+    }
+    return 3
+}
+
+function Get-BackupFiles($path) {
+    $parent = Split-Path -Parent $path
+    $leaf = Split-Path -Leaf $path
+    if (-not (Test-Path $parent)) { return @() }
+    return @(Get-ChildItem -LiteralPath $parent -Filter "$leaf.bak.*" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+}
+
+function Prune-InstallBackups($path) {
+    $retention = Get-BackupRetention
+    $backups = Get-BackupFiles $path
+    if ($backups.Count -gt $retention) {
+        $backups | Select-Object -Skip $retention | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-SameTextContent($path, $content) {
+    if (-not (Test-Path $path)) { return $false }
+    $current = Get-Content $path -Raw -Encoding UTF8
+    return $current -eq $content
+}
+
+function Get-DirectoryFingerprint($path) {
+    if (-not (Test-Path $path)) { return "" }
+    $root = (Resolve-Path $path).Path
+    $items = Get-ChildItem -LiteralPath $root -Recurse -File -Force | Sort-Object FullName
+    $parts = @()
+    foreach ($item in $items) {
+        $relative = $item.FullName.Substring($root.Length).TrimStart('\','/') -replace '\\','/'
+        $hash = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash
+        $parts += "$relative=$hash"
+    }
+    return ($parts -join "`n")
+}
+
+function Test-SameDirectoryContent($left,$right) {
+    if (-not (Test-Path $left) -or -not (Test-Path $right)) { return $false }
+    return (Get-DirectoryFingerprint $left) -eq (Get-DirectoryFingerprint $right)
+}
+
 function Resolve-UserPath($path) {
     if (-not $path) { return $path }
     if ($path -eq "~") { return $HomeDir }
@@ -116,34 +165,50 @@ function Test-GeneratedCodexTemplateNeedsRepair($path) {
 
 function Backup-ExistingFile($path) {
     if (Test-Path $path) {
-        Copy-Item $path "$path.bak.$(Get-Date -Format 'yyyyMMddHHmmss')" -Force
+        Copy-Item -LiteralPath $path -Destination "$path.bak.$(Get-Date -Format 'yyyyMMddHHmmss')" -Force
+        Prune-InstallBackups $path
     }
 }
 
 function Copy-CodexText($source, $target, [switch]$NoOverwrite, [switch]$BackupExisting, [switch]$RepairGenerated) {
+    $content = Get-Content $source -Raw -Encoding UTF8
+    $converted = Convert-CodexText $content
+
     if ($NoOverwrite -and (Test-Path $target)) {
         if ($RepairGenerated -and (Test-GeneratedCodexTemplateNeedsRepair $target)) {
+            if (Test-SameTextContent $target $converted) {
+                Prune-InstallBackups $target
+                return
+            }
             Backup-ExistingFile $target
             Write-Warn "$(Split-Path -Leaf $target) looked generated/broken, backed up and repaired"
         } else {
+            Prune-InstallBackups $target
             Write-Warn "$(Split-Path -Leaf $target) exists, skip"
             return
         }
     } elseif ($BackupExisting -and (Test-Path $target)) {
+        if (Test-SameTextContent $target $converted) {
+            Prune-InstallBackups $target
+            return
+        }
         Backup-ExistingFile $target
     }
     Ensure-Dir (Split-Path -Parent $target)
-    $content = Get-Content $source -Raw -Encoding UTF8
-    Write-Utf8NoBom $target (Convert-CodexText $content)
+    Write-Utf8NoBom $target $converted
 }
 
-function Copy-CodexCommandDir($sourceDir, $targetDir) {
+function Copy-CodexCommandDir($sourceDir, $targetDir, [string[]]$ExcludeNames = @()) {
     if (-not (Test-Path $sourceDir)) { return 0 }
     Ensure-Dir $targetDir
+    $excluded = @{}
+    foreach ($name in $ExcludeNames) { $excluded[$name] = $true }
     $count = 0
     Get-ChildItem $sourceDir -Filter "*.md" | ForEach-Object {
-        Copy-CodexText $_.FullName (Join-Path $targetDir $_.Name) -BackupExisting
-        $count++
+        if (-not $excluded.ContainsKey($_.Name)) {
+            Copy-CodexText $_.FullName (Join-Path $targetDir $_.Name) -BackupExisting
+            $count++
+        }
     }
     return $count
 }
@@ -307,12 +372,21 @@ function Install-User {
     Ensure-Dir $UserPluginsRoot
 
     if (Test-Path $PluginTarget) {
-        $backup = "$PluginTarget.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
-        Move-Item $PluginTarget $backup -Force
-        Write-Warn "Existing plugin backed up to $backup"
+        if (Test-SameDirectoryContent $PluginSource $PluginTarget) {
+            Prune-InstallBackups $PluginTarget
+            Write-OK "plugin already up to date"
+        } else {
+            $backup = "$PluginTarget.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
+            Move-Item -LiteralPath $PluginTarget -Destination $backup -Force
+            Prune-InstallBackups $PluginTarget
+            Write-Warn "Existing plugin backed up to $backup"
+            Copy-Item $PluginSource $UserPluginsRoot -Recurse -Force
+            Write-OK "plugin copied"
+        }
+    } else {
+        Copy-Item $PluginSource $UserPluginsRoot -Recurse -Force
+        Write-OK "plugin copied"
     }
-    Copy-Item $PluginSource $UserPluginsRoot -Recurse -Force
-    Write-OK "plugin copied"
 
     Update-Marketplaces
     Register-CodexMarketplace
@@ -333,8 +407,13 @@ function Install-Project {
     $agentsTarget = Join-Path $root "AGENTS.md"
     Copy-CodexText (Join-Path $ScriptDir "project-level\CLAUDE.md") $agentsTarget -NoOverwrite -RepairGenerated
 
-    $userCommands = Copy-CodexCommandDir (Join-Path $ScriptDir "user-level\commands") (Join-Path $codexDir "commands")
-    $projectCommands = Copy-CodexCommandDir (Join-Path $ScriptDir "project-level\.claude\commands") (Join-Path $codexDir "commands")
+    $projectCommandDir = Join-Path $ScriptDir "project-level\.claude\commands"
+    $projectCommandNames = @()
+    if (Test-Path $projectCommandDir) {
+        $projectCommandNames = @(Get-ChildItem $projectCommandDir -Filter "*.md" | ForEach-Object { $_.Name })
+    }
+    $userCommands = Copy-CodexCommandDir (Join-Path $ScriptDir "user-level\commands") (Join-Path $codexDir "commands") $projectCommandNames
+    $projectCommands = Copy-CodexCommandDir $projectCommandDir (Join-Path $codexDir "commands")
     Write-OK "commands copied ($userCommands user, $projectCommands project)"
 
     Copy-CodexRuleDir (Join-Path $ScriptDir "user-level\rules") (Join-Path $codexDir "rules") | Out-Null

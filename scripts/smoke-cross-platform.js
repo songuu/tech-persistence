@@ -143,6 +143,46 @@ function testClaudeProjectInstallCreatesPlansDirectory() {
   assertIncludes(workflow, 'test -d ".claude/plans"', '.github/workflows/macos-cross-platform.yml');
 }
 
+function testPowerShellInstallersDoNotBackupUnchangedFiles() {
+  const claudeInstaller = read('install.ps1');
+  assertIncludes(claudeInstaller, 'function Test-SameFileContent', 'install.ps1');
+  assertIncludes(claudeInstaller, 'Prune-InstallBackups $d', 'install.ps1');
+  assertIncludes(claudeInstaller, 'if (Test-SameFileContent $s $d)', 'install.ps1');
+
+  const codexInstaller = read('install-codex.ps1');
+  assertIncludes(codexInstaller, 'function Test-SameTextContent', 'install-codex.ps1');
+  assertIncludes(codexInstaller, 'function Test-SameDirectoryContent', 'install-codex.ps1');
+  assertIncludes(codexInstaller, '[string[]]$ExcludeNames = @()', 'install-codex.ps1');
+  assertIncludes(codexInstaller, 'Prune-InstallBackups $target', 'install-codex.ps1');
+  assertIncludes(codexInstaller, 'if (Test-SameTextContent $target $converted)', 'install-codex.ps1');
+  assertIncludes(codexInstaller, '$projectCommandNames', 'install-codex.ps1');
+  assertIncludes(codexInstaller, 'plugin already up to date', 'install-codex.ps1');
+
+  const pluginInstaller = read('install-plugin.ps1');
+  assertIncludes(pluginInstaller, '[switch]$All', 'install-plugin.ps1');
+  assertIncludes(pluginInstaller, 'function Show-Help', 'install-plugin.ps1');
+}
+
+function testUnifiedPowerShellInstallerCoversAllWindowsInstallers() {
+  const unifiedInstallerPath = 'install-all.ps1';
+  assert(fs.existsSync(path.join(repoRoot, unifiedInstallerPath)), `${unifiedInstallerPath} does not exist`);
+
+  const script = read(unifiedInstallerPath);
+  for (const needle of [
+    'install.ps1',
+    'install-codex.ps1',
+    'install-plugin.ps1',
+    '[switch]$SkipLegacy',
+    '[switch]$SkipCodex',
+    '[switch]$SkipPlugin',
+    '[switch]$DryRun',
+    '[switch]$ContinueOnError',
+    'If no target switch is provided, this script defaults to -All.',
+  ]) {
+    assertIncludes(script, needle, unifiedInstallerPath);
+  }
+}
+
 process.stdout.write('\nsmoke: cross-platform install and macOS CI\n');
 run('install.sh fails fast when Node.js is missing or too old', testInstallShNodePreflight);
 run('install-codex.sh keeps Node.js preflight', testCodexInstallStillHasNodePreflight);
@@ -150,6 +190,8 @@ run('cross-platform CI workflow covers matrix os, smoke checks, and unit tests',
 run('project plans directories survive clean checkouts', testProjectPlanDirectoriesAreTracked);
 run('unset shared homunculus is a successful no-op', testSharedHomunculusNoopDoesNotAbortInstall);
 run('Claude project install creates plans directory', testClaudeProjectInstallCreatesPlansDirectory);
+run('PowerShell installers skip unchanged-file backups and prune old .bak files', testPowerShellInstallersDoNotBackupUnchangedFiles);
+run('unified PowerShell installer covers legacy, Codex, and plugin installers', testUnifiedPowerShellInstallerCoversAllWindowsInstallers);
 
 process.stdout.write(`\nresult: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) {
