@@ -3,7 +3,7 @@ title: "mattpocock/skills 对照分析"
 type: analysis
 status: completed
 created: "2026-05-15"
-updated: "2026-05-15"
+updated: "2026-05-18"
 tags: [analysis, sibling-eval, external-reference]
 aliases: ["mattpocock-skills-eval"]
 sources:
@@ -14,6 +14,7 @@ sources:
 
 > 评估请求是「分析下」，**不是「选哪几个借鉴」**。本文默认形态是 compare + pros/cons，不是落地决策表。
 > 用户选择只产出 Phase 3 文档（跳过 Plan/Review/Compound 形式化阶段）。
+> 2026-05-18 follow-up：grill/glossary 专题后续已判断为不纳入默认架构，相关计划文件已删除。剩余可吸收点见 [[2026-05-18-mattpocock-skills-followup]]；本文保留为首次全量对照记录。
 
 ## 0. 关键假设验证
 
