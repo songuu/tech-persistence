@@ -155,13 +155,16 @@ Next: go -> Plan
 Phase 2/5: Plan
 [执行 /plan，输出实现计划]
 [填写文档的技术方案、任务拆解]
+[强制执行「跨 Sprint 入场 checklist」三项，见下方协议]
 [如果 Task > 5 个，预告：将在 Task 5 后自动 checkpoint]
 → 'go' 进入 Work | 修改意见调整
 ```
 
-Auto mode：任务数 ≤ 8 且无 L3/L4 task、无明显 scope 不一致时直接进入 Work；否则保留人工 gate。打印 `✓ auto: phase 2 → 3` 或 `⚠ manual gate kept: phase 2 — <原因>`。
+Auto mode：任务数 ≤ 8 且无 L3/L4 task、无明显 scope 不一致、入场 checklist 三项全部回答时直接进入 Work；否则保留人工 gate。打印 `✓ auto: phase 2 → 3` 或 `⚠ manual gate kept: phase 2 — <原因>`。
 
 Caveman mode 输出只展示任务表和验证策略；完整方案写入 sprint 文档，不在对话中重复。
+
+**跨 sprint 入场 checklist (Phase 2 强制)**：详见下方「跨 Sprint 防漂移协议 → 入场 checklist」段。三项任一空白视为 Plan 未完成。
 
 ### Phase 3: Work (含自动 checkpoint)
 
@@ -193,8 +196,11 @@ Done: Task N
 Changed: <files>
 Risk: Lx
 Test: <command> -> pass/fail/skipped
+Invariants: <列表> -> pass/fail
 Next: Task N+1
 ```
+
+**每 Task 完成强制跑「不变量回归」**：除本 task 新增测试外，必须额外跑 sprint 文档 `invariant_tests` 字段列出的所有测试 + 涉及子系统的 perf benchmark。任一回归挂掉立即升级为 P0，本 task 不算完成。
 
 达到 checkpoint 条件时必须生成 compact handoff，并提示先 `/compound` 再 `/compact`。
 
@@ -225,12 +231,22 @@ Next: Task N+1
 
 ```
 Phase 4/5: Review
-[执行 /review，多视角审查]
+[执行 /review，多视角审查 (5 + 1 视角)]
 [审查报告写入文档]
 → P0 自动修复 → P1 确认 → 'go' 进入 Compound
 ```
 
-Auto mode：obvious P0（typo / 缺 import / null check）自动修复并继续；语义级 P0、destructive 改动、L4 任务相关 P0 仍保留人工 gate。P1 默认跳过确认进入 Compound；P0 强制项必须问。
+**第 6 视角 — 集成连续性（跨 sprint, 强制）**：5 视角（架构 / 安全 / 性能 / 代码质量 / 测试覆盖）之外必加。检查项：
+
+1. 本 sprint 改动是否破坏前 sprint 立的 invariant（reload `invariants` frontmatter 字段逐条 verify）
+2. 是否引入 dead code（新建 API / export 被 import 次数 == 0）
+3. 是否让前 sprint 的设计意图无法实现（如前 sprint 留的"待 UI 接线"在本 sprint 仍空）
+4. 本 sprint 留的中间状态在下个 sprint 走通整链路要多大工作量
+5. 是否有"半下沉漂移"（shared / web / api 边界中间状态无 timeline）
+
+第 6 视角发现破坏 invariant 或新增 dead code 一律视为 P0/P1 必修。
+
+Auto mode：obvious P0（typo / 缺 import / null check）自动修复并继续；语义级 P0、destructive 改动、L4 任务相关 P0、第 6 视角任一 finding 仍保留人工 gate。P1 默认跳过确认进入 Compound；P0 强制项必须问。
 
 Caveman mode review 展示：
 
@@ -300,7 +316,125 @@ Compact: yes/no + reason
 
 预热段失败（如无法确定下一 phase 关键文件）时，输出 `预热: 跳过 — <原因>` 即可，不阻塞流程。
 
-## Sprint 文档 frontmatter（Obsidian 兼容）
+## 跨 Sprint 防漂移协议（Anti-Drift）
+
+Sprint 拆分降低单次风险，但放大长期漂移。多 sprint 任务要保证质量，必须显式建模"跨 sprint 状态"。
+
+### 为什么需要
+
+Sprint 边界默认切断 3 类信息流：
+
+1. **跨 sprint 不变量**：上 sprint 立的纪律（如 useMemo / nodeTypes 模块级常量）在新 sprint 看不到 diff，容易回归
+2. **跨层集成路径**：API 在 task A，UI 在 task B，单 task acceptance 都通过但联起来是 dead code 或静默丢失
+3. **历史决策语境**：上 sprint 留的"暂不做"在新 sprint 启动时无人盘点，半完成状态无限延期
+
+不防护就会出现 3 类典型反模式：
+
+| 反模式 | 实例 | 单 sprint review 为什么漏 |
+|--------|------|--------------------------|
+| 回归式反模式 | 上 sprint 加的 useMemo 在新 sprint 同类代码处缺失 | review 只看本 sprint diff，feedback memory 存在但无强制 cross-check |
+| 集成断裂 | API 全套建好但 UI 不调用；state 校验通过但保存路径不含它 | 每 task acceptance 只检查"本 task 完成"，没有"用户走通整条路径" |
+| 半完成漂移 | shared 下沉到一半；大文件持续新增不拆 | 单 sprint 看每改动都合理，无人监督整体方向是否仍一致 |
+
+### 入场 checklist（Phase 2 Plan 强制）
+
+每次新 sprint 进入 Phase 2 必须显式回答以下三项，写入 sprint 文档"## Phase 2: 技术方案"段开头：
+
+#### 1. 回归扫描
+
+列出本 sprint 触及的子系统在之前 sprint 立过的 invariant，每条作为本 sprint 隐式 acceptance：
+
+```markdown
+### 入场扫描 - Invariants 继承
+
+| 子系统 | 上 sprint invariant | 本 sprint 如何保持 |
+|--------|---------------------|--------------------|
+| ReactFlow | nodeTypes 模块级 const, adapter useMemo | 新接入文件复用相同模式 |
+| TS↔Go DAG | sync test 守拓扑同步 | 改 DEFAULT_STAGE_DAG 必须同步 Go |
+```
+
+实操：在父需求 `docs/plans/<parent>.md` 或前置 sprint 文档的 frontmatter 中查 `invariants:` 字段，逐条照搬。
+
+#### 2. 集成路径声明
+
+每个新建 API / 持久化状态 / 跨层组件，必须画出"用户从点击到持久化再到刷新可见的完整链路"：
+
+```markdown
+### 入场扫描 - 集成路径
+
+| 改动点 | 触发动作 | 中间层 | 持久化 | 刷新后可见 |
+|--------|----------|--------|--------|------------|
+| customEdges 拖线 | onConnect | setState | ❌ 内存 only | ❌ 丢失 |
+| Layout API | savePipelineGraphLayout | controller → supabase | ✅ jsonb | ❌ UI 不调用 |
+```
+
+任一链路有"❌"必须显式归属：要么本 sprint 收口（添加缺失环节），要么文档化推迟到下一 sprint 并加 feature gate / 预览 banner 防止静默丢失。
+
+#### 3. 半完成债务清单
+
+上 sprint 留的 `⏭ Sprint X 议题` 必须二选一：
+
+- **本 sprint 解决**：作为 task 加入 Phase 3 任务表
+- **明确推迟**：写入 frontmatter `deferred:` 字段，附 deadline；超过 3 sprint 未落地必须正式撤回（写入"不做"决策，不再算半完成）
+
+```markdown
+### 入场扫描 - 债务清单
+
+| 来源 sprint | 议题 | 本 sprint 决策 | deadline |
+|-------------|------|----------------|----------|
+| Sprint A | adapter 下沉 shared | ⏭ Sprint C | 2026-06-01 |
+| Sprint B | editor-core 拆分 | ⏭ Sprint C | 2026-06-01 |
+```
+
+任一项空白即 Plan 不通过，强制 manual gate。
+
+### Phase 3 局部回归（每 Task 完成）
+
+每 Task 收尾必须跑（不只是本 task 新增测试）：
+
+```bash
+# 1. 本 task 新增测试（默认）
+# 2. invariant_tests frontmatter 列表（强制）
+# 3. 涉及子系统的 perf benchmark（强制）
+# 4. TS↔Go contract test / sync test（如适用）
+```
+
+实操：sprint 文档 frontmatter 加 `invariant_tests:` 字段（见下方 frontmatter 示例）；Phase 3 Work 阶段每 task done 时自动跑这个列表。
+
+### Phase 4 第 6 视角
+
+见上方 Phase 4: Review 段的「第 6 视角 — 集成连续性」。
+
+### 架构纪律标签
+
+代码层面预防漂移，通过显式标签把"软纪律"变成"硬约束"：
+
+| 标签 | 用途 | 实例 |
+|------|------|------|
+| `@FeatureGate("<name>")` 装饰器 | dead code API 必须挂 feature gate, 未启用时即使后端可用也 404 | Layout API 未接 UI 时 `@FeatureGate("layouts-ui")` |
+| `Persistence: "memory" \| "session" \| "server"` 类型标签 | `useState` 涉及业务数据必须显式声明持久化层级 | `customEdges: PersistedState<"memory", Edge[]>` |
+| `// @sizebudget <N>` 注释 | 大文件加行数上限注释, pre-commit hook 拒绝超额提交 | `// @sizebudget 800` |
+| `@sprint-X-invariant` 测试标签 | sprint 立的不变量打标签, 所有后续 sprint 必跑 | `describe.concurrent("@sprint-a-invariant: ReactFlow perf", ...)` |
+| `// @deadcode-until: <sprint>` 注释 | 标注"建好暂不用"代码, 必有 sprint deadline | Layout controller 顶部加 `// @deadcode-until: Sprint C` |
+
+### Sprint 内 checkpoint 额外触发条件
+
+Phase 3 中除"每 5 task / 退化信号"之外，新增触发条件：
+
+- **invariant test 失败**：必 checkpoint 排查根因，不允许"暂时跳过"
+- **新增 dead code 探测**：本 sprint 新增 API export 但 import 计数为 0 时打印警告，是否 checkpoint 由用户决定
+
+### 复盘审计（每 2-3 sprint 一次）
+
+跑"半完成债务清单"审计：
+
+- 所有 `⏭ Sprint X 议题` 列项目要么落地要么撤回
+- 不允许无限延期；超过 3 sprint 未落地必须正式撤回（写入"不做"决策）
+- 审计结果写入根 sprint 文档（父需求）或独立 audit doc
+
+实操：会话中说"`/sprint audit`" 触发，本 skill 扫描 `docs/plans/*.md` 的所有 `deferred:` 字段，输出过期/未跟踪条目清单。
+
+## Sprint 文档 frontmatter（Obsidian 兼容 + Anti-Drift 扩展）
 
 ```yaml
 ---
@@ -314,6 +448,36 @@ tasks_total: 8
 tasks_completed: 8
 tags: [sprint, feature]
 aliases: ["用户导出"]
+
+# === Anti-Drift 扩展字段 ===
+
+# 本 sprint 立的不变量，后续 sprint 必须保持
+invariants:
+  - "ReactFlow nodeTypes 必须模块级 const"
+  - "adapter 输出必须 useMemo 包装"
+  - "TS DEFAULT_STAGE_DAG 与 Go defaultStageDAG sync test 守住"
+
+# 本 sprint 的不变量回归测试入口（Phase 3 每 task 必跑）
+invariant_tests:
+  - apps/web/app/ui/graph/__tests__/perf-bench.test.ts
+  - apps/api/src/snapshot/snapshot.service.spec.ts  # 含 TS↔Go sync test
+
+# 留给后续 sprint 的议题，标明 deadline；超过 3 sprint 未落地必须撤回
+deferred:
+  - sprint: C
+    item: "adapter 下沉 shared (Sprint A 决策)"
+    deadline: "2026-06-01"
+    reason: "等 customEdges 持久化决策"
+  - sprint: C
+    item: "editor-core 1900+ 行拆分"
+    deadline: "2026-06-01"
+    reason: "Sprint A + B 累积技术债"
+
+# 本 sprint 引入的 dead code / feature-gated 代码, 必填 owner 和 unblock 条件
+deadcode_until:
+  - path: "apps/api/src/pipeline-layouts/"
+    until_sprint: C
+    unblock: "editor-core 接入 fetchPipelineGraphLayout / save"
 ---
 ```
 
