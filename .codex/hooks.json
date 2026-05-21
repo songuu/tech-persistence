@@ -1,0 +1,51 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ~/.claude/skills/continuous-learning/hooks/observe.js pre 2>/dev/null || true",
+            "timeout": 2000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ~/.claude/skills/continuous-learning/hooks/observe.js post 2>/dev/null || true",
+            "timeout": 2000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ~/.claude/skills/continuous-learning/hooks/inject-context.js 2>/dev/null || true",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ~/.claude/skills/continuous-learning/hooks/evaluate-session.js 2>/dev/null || true",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}
