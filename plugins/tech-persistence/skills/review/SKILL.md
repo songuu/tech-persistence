@@ -135,6 +135,30 @@ STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
 1. **评估风险**：先判定变更的最高 risk 等级（L0-L4，见 `~/.codex/AGENTS.md` 测试规则）。
 2. **选择子集**：按下方 Dispatch Matrix 决定跑哪些视角。
 3. **打印派遣记录**：审查报告开头必须列出跑了哪些、跳过哪些、为什么。
+4. **执行 Gap Detection Walkthrough**：在 Findings 前检查"测试/规则已覆盖"与"真实工作流仍可能断裂"之间的缺口。
+
+### Gap Detection Walkthrough
+
+**目的**：吸收 GSD `verify-work` 的有效部分，但不新增 `/uat` 或 GSD 命令。审查不仅看 diff 是否局部正确，还要问：现有测试、hook、projection、invariant 是否真的覆盖了用户会触发的工作流。
+
+审查报告在派遣记录后、Findings 前必须包含：
+
+```markdown
+## Gap Detection Walkthrough
+| workflow / invariant | existing coverage | uncovered gap | action |
+|----------------------|-------------------|---------------|--------|
+| <用户路径或跨 sprint invariant> | <已有测试/脚本/人工验证> | <未覆盖缺口或 none> | <finding / follow-up / skip reason> |
+```
+
+触发规则：
+
+| Risk | 要求 |
+|------|------|
+| L0 / L1 | 可跳过，但必须写跳过原因，例如"纯文案/样式，无跨 workflow invariant" |
+| L2 | 至少检查测试覆盖与用户路径是否断裂；如改文档 SoT，检查 projection 是否同步 |
+| L3 / L4 | 强制检查跨 runtime、projection、hook、state artifact、安全边界、回滚路径 |
+
+若发现 "existing tests pass but workflow still broken" 风险，按 P1+ finding 处理。若发现跨 sprint invariant 破坏，按第 6 视角规则升级为 P0/P1。
 
 ### Dispatch Matrix
 

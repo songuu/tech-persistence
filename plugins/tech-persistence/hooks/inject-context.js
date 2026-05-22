@@ -102,22 +102,101 @@ function addSection(sections, title, body, maxChars) {
   });
 }
 
-function renderSections(sections) {
-  let remaining = CONTEXT_BUDGET_CHARS;
+function renderSectionsWithStats(sections, budgetChars = CONTEXT_BUDGET_CHARS) {
+  let remaining = budgetChars;
   const rendered = [];
+  const sectionStats = [];
+  let sourceChars = 0;
+  let injectedChars = 0;
 
   for (const section of sections) {
-    if (remaining <= 0) break;
+    const sourceBody = String(section.body || '').trim();
     const heading = `## ${section.title}\n\n`;
+    const selectedChars = heading.length + sourceBody.length;
+    sourceChars += selectedChars;
+    if (remaining <= 0) {
+      sectionStats.push({
+        title: section.title,
+        sourceChars: selectedChars,
+        injectedChars: 0,
+        truncated: sourceBody.length > 0,
+      });
+      continue;
+    }
     const available = Math.max(0, remaining - heading.length);
-    const body = section.body.slice(0, available).trim();
-    if (!body) continue;
+    const body = sourceBody.slice(0, available).trim();
+    if (!body) {
+      sectionStats.push({
+        title: section.title,
+        sourceChars: selectedChars,
+        injectedChars: 0,
+        truncated: sourceBody.length > 0,
+      });
+      continue;
+    }
     const block = `${heading}${body}`;
     rendered.push(block);
+    injectedChars += block.length;
+    sectionStats.push({
+      title: section.title,
+      sourceChars: selectedChars,
+      injectedChars: block.length,
+      truncated: body.length < sourceBody.length,
+    });
     remaining -= block.length + 2;
   }
 
-  return rendered.join('\n\n');
+  return {
+    text: rendered.join('\n\n'),
+    stats: {
+      budgetChars,
+      sourceChars,
+      injectedChars,
+      estimatedTokens: Math.ceil(injectedChars / 4),
+      selectedSections: sections.length,
+      injectedSections: sectionStats.filter((s) => s.injectedChars > 0).length,
+      truncatedSections: sectionStats.filter((s) => s.truncated).map((s) => s.title),
+      sections: sectionStats,
+    },
+  };
+}
+
+function renderSections(sections) {
+  return renderSectionsWithStats(sections).text;
+}
+
+function shouldIncludeContextCostSummary(stats, env = process.env) {
+  const flag = String(env.TECH_PERSISTENCE_CONTEXT_COST_SUMMARY || '').toLowerCase();
+  if (['1', 'true', 'yes', 'always'].includes(flag)) return true;
+  if (!stats || !stats.budgetChars) return false;
+  return stats.injectedChars >= Math.floor(stats.budgetChars * 0.8)
+    || stats.truncatedSections.length > 0;
+}
+
+function renderContextCostSummary(stats) {
+  const truncated = stats.truncatedSections.slice(0, 3);
+  const truncatedText = truncated.length > 0
+    ? `; truncated=${truncated.join(', ')}${stats.truncatedSections.length > truncated.length ? ', ...' : ''}`
+    : '';
+  return [
+    `context=${stats.injectedChars}/${stats.budgetChars} chars`,
+    `~${stats.estimatedTokens} tokens`,
+    `sections=${stats.injectedSections}/${stats.selectedSections}`,
+    `selected=${stats.sourceChars} chars${truncatedText}`,
+  ].join('; ');
+}
+
+function renderContextWithOptionalCostSummary(sections, projectName, env = process.env) {
+  let rendered = renderSectionsWithStats(sections);
+  let finalSections = sections;
+  if (shouldIncludeContextCostSummary(rendered.stats, env)) {
+    const summary = renderContextCostSummary(rendered.stats);
+    finalSections = [{ title: 'Context cost summary', body: summary }, ...sections];
+    rendered = renderSectionsWithStats(finalSections);
+  }
+  return `<learned-context project="${projectName}">
+${rendered.text}
+</learned-context>`;
 }
 
 /**
@@ -340,9 +419,7 @@ function main() {
     process.exit(0);
   }
 
-  const context = `<learned-context project="${project.name}">
-${renderSections(sections)}
-</learned-context>`;
+  const context = renderContextWithOptionalCostSummary(sections, project.name);
 
   const output = JSON.stringify({
     hookSpecificOutput: {
@@ -358,4 +435,11 @@ if (require.main === module) {
   try { main(); } catch { process.exit(0); }
 }
 
-module.exports = { detectActiveSprintTags };
+module.exports = {
+  detectActiveSprintTags,
+  renderSections,
+  renderSectionsWithStats,
+  shouldIncludeContextCostSummary,
+  renderContextCostSummary,
+  renderContextWithOptionalCostSummary,
+};
