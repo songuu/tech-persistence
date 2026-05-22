@@ -199,36 +199,66 @@ ${rendered.text}
 </learned-context>`;
 }
 
+const HANDOFF_FILE_RE = /(?:^session-.+-handoff|-handoff-\d+(?:-compact)?)\.md$/;
+
+function listHandoffCandidates(dir, displayPrefix) {
+  if (!fs.existsSync(dir)) return [];
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && HANDOFF_FILE_RE.test(entry.name))
+      .map((entry) => {
+        const fullPath = path.join(dir, entry.name);
+        const stat = fs.statSync(fullPath);
+        return {
+          fullPath,
+          displayPath: `${displayPrefix}/${entry.name}`,
+          mtimeMs: stat.mtimeMs,
+        };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs || b.displayPath.localeCompare(a.displayPath));
+  } catch {
+    return [];
+  }
+}
+
 /**
- * 检测未完成的 sprint handoff 文件
- * 查找 docs/plans/ 下最新的 *-handoff-*.md
+ * 检测未完成的 sprint/session handoff 文件。
+ * 优先读取 docs/plans/.handoff/，仅为兼容历史数据回退到 docs/plans/ 顶层。
  */
-function detectPendingHandoff() {
-  const plansDir = path.join(process.cwd(), 'docs', 'plans');
+function detectPendingHandoff(options = {}) {
+  const repoRoot = options.repoRoot || process.cwd();
+  const plansDir = options.plansDir || path.join(repoRoot, 'docs', 'plans');
   if (!fs.existsSync(plansDir)) return null;
 
-  const handoffs = fs.readdirSync(plansDir)
-    .filter(f => f.includes('-handoff-') && f.endsWith('.md'))
-    .sort()
-    .reverse();
+  const candidateGroups = [
+    listHandoffCandidates(path.join(plansDir, '.handoff'), 'docs/plans/.handoff'),
+    listHandoffCandidates(plansDir, 'docs/plans'),
+  ];
 
-  if (handoffs.length === 0) return null;
+  for (const candidates of candidateGroups) {
+    for (const candidate of candidates) {
+      let content;
+      try {
+        content = fs.readFileSync(candidate.fullPath, 'utf-8');
+      } catch {
+        continue;
+      }
 
-  const latest = handoffs[0];
-  const content = fs.readFileSync(path.join(plansDir, latest), 'utf-8');
+      // 检查关联的 sprint 文档是否还是 in-progress/checkpoint 状态。
+      const sprintDocMatch = content.match(/sprint_doc:\s*"?([^"\n]+)"?/);
+      if (sprintDocMatch) {
+        const sprintDocPath = path.join(repoRoot, sprintDocMatch[1]);
+        if (fs.existsSync(sprintDocPath)) {
+          const sprintContent = fs.readFileSync(sprintDocPath, 'utf-8');
+          if (sprintContent.match(/status:\s*completed/)) continue;
+        }
+      }
 
-  // 检查关联的 sprint 文档是否还是 in-progress/checkpoint 状态
-  const sprintDocMatch = content.match(/sprint_doc:\s*"?([^"\n]+)"?/);
-  if (sprintDocMatch) {
-    const sprintDocPath = path.join(process.cwd(), sprintDocMatch[1]);
-    if (fs.existsSync(sprintDocPath)) {
-      const sprintContent = fs.readFileSync(sprintDocPath, 'utf-8');
-      // 如果 sprint 已经 completed 则不注入 handoff
-      if (sprintContent.match(/status:\s*completed/)) return null;
+      return { file: candidate.displayPath, content };
     }
   }
 
-  return { file: latest, content: content };
+  return null;
 }
 
 /**
@@ -334,7 +364,7 @@ function main() {
     addSection(
       sections,
       '未完成的 Sprint (从 checkpoint 恢复)',
-      `文件: docs/plans/${handoff.file}\n\n${handoff.content}`,
+      `文件: ${handoff.file}\n\n${handoff.content}`,
       1500
     );
   }
@@ -436,6 +466,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  detectPendingHandoff,
   detectActiveSprintTags,
   renderSections,
   renderSectionsWithStats,

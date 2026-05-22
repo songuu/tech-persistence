@@ -133,6 +133,44 @@ function readJson(file) {
   }
 }
 
+function collectHookCommands(value, commands = []) {
+  if (!value) return commands;
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectHookCommands(item, commands));
+    return commands;
+  }
+  if (typeof value !== 'object') return commands;
+  if (typeof value.command === 'string') commands.push(value.command);
+  Object.values(value).forEach((item) => collectHookCommands(item, commands));
+  return commands;
+}
+
+function validateProjectHookPortability() {
+  const hooksPath = path.join(root, '.codex', 'hooks.json');
+  if (!fs.existsSync(hooksPath)) {
+    ok('project .codex/hooks.json missing');
+    return;
+  }
+
+  const hooksConfig = readJson(hooksPath);
+  if (!hooksConfig) return;
+
+  const forbidden = [
+    { pattern: /~\/\.claude/, reason: 'home-scoped Claude path' },
+    { pattern: /\.claude[\\/]/, reason: 'Claude-only runtime directory' },
+    { pattern: /continuous-learning[\\/]hooks/, reason: 'legacy skill hook path' },
+  ];
+  const badCommands = collectHookCommands(hooksConfig)
+    .filter((command) => forbidden.some((rule) => rule.pattern.test(command)));
+
+  if (badCommands.length > 0) {
+    fail(`project .codex/hooks.json contains non-portable hook commands: ${badCommands.join(' | ')}`);
+    return;
+  }
+
+  ok('project .codex/hooks.json uses project-local hook commands');
+}
+
 function stat(file) {
   try {
     return fs.lstatSync(file);
@@ -264,6 +302,7 @@ function validateNoClaudeOnlyText(dir, label) {
 }
 
 if (!exists(pluginRoot, 'plugin root')) process.exit(1);
+validateProjectHookPortability();
 
 const manifestPath = path.join(pluginRoot, '.codex-plugin', 'plugin.json');
 if (isFile(manifestPath, 'plugin manifest')) {

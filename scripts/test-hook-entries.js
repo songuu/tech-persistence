@@ -59,6 +59,17 @@ function withTempHome(fn) {
   withEnv({ HOME: root, USERPROFILE: root }, () => fn(root));
 }
 
+function withTempCwd(fn) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-hook-cwd-'));
+  const previous = process.cwd();
+  process.chdir(root);
+  try {
+    fn(root);
+  } finally {
+    process.chdir(previous);
+  }
+}
+
 function clearRequireCache() {
   // 清缓存让 readConfigMode 重新读 os.homedir
   delete require.cache[require.resolve('./caveman-activate.js')];
@@ -230,6 +241,43 @@ test('E2 observe.js require does NOT auto-write observations.jsonl', () => {
   const after = fs.readdirSync(__dirname);
   assert.deepStrictEqual(before, after, 'require should not create files');
   assert.strictEqual(typeof m.main, 'function');
+});
+
+test('E3 evaluate-session autoCheckpoint writes handoffs under docs/plans/.handoff', () => {
+  withTempCwd((root) => {
+    const plansDir = path.join(root, 'docs', 'plans');
+    fs.mkdirSync(plansDir, { recursive: true });
+
+    const m = require('./evaluate-session.js');
+    assert.strictEqual(typeof m.autoCheckpoint, 'function');
+    const checkpoint = m.autoCheckpoint(
+      {
+        file: '2026-05-22-demo-sprint.md',
+        status: 'work',
+        content: '- [x] Done\n- [ ] Todo\n',
+      },
+      [{ phase: 'post', tool: 'Edit', input_summary: 'path "scripts/foo.js"' }]
+    );
+
+    const expectedRel = 'docs/plans/.handoff/2026-05-22-demo-sprint-handoff-1.md';
+    assert.strictEqual(checkpoint.file, expectedRel);
+    assert.ok(fs.existsSync(path.join(root, expectedRel)), 'handoff should be written under .handoff');
+    assert.ok(
+      !fs.existsSync(path.join(plansDir, '2026-05-22-demo-sprint-handoff-1.md')),
+      'handoff must not be written to top-level docs/plans'
+    );
+  });
+});
+
+// ============================================================
+// .codex/hooks.json runtime boundary
+// ============================================================
+
+test('F1 project .codex/hooks.json must not hard-code ~/.claude runtime paths', () => {
+  const hooksPath = path.join(__dirname, '..', '.codex', 'hooks.json');
+  const content = fs.readFileSync(hooksPath, 'utf8');
+  assert.ok(!content.includes('~/.claude'), '.codex/hooks.json must not reference ~/.claude');
+  assert.ok(!content.includes('.claude/skills'), '.codex/hooks.json must not reference Claude skill paths');
 });
 
 // ============================================================

@@ -736,13 +736,22 @@ function autoCheckpoint(sprint, observations) {
   if (!sprint) return null;
 
   const plansDir = path.join(process.cwd(), 'docs', 'plans');
+  const handoffDir = path.join(plansDir, '.handoff');
+  fs.mkdirSync(handoffDir, { recursive: true });
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const timeStr = now.toISOString().split('T')[1].slice(0, 5);
 
   // 计算 handoff 编号
-  const existingHandoffs = fs.readdirSync(plansDir)
-    .filter(f => f.includes('-handoff-'))
+  const existingHandoffs = [plansDir, handoffDir]
+    .flatMap((dir) => {
+      try {
+        return fs.readdirSync(dir)
+          .filter(f => f.includes('-handoff-') && f.endsWith('.md'));
+      } catch {
+        return [];
+      }
+    })
     .length;
   const handoffNum = existingHandoffs + 1;
 
@@ -792,8 +801,8 @@ ${[...editedFiles].map(f => `- ${f}`).join('\n') || '- (无文件修改记录)'}
 - [[${baseName}]]
 `;
 
-  fs.writeFileSync(path.join(plansDir, handoffFile), handoffContent);
-  return { file: handoffFile, tasksDone, tasksTotal };
+  fs.writeFileSync(path.join(handoffDir, handoffFile), handoffContent);
+  return { file: `docs/plans/.handoff/${handoffFile}`, tasksDone, tasksTotal };
 }
 
 // ─── 主流程 ───
@@ -913,8 +922,16 @@ function main() {
   console.log('');
 }
 
-try { main(); } catch (err) {
-  // Hook 错误不应中断 Claude Code 主流程
-  // console.error('evaluate-session error:', err.message);
-  process.exit(0);
+if (require.main === module) {
+  try { main(); } catch (err) {
+    // Hook 错误不应中断 Claude Code 主流程
+    // console.error('evaluate-session error:', err.message);
+    process.exit(0);
+  }
 }
+
+module.exports = {
+  autoCheckpoint,
+  shouldAutoCheckpoint,
+  main,
+};

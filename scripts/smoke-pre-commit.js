@@ -217,6 +217,17 @@ function scenarioRulesPathOutOfSync() {
   assert(/--rules auto-mode/.test(res.stderr), `expected derived repair command with --rules, got: ${res.stderr}`);
 }
 
+function scenarioTopLevelHandoffBlocked() {
+  const dir = makeRepo('handoff');
+  writeFile(dir, 'docs/plans/demo-handoff-1.md', '---\ntype: sprint-handoff\n---\n# Handoff\n');
+  gitAdd(dir, 'docs/plans/demo-handoff-1.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/Top-level handoff/.test(res.stderr), `stderr missing top-level handoff error: ${res.stderr}`);
+  assert(/docs\/plans\/\.handoff/.test(res.stderr), `stderr missing .handoff repair path: ${res.stderr}`);
+}
+
 function scenarioFailOpenOnMissingTransformer() {
   // This is the hook's keystone promise: if a hook-internal dependency disappears,
   // the commit must still pass. Tests that the MISSING_TRANSFORMERS path produces
@@ -693,20 +704,21 @@ function main() {
   runScenario('S4: new plan doc with 关键假设验证 → exit 0', scenarioPlanWithAssumptionSection);
   runScenario('S5: grandfathered old plan (filename date < 2026-05-12) → exit 0', scenarioGrandfatheredPlan);
   runScenario('S6: user-level/rules/ source out of sync → exit 1 with --rules in repair cmd', scenarioRulesPathOutOfSync);
-  runScenario('S7: missing transformer module → exit 0 with fail-open diagnostic', scenarioFailOpenOnMissingTransformer);
-  runScenario('S8: orchestrator src+plugin synced → exit 0 (not fail-open)', scenarioOrchestratorSynced);
-  runScenario('S9: orchestrator plugin tampered → exit 1 with file name + sha mismatch', scenarioOrchestratorTampered);
-  runScenario('S10: orchestrator source CRLF + plugin LF → exit 0 (LF-normalized)', scenarioOrchestratorCRLFSource);
-  runScenario('S11: orchestrator source submodule deleted, plugin remains → exit 1 (orphan)', scenarioOrchestratorSourceDeletedOrphan);
-  runScenario('S12: nested subdir under scripts/agent-orchestrator/ → exit 1 (non-recursive build)', scenarioOrchestratorNestedSubdir);
-  runScenario('S13a: sprint completed + checked task path in diff → exit 0 (not fail-open)', scenarioPlanCompletionPathInDiff);
-  runScenario('S13b: sprint completed + checked task path missing → exit 1 with C7 marker + path', scenarioPlanCompletionPathMissing);
-  runScenario('S13c: sprint completed + checked task without inline-code path → exit 0 (research skip)', scenarioPlanCompletionNoCodeTask);
-  runScenario('S13d: type=plan (not sprint) + status=completed → exit 0 (non-sprint skip)', scenarioPlanCompletionNotSprintType);
-  runScenario('S13e: sprint type but status=in-progress → exit 0 (status skip)', scenarioPlanCompletionStatusNotCompleted);
-  runScenario('S13f: grandfathered date + completed + path missing → exit 0', scenarioPlanCompletionGrandfathered);
-  runScenario('S14a: docs/solutions changed but index/projections stale → exit 1', scenarioSolutionIndexChangedNotSynced);
-  runScenario('S14b: docs/solutions changed and index/projections synced → exit 0', scenarioSolutionIndexChangedAndSynced);
+  runScenario('S7: top-level docs/plans/*-handoff-*.md staged → exit 1', scenarioTopLevelHandoffBlocked);
+  runScenario('S8: missing transformer module → exit 0 with fail-open diagnostic', scenarioFailOpenOnMissingTransformer);
+  runScenario('S9: orchestrator src+plugin synced → exit 0 (not fail-open)', scenarioOrchestratorSynced);
+  runScenario('S10: orchestrator plugin tampered → exit 1 with file name + sha mismatch', scenarioOrchestratorTampered);
+  runScenario('S11: orchestrator source CRLF + plugin LF → exit 0 (LF-normalized)', scenarioOrchestratorCRLFSource);
+  runScenario('S12: orchestrator source submodule deleted, plugin remains → exit 1 (orphan)', scenarioOrchestratorSourceDeletedOrphan);
+  runScenario('S13: nested subdir under scripts/agent-orchestrator/ → exit 1 (non-recursive build)', scenarioOrchestratorNestedSubdir);
+  runScenario('S14a: sprint completed + checked task path in diff → exit 0 (not fail-open)', scenarioPlanCompletionPathInDiff);
+  runScenario('S14b: sprint completed + checked task path missing → exit 1 with C7 marker + path', scenarioPlanCompletionPathMissing);
+  runScenario('S14c: sprint completed + checked task without inline-code path → exit 0 (research skip)', scenarioPlanCompletionNoCodeTask);
+  runScenario('S14d: type=plan (not sprint) + status=completed → exit 0 (non-sprint skip)', scenarioPlanCompletionNotSprintType);
+  runScenario('S14e: sprint type but status=in-progress → exit 0 (status skip)', scenarioPlanCompletionStatusNotCompleted);
+  runScenario('S14f: grandfathered date + completed + path missing → exit 0', scenarioPlanCompletionGrandfathered);
+  runScenario('S15a: docs/solutions changed but index/projections stale → exit 1', scenarioSolutionIndexChangedNotSynced);
+  runScenario('S15b: docs/solutions changed and index/projections synced → exit 0', scenarioSolutionIndexChangedAndSynced);
 
   process.stdout.write(`\nresult: ${passed} passed, ${failed} failed\n`);
 

@@ -39,7 +39,7 @@ Task 4 → Task 5 → ... → ⚡ CHECKPOINT（如果需要）
 
 ## 交接文件格式
 
-路径：`docs/plans/{sprint-doc-name}-handoff-{N}.md`
+路径：`docs/plans/.handoff/{sprint-doc-name}-handoff-{N}.md`
 
 ```yaml
 ---
@@ -103,7 +103,7 @@ tags: [handoff, sprint]
 
 ## 恢复流程
 
-新会话开始时，SessionStart Hook 自动检测最新的 handoff 文件。
+新会话开始时，SessionStart Hook 优先从 `docs/plans/.handoff/` 自动检测最新的 handoff 文件。
 或者用户说 "继续 sprint" 时：
 
 1. 读取最新 handoff 文件

@@ -34,6 +34,7 @@ const ORCHESTRATOR_PATH_RE = /^(?:scripts|plugins\/tech-persistence\/scripts)\/a
 // — independent of frontmatter, which may be missing or have CRLF issues.
 const GRANDFATHER_BEFORE = '2026-05-12';
 const PLAN_PATH_RE = /^docs\/plans\/(\d{4}-\d{2}-\d{2})-.+\.md$/;
+const TOP_LEVEL_HANDOFF_PATH_RE = /^docs\/plans\/(?:session-[^/]+-handoff|[^/]+-handoff-\d+(?:-compact)?)\.md$/;
 
 function resolveRepoRoot(cwd = process.cwd()) {
   try {
@@ -301,6 +302,13 @@ function checkPlanScope(stagedFiles, repoRoot) {
   return failures;
 }
 
+function checkTopLevelHandoffs(stagedFiles, repoRoot) {
+  return stagedFiles
+    .filter((f) => TOP_LEVEL_HANDOFF_PATH_RE.test(f))
+    .filter((f) => fs.existsSync(path.join(repoRoot, f)))
+    .sort();
+}
+
 function checkPlanCompletion(stagedFiles, repoRoot) {
   // C7 / ADR-013: a sprint marked status:completed must actually have touched
   // at least one of the inline-code paths mentioned in each checked task line.
@@ -560,6 +568,26 @@ function formatPlanError(failures) {
   return lines.join('\n');
 }
 
+function formatTopLevelHandoffError(files) {
+  const lines = [
+    '',
+    '✗ Top-level handoff guard 失败: handoff 是临时恢复上下文，不能写入 docs/plans/ 顶层',
+    '',
+  ];
+  for (const file of files) {
+    lines.push(`  ${file}`);
+    lines.push('    × 请移动到 docs/plans/.handoff/（该目录已 gitignore）或不要提交临时 handoff');
+  }
+  lines.push('');
+  lines.push('  修复:');
+  lines.push('    先创建 docs/plans/.handoff/（若不存在）');
+  lines.push('    git restore --staged <handoff-file>');
+  lines.push('    move <handoff-file> docs/plans/.handoff/');
+  lines.push('  若是清理历史 handoff，请只 stage 删除，不要提交顶层新增/修改内容。');
+  lines.push('');
+  return lines.join('\n');
+}
+
 function main() {
   const repoRoot = resolveRepoRoot();
   const stagedFiles = getStagedFiles(repoRoot);
@@ -573,12 +601,14 @@ function main() {
     ...checkOrchestratorSync(stagedFiles, repoRoot),
   ];
   const failures = checkPlanScope(stagedFiles, repoRoot);
+  const topLevelHandoffFailures = checkTopLevelHandoffs(stagedFiles, repoRoot);
   const completionFailures = checkPlanCompletion(stagedFiles, repoRoot);
   const solutionIndexFailures = checkSolutionIndexSync(stagedFiles, repoRoot);
 
   if (
     mismatches.length === 0
     && failures.length === 0
+    && topLevelHandoffFailures.length === 0
     && completionFailures.length === 0
     && solutionIndexFailures.length === 0
   ) {
@@ -587,6 +617,7 @@ function main() {
 
   if (mismatches.length > 0) process.stderr.write(formatPropagateError(mismatches));
   if (failures.length > 0) process.stderr.write(formatPlanError(failures));
+  if (topLevelHandoffFailures.length > 0) process.stderr.write(formatTopLevelHandoffError(topLevelHandoffFailures));
   if (completionFailures.length > 0) process.stderr.write(formatPlanCompletionError(completionFailures));
   if (solutionIndexFailures.length > 0) process.stderr.write(formatSolutionIndexError(solutionIndexFailures));
 
@@ -616,15 +647,18 @@ module.exports = {
   checkPropagateSync,
   checkOrchestratorSync,
   checkPlanScope,
+  checkTopLevelHandoffs,
   checkPlanCompletion,
   checkSolutionIndexSync,
   parseFrontmatter,
   deriveRepairCommand,
   formatPropagateError,
   formatPlanError,
+  formatTopLevelHandoffError,
   formatPlanCompletionError,
   formatSolutionIndexError,
   GRANDFATHER_BEFORE,
   PLAN_PATH_RE,
+  TOP_LEVEL_HANDOFF_PATH_RE,
   ORCHESTRATOR_PATH_RE,
 };

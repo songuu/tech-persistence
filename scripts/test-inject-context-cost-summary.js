@@ -7,8 +7,12 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const {
+  detectPendingHandoff,
   renderContextCostSummary,
   renderContextWithOptionalCostSummary,
   renderSections,
@@ -19,6 +23,13 @@ const {
 let passed = 0;
 let failed = 0;
 const failures = [];
+
+function withTempRepo(fn) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-inject-test-'));
+  const plansDir = path.join(root, 'docs', 'plans');
+  fs.mkdirSync(plansDir, { recursive: true });
+  return fn({ root, plansDir });
+}
 
 function test(name, fn) {
   try {
@@ -78,6 +89,27 @@ test('near-budget context triggers cost summary', () => {
   const rendered = renderSectionsWithStats([{ title: 'A', body: 'x'.repeat(75) }], 100);
   assert.ok(rendered.stats.injectedChars >= 80, `expected >=80 injected chars, got ${rendered.stats.injectedChars}`);
   assert.strictEqual(shouldIncludeContextCostSummary(rendered.stats, {}), true);
+});
+
+test('detectPendingHandoff reads gitignored .handoff directory before legacy top-level handoffs', () => {
+  withTempRepo(({ root, plansDir }) => {
+    const handoffDir = path.join(plansDir, '.handoff');
+    fs.mkdirSync(handoffDir, { recursive: true });
+    fs.writeFileSync(path.join(root, 'docs', 'plans', 'active-sprint.md'), '---\nstatus: in-progress\n---\n');
+    fs.writeFileSync(
+      path.join(plansDir, 'legacy-handoff-1.md'),
+      '---\nsprint_doc: "docs/plans/active-sprint.md"\n---\nlegacy'
+    );
+    fs.writeFileSync(
+      path.join(handoffDir, 'active-sprint-handoff-2.md'),
+      '---\nsprint_doc: "docs/plans/active-sprint.md"\n---\nnew handoff'
+    );
+
+    const handoff = detectPendingHandoff({ repoRoot: root, plansDir });
+    assert.ok(handoff, 'expected pending handoff');
+    assert.strictEqual(handoff.file, 'docs/plans/.handoff/active-sprint-handoff-2.md');
+    assert.ok(handoff.content.includes('new handoff'));
+  });
 });
 
 console.log('');
