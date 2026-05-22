@@ -32,6 +32,7 @@ sources:
    - **校验层**：Playwright 截图 + 与 Figma export PNG 做 visual diff，回路给 LLM 迭代
 4. 商业工具（Anima / Locofy / Builder.io Visual Copilot）在"快速 prototype"场景胜过通用 MCP，但**长期维护成本高**（vendor lock-in + 生成代码可读性 vs 你的代码规范脱节），solo / 小团队不推荐作为主路径。
 5. **本研究的推荐路径（按 5 年杠杆）**：先做 P0 (设计 tokens 同源) → P1 (Code Connect 关键组件) → P2 (verify 回路)。前两步覆盖你提的 color/font/spacing 痛点；第 3 步是终极保险。
+6. **已落地到 tech-persistence**：新增 `user-level/rules/figma-fidelity.md` / `.codex/rules/figma-fidelity.md`、`scripts/figma-fidelity-audit.js`、3 个模板（preflight / visual regression / Code Connect backlog），把建议变成可执行协议。
 
 ---
 
@@ -89,7 +90,7 @@ Figma 官方 Dev Mode MCP Server 提供的核心工具（截至 2026-05）：
 
 ### 2.3 当前 tech-persistence 仓库已有的 figma-implement-design skill
 
-system-reminder 列出的 figma-implement-design skill 已经声明使用"Figma MCP workflow (design context, screenshots, assets, and project-convention translation)"。但**没有强制调用 `get_variable_defs` / `get_code_connect_map`**——这是改进空间的第一站（属于 skill 改造，不在本研究 scope）。
+system-reminder 列出的 figma-implement-design skill 已经声明使用"Figma MCP workflow (design context, screenshots, assets, and project-convention translation)"。但**没有强制调用 `get_variable_defs` / `get_code_connect_map`**。后续已在本仓库新增 `figma-fidelity` rule 作为上层协议：不改官方 skill 本体，而是在项目规则里强制 preflight、门禁、输出表和验证阶梯。
 
 ---
 
@@ -298,8 +299,19 @@ system-reminder 列出的 figma-implement-design skill 已经声明使用"Figma 
 - 如果 get_variable_defs 返回空，停下来告诉我，让设计师建 Variables"
 ```
 
-**长期方案**（改 Anthropic 官方 figma-implement-design skill 描述）：
-- 改不动（系统 skill），但可以在自己项目 CLAUDE.md 加 figma-related 规则段
+**本仓库落地方案**：
+
+- `user-level/rules/figma-fidelity.md`：Claude/user-level 规则源。
+- `.codex/rules/figma-fidelity.md`：Codex 派生副本，由 `node scripts/propagate-command-changes.js --rules figma-fidelity` 同步。
+- `docs/templates/figma-fidelity-preflight.md`：每次 Figma -> code 前填写的 MCP evidence / token / component / verification 表。
+- `scripts/figma-fidelity-audit.js`：L1 token audit，阻止 hardcoded hex/rgb/hsl 和未登记视觉 px 回流。
+
+```bash
+node scripts/figma-fidelity-audit.js --paths <changed-files-or-dirs>
+npm run figma:audit -- --paths <changed-files-or-dirs>
+```
+
+官方 skill 不作为 source of truth 修改；本仓库用 rule + template + audit 脚本覆盖行为。
 
 ### 5.2 本周建议（方案 B - Design Tokens 同源）
 
@@ -472,6 +484,28 @@ npx playwright test
 | **像素级** | 截图 diff pixel ratio (0-1, 即 0-100%) | Playwright `toHaveScreenshot` / Percy / Chromatic | maxDiffPixelRatio < 0.03 (3%) |
 | **行为级** | Storybook interaction tests 通过率 | Storybook + @storybook/test | 100% |
 
+### 6.1.1 本仓库新增的 L1 审计
+
+`scripts/figma-fidelity-audit.js` 是最小可执行门禁：
+
+```bash
+node scripts/figma-fidelity-audit.js --paths src/pages/foo.tsx src/pages/foo.css
+node scripts/figma-fidelity-audit.js --json --paths src
+```
+
+默认检测：
+
+- hardcoded hex color：`#1677ff`
+- hardcoded color function：`rgb()` / `rgba()` / `hsl()` / `hsla()`
+- 大于 `1px` 的视觉 `px` 值
+
+默认放行：
+
+- token/theme/variables/style-dictionary/tailwind config 等 token 源文件
+- `0px` / `1px` hairline
+- 显式注释：`figma-fidelity-allow: reason`
+- 整文件注释：`figma-fidelity-audit: allow-file`
+
 ### 6.2 推荐工具组合（按预算）
 
 | 预算 | 像素 verify | 语义 verify | 行为 verify |
@@ -533,6 +567,7 @@ jobs:
 |------|------|---------|
 | 2026-05-22 | T1-T5 | 研究文档完成（一次性产出） |
 | 2026-05-22 | Review-P0/P1 | Phase 4 review 修复：调整推荐路径 E→B→C→A、新增 §5.2.5 设计师不配合 fallback 路径、商业工具价格更新 (Anima/Locofy/Builder.io 2026)、maxDiffPixelRatio 明示 ratio 0-1 单位、§3.D 客观性软化、§5.3 加 Code Connect 前置依赖 |
+| 2026-05-22 | Follow-up implementation | 落地 P0-P4：新增 `figma-fidelity` rule、Codex 派生副本、L1 audit 脚本+测试、preflight / visual regression / Code Connect 模板，并更新本研究文档 |
 
 ---
 

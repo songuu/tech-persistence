@@ -282,11 +282,13 @@ Knowledge: <N rules>, <M instincts>, <K signals>
 Compact: yes/no + reason
 ```
 
-## Phase 间预热协议
+## Phase 间预热协议（建议，非强制）
 
-每个 Phase 报告末尾**必须**追加「下一 Phase 预热」段，让用户 'go' 时模型上下文已就绪，节省 N→N+1 切换的探索往返。
+> **撤回历史**：2026-05-22 撤回"必须"约束。6 个月观察落地率 18% (9/49 plans)，价值未通过返工率量化，反方 cargo-cult 假设未被反驳。按 [[mechanism-over-discipline]] 隐含前提（协议先证明价值再 enforcement），降级为建议；接 enforcement 会触发 [[ADR-013]] enforcement 死亡风险（高频 `--no-verify`）。详见会话 2026-05-22 C2 评估。
 
-### 预热段格式（强制）
+每个 Phase 报告末尾**可选**追加「下一 Phase 预热」段，让用户 'go' 时模型上下文已就绪，节省 N→N+1 切换的探索往返。预热段非必填，跳过不视为协议违反。
+
+### 预热段格式（可选）
 
 ```text
 ## 下一 Phase 预热（Phase N+1: <名称>）
@@ -314,7 +316,7 @@ Compact: yes/no + reason
 - ❌ 不预先调用 LLM 生成下一 phase 的产物
 - ❌ 不修改任何文件，纯文本提示
 
-预热段失败（如无法确定下一 phase 关键文件）时，输出 `预热: 跳过 — <原因>` 即可，不阻塞流程。
+预热段失败（如无法确定下一 phase 关键文件）或主动跳过时，输出 `预热: 跳过 — <原因>` 即可，不阻塞流程；什么都不输出也合法（建议非强制）。
 
 ## 跨 Sprint 防漂移协议（Anti-Drift）
 
