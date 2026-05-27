@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const {
+  resolveBaseDir,
   resolveCompatReadDirs,
   resolveProjectPlansDir,
 } = require('./lib/runtime-paths');
@@ -21,6 +22,7 @@ const {
   detectProjectIdentity,
   loadUnifiedMemoryIndex,
   parseFrontmatter,
+  recordMemoryRecallMetric,
 } = require('./lib/memory-v5');
 
 const CONTEXT_BUDGET_CHARS = 12000;
@@ -392,11 +394,23 @@ function main() {
   // 0d. Memory v5: merge compatible runtime stores instead of shadowing by first hit
   // 按当前活跃 sprint 的 tags 重排 entries — 命中条目排前，与 sprint 主题更相关的经验先进入上下文
   const sprintTags = detectActiveSprintTags();
+  const memoryDirs = compatReadDirs.map(baseDir => path.join(baseDir, 'projects', project.id, 'memory'));
   const memoryIndex = loadUnifiedMemoryIndex(
-    compatReadDirs.map(baseDir => path.join(baseDir, 'projects', project.id, 'memory')),
+    memoryDirs,
     DEFAULT_MEMORY_CONFIG,
     { prioritizeTopics: sprintTags }
   );
+  try {
+    recordMemoryRecallMetric(memoryDirs, DEFAULT_MEMORY_CONFIG, {
+      project,
+      prioritizeTopics: sprintTags,
+      telemetryDir: path.join(resolveBaseDir(), 'telemetry'),
+    });
+  } catch (error) {
+    try {
+      process.stderr.write(`[inject-context] memory recall telemetry failed: ${error && error.message ? error.message : error}\n`);
+    } catch {}
+  }
   if (memoryIndex) {
     addSection(
       sections,

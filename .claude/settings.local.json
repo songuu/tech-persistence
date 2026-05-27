@@ -85,7 +85,14 @@
       "Bash(rm -f /tmp/fake.md /tmp/out)",
       "WebFetch(domain:github.com)",
       "Bash(cp /tmp/th.bak.js scripts/test-hook-entries.js)",
-      "Bash(rm /tmp/th.bak.js)"
+      "Bash(rm /tmp/th.bak.js)",
+      "PowerShell(gh repo view thedotmack/claude-mem --json name,description,homepageUrl,stargazerCount,primaryLanguage,repositoryTopics,createdAt,updatedAt)",
+      "Bash(grep -rE \"sk-[a-zA-Z0-9]{40,}|api[_-]?key.*=.*['\\\\\"][a-zA-Z0-9_-]{20,}['\\\\\"]|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36,}|xoxb-[a-zA-Z0-9-]{20,}\" ~/.claude/homunculus/)",
+      "Bash(grep -rlE \"spawn|execSync.*\\\\\\\\$\\\\\\\\{|exec\\\\\\\\\\(.*\\\\\\\\$\" scripts/*.js scripts/lib/*.js)",
+      "Bash([ -d \"$HOME/.claude/homunculus\" ])",
+      "Bash(grep -rE \"sk-[a-zA-Z0-9]{40,}|ghp_[a-zA-Z0-9]{36,}|AIza[a-zA-Z0-9_-]{30,}|xoxb-\" ~/.claude/homunculus/)",
+      "Bash(mkdir -p /c/Users/Administrator/.codex/skills/sibling-eval-protocol)",
+      "Bash(cp /c/Users/Administrator/.claude/skills/sibling-eval-protocol/SKILL.md /c/Users/Administrator/.codex/skills/sibling-eval-protocol/SKILL.md)"
     ]
   }
 }

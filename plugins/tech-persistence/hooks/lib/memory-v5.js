@@ -384,6 +384,34 @@ function collectMemoryEntries(memoryDir) {
     });
 }
 
+function collectMemoryTopicStats(memoryDirs) {
+  const stats = {
+    topic_count: 0,
+    topic_file_count: 0,
+    total_bytes: 0,
+  };
+  const topics = new Set();
+
+  uniqueDirs(memoryDirs).forEach((memoryDir) => {
+    if (!fs.existsSync(memoryDir)) return;
+    fs.readdirSync(memoryDir)
+      .filter(file => file.endsWith('.md') && file !== 'MEMORY.md')
+      .forEach((file) => {
+        const fullPath = path.join(memoryDir, file);
+        try {
+          const fileStats = fs.statSync(fullPath);
+          if (!fileStats.isFile()) return;
+          topics.add(path.basename(file, '.md'));
+          stats.topic_file_count += 1;
+          stats.total_bytes += fileStats.size;
+        } catch {}
+      });
+  });
+
+  stats.topic_count = topics.size;
+  return stats;
+}
+
 function sortMemoryEntries(entries) {
   return [...entries].sort((a, b) => {
     if (b.confidence !== a.confidence) return b.confidence - a.confidence;
@@ -538,8 +566,52 @@ function loadUnifiedMemoryIndex(memoryDirs, config = DEFAULT_MEMORY_CONFIG, opti
   );
 }
 
+function buildMemoryRecallMetric(memoryDirs, config = DEFAULT_MEMORY_CONFIG, options = {}) {
+  const memoryConfig = { ...DEFAULT_MEMORY_CONFIG, ...config };
+  const dirs = uniqueDirs(memoryDirs);
+  const entries = mergeMemoryEntries(dirs.flatMap(collectMemoryEntries));
+  const selected = selectMemoryIndexEntries(entries, memoryConfig, {
+    prioritizeTopics: options.prioritizeTopics,
+  });
+  const topicStats = collectMemoryTopicStats(dirs);
+  const totalEntries = entries.length;
+  const hitRate = totalEntries === 0 ? 1 : selected.length / totalEntries;
+  const project = options.project || {};
+
+  return {
+    schema_version: MEMORY_VERSION,
+    timestamp: options.timestamp || new Date().toISOString(),
+    project_id: project.id || 'unknown',
+    project_name: project.name || 'unknown',
+    topic_count: topicStats.topic_count,
+    topic_file_count: topicStats.topic_file_count,
+    total_entries: totalEntries,
+    indexed_entries: selected.length,
+    index_max_entries: memoryConfig.maxIndexEntries,
+    total_bytes: topicStats.total_bytes,
+    hit_rate: Number(hitRate.toFixed(4)),
+    prioritize_topics: Array.isArray(options.prioritizeTopics) ? options.prioritizeTopics : [],
+  };
+}
+
+function writeMemoryRecallMetric(metric, telemetryDir) {
+  if (!telemetryDir) return null;
+  fs.mkdirSync(telemetryDir, { recursive: true });
+  const outputPath = path.join(telemetryDir, 'memory-recall.jsonl');
+  fs.appendFileSync(outputPath, `${JSON.stringify(metric)}\n`);
+  return outputPath;
+}
+
+function recordMemoryRecallMetric(memoryDirs, config = DEFAULT_MEMORY_CONFIG, options = {}) {
+  const metric = buildMemoryRecallMetric(memoryDirs, config, options);
+  const outputPath = writeMemoryRecallMetric(metric, options.telemetryDir);
+  return { metric, outputPath };
+}
+
 module.exports = {
+  buildMemoryRecallMetric,
   collectMemoryEntries,
+  collectMemoryTopicStats,
   DEFAULT_MEMORY_CONFIG,
   detectProjectIdentity,
   formatMemoryIndexContent,
@@ -554,6 +626,7 @@ module.exports = {
   parseFrontmatter,
   patternSignature,
   redactSensitive,
+  recordMemoryRecallMetric,
   safeStringify,
   selectMemoryIndexEntries,
   similarityScore,
@@ -562,5 +635,6 @@ module.exports = {
   topicForDomain,
   topicTitle,
   uniqueDirs,
+  writeMemoryRecallMetric,
   yamlEscape,
 };

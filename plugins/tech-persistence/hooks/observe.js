@@ -21,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const { resolveBaseDir, resolveSessionId } = require('./lib/runtime-paths');
 const { MEMORY_VERSION, detectProjectIdentity, normalizeHookPayload } = require('./lib/memory-v5');
+const { redactObservation, stripPrivateTags } = require('./lib/redaction');
 
 // ─── 存储路径 ───
 function getObservationPath(project) {
@@ -50,9 +51,9 @@ function main() {
     // stdin 不可用时静默继续
   }
 
-  const normalized = normalizeHookPayload(input, phase);
+  const normalized = normalizeHookPayload(stripPrivateTags(input), phase);
 
-  const observation = {
+  const observation = redactObservation({
     schema_version: MEMORY_VERSION,
     timestamp: new Date().toISOString(),
     phase, // pre | post
@@ -70,7 +71,7 @@ function main() {
     payload_format: normalized.payload_format,
     payload_keys: normalized.payload_keys,
     cwd: process.cwd(),
-  };
+  });
 
   // 追加写入 JSONL（fire-and-forget，不阻塞）
   try {
