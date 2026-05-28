@@ -38,6 +38,23 @@
     "followUpTasks": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "clarificationRulings": {
+      "type": "array",
+      "description": "Optional. Rulings for open clarifications raised by the implementer. decision=confirm-assumption keeps the adopted assumption; decision=revise-spec means the spec must change (also surface the change in findings/followUpTasks so the classic needs-followup loop re-implements).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "decision"],
+        "properties": {
+          "id": { "type": "string" },
+          "decision": {
+            "type": "string",
+            "enum": ["confirm-assumption", "revise-spec"]
+          },
+          "note": { "type": "string" }
+        }
+      }
     }
   }
 }

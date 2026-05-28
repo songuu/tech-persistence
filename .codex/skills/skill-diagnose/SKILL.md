@@ -70,6 +70,13 @@ Progressive disclosure 检查:
 
 > trace 入口是半自动（LLM 提取 + 人工确认），不靠 hook 自动检测——skill 成败是语义判断，无 exit code。
 
+4. （可选，B2）若该条 trace 值得固化为 eval 测试，人工确认后转结构化 case（最有价值的测试 = 真实失败）：
+   ```bash
+   node scripts/skill-eval-cases.js add --name <skill> \
+     --input "<触发输入>" --expectation "<期望>" --from-trace '<trace JSON 快照>'
+   ```
+   追加到 `skill-evals/{name}/cases/cases.jsonl`，供 `/skill eval` 消费。case 强制带 `provenance=trace` + trace 快照（护城河：不接受 skill 自产）。
+
 ## 触发时机
 - 手动执行
 - `/retrospective` 时自动附带

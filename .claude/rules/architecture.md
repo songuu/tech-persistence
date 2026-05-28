@@ -17,6 +17,24 @@
 
 ## 决策列表
 
+### ADR-019: skill eval case 的护城河靠 provenance 确定性写入 gate，traces/cases/results 在 skill-evals 下同构 (2026-05-28)
+- **状态**：已采纳
+- **上下文**：[[2026-05-28-two-layer-architecture-enhancement]] §B2 要从真实使用 trace 半自动转 skill eval case，护城河目标是 eval case 来自真实 trace 而非 skill 自产（避免"自己出题给自己考"）。设计文档假设数据源是「signal jsonl 里 corrections」、复用 `skill-evals/{name}/`。[[ADR-012]] 勘察推翻两个数据源假设：(1) signal record（`scripts/lib/skill-signals.js`）只有 `{skill, calls, source, session_id, project}`，无 corrections/真实输入——B1 已把含 `input_excerpt/correction_diff` 的 trace 移到独立 `skill-traces/{name}.jsonl`（[[ADR-017]]），B2 真实数据源是 skill-traces 不是 signal jsonl；(2) eval **case** 此前无结构化格式（只是 skill-eval.md 描述的 LLM 非结构化用例），与 [[ADR-016]] 当时「eval 结果无格式得先补」是同类前置缺口。
+- **决策**：(1) 新建 `skill-evals/{name}/cases/cases.jsonl`，与 [[ADR-016]] 的 `results/results.jsonl` 平级同构（append-only / `SKILL_NAME_RE` 防路径逃逸 / 损坏行 skip + stderr marker / 双层脱敏）——traces/cases/results 构成 skill-evals 下完整数据三角；(2) 护城河靠 `addCase` 的**写入即拒绝** gate：`provenance` 必须 `trace` + `source_trace` 必须是对象（快照不可复现的真实上下文）+ `input` 非空，CLI 缺 `--from-trace` 直接 `exit 2`；(3) 所有字符串字段含嵌套 `source_trace.*` 写入前递归 `redactDeep`→`stripPrivateTags`（纵深防御，即使来源 skill-traces 已脱敏）；(4) record + list 合并为单 CLI `scripts/skill-eval-cases.js`（YAGNI）。
+- **原因**：(1) 护城河隔离性（来源是否 trace）是确定性可判定的，按 [[ADR-013]] mechanism-over-discipline 应下沉为工具拒绝，而非靠"模型记得别自产"；(2) 与 results.jsonl 同构降认知成本 + 复用同套防御（[[reuse-existing-infra-before-building-new]]）；(3) trace 含真实输入，双层脱敏是隐私不可妥协项（与 [[ADR-017]] recordTrace 同纵深防御）。
+- **备选**：(a) 复用 signal jsonl——无 corrections 字段，否决；(b) 靠 skill-eval.md 协议约束别自产 case——正是 [[ADR-013]] 批判的纪律层；(c) eval case 通过率自动算进 results.jsonl——涉及语义判断确定性化边界（[[ADR-017]]），超本 sprint 范围，另立。
+- **影响**：(1) eval case 执行 + 评分仍是 LLM 语义判断（[[ADR-017]] 边界不变，本 sprint 只结构化 case 产物，不自动跑）；(2) 未来 skill-evals 下新增数据流沿用同构 append-only jsonl + 同套防御；(3) `skill-eval-cases.js` 进 `copyUtilityScripts` 列表（双 runtime parity），lib 经 `copyHookLibs` glob 自动复制；(4) `cases/` 子目录由 lib `mkdirSync recursive` 懒创建，install.* 无需改。
+- **来源**：`docs/plans/2026-05-28-trace-to-eval.md`，`docs/solutions/2026-05-28-trace-to-eval.md`。
+
+### ADR-018: agent-loop classic 模式的 spec 澄清用 append-only `clarifications.md` 异步通道，ruling→spec 修正复用 needs-followup 回路（不复用 pipeline contract-revision） (2026-05-28)
+- **状态**：已采纳
+- **上下文**：[[2026-05-28-two-layer-architecture-enhancement]] §A3 要给 frozen spec 加 implementer→spec-writer 澄清通道，假设「复用现有 contract-revision（问题 13 accept-revision）」。[[ADR-012]] 勘察推翻：contract-revision/accept-revision/reject-revision 只在 pipeline 模式（`scripts/agent-orchestrator/pipeline.js` 的 contract-conflict 状态机）；classic 线性流（freeze→implement→review→resume）没有该机制，其「修正 spec」等价回路是 review→`needs-followup`→resume re-implement（`runResume`）。同时 handoff schema strict（`additionalProperties:false`）、orchestrator artifact 全是覆盖式 `writeText`/`writeJson` 无 append 助手。
+- **决策**：(1) frozen spec 旁加 append-only `clarifications.md`（新 lib `scripts/lib/clarifications.js`，`fs.appendFileSync`，section 化 markdown + frontmatter，自动派生 `clr-NNN` id）；(2) implementer 经 handoff `clarifications[]` 提问（**不阻塞**，记假设继续实现），orchestrator append 进文件；(3) review provider 兼任 spec-writer，经 `clarificationRulings[]` 逐条裁决（decision ∈ confirm-assumption | revise-spec），append 为 ruling section；(4) **ruling=revise-spec 复用 classic 既有 needs-followup 回路**（review 同步进 findings/followUpTasks），不调用 pipeline accept-revision；(5) 所有字段写入前 `stripPrivateTags`（纵深防御）；(6) handoff/review schema 加可选字段（向后兼容，非 required），同步改对应 normalize 函数。
+- **原因**：(1) append-only + 异步裁决符合 TP「批处理而非实时」+「非 runtime」定位，零双向 runtime 通道（轻量原则）；(2) classic/pipeline 是两套状态机，强搬 contract-revision 会引入跨模式耦合；(3) 复用 needs-followup 回路使「ruling 改 spec」零新状态流；(4) clarifications.md 是纯 markdown runDir artifact，schemas/ 与 scripts/lib/ 由 build glob 自动同步，双 runtime parity 天然满足。
+- **备选**：(a) 把 pipeline contract-revision 搬到 classic——跨模式耦合，否决；(b) 双向 runtime 实时通道——违反轻量+非 runtime，否决；(c) 覆盖式重写 clarifications——丢历史违反审计性，否决。
+- **影响**：(1) classic 模式新增 `clarifications.md` artifact 与 handoff/review schema 两个可选字段（向后兼容）；(2) 未来 classic 模式「frozen 后追加」场景统一用 append-only lib + append-only 单测（断言二次写后 `body.startsWith(priorBody)` + 字节只增）；(3) pipeline 模式不受影响（改动全在 classic 路径）；(4) 新 lib 进 `scripts/lib/` 由 `copyHookLibs` glob 自动进 plugin 副本；(5) clarification 由 LLM provider 在 handoff/review JSON 产出（语义判断，同 [[ADR-017]] 性质，无法 hook 自动派生），靠 prompt 强约束 + schema 缓解。
+- **来源**：`docs/plans/2026-05-28-clarification-channel.md`，`docs/solutions/2026-05-28-clarification-channel.md`。
+
 ### ADR-017: skill 进化链的语义信号（失败/纠正）用"LLM 半自动判断 + CLI 结构化 record"捕获，不靠 hook 自动检测 (2026-05-28)
 - **状态**：已采纳
 - **上下文**：[[2026-05-28-two-layer-architecture-enhancement]] §B1（GEPA 内核）要 improve 基于真实失败 trace 反思。设计文档假设"扩展现有 signal jsonl 的 steps_skipped/corrections/duration 字段"。勘察推翻：`aggregateSkillSignals` record 只有 `{skill, calls, source}`——diagnose/improve.md 描述的完成率/热力图/纠正模式全是 doc drift（[[documented-claim-vs-code-reality-drift]]）。更根本：skill 一次执行"成功/失败/被纠正"是**语义判断**，无 exit code，PostToolUse hook 看不到——无法像 observe 那样确定性自动派生。

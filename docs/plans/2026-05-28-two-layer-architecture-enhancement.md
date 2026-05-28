@@ -1,7 +1,7 @@
 ---
 title: "编码流层 + 自进化层架构增强设计（基于 2026 市面 gap）"
 type: design
-status: proposed
+status: implemented
 created: "2026-05-28"
 updated: "2026-05-28"
 tags: [design, architecture, agent-orchestration, self-evolution, proposed]
@@ -44,6 +44,8 @@ aliases: ["两层架构增强", "coding-flow + self-evolution enhancement"]
 
 ### A1. clarify 阶段强化（think 层）
 
+> **✅ 已实现（2026-05-28）**：见 [[2026-05-28-a1-clarify-enhancement]]。落地与设计一致（无假设推翻——勘察证设计现状描述准确）：think.md 步骤 3 升级 EARS-lite（L3+ 强制 / L0-L2 可选）+ 新增可选执行步骤 1.5「需求澄清扫描」（`--clarify` 触发，扫描 输入边界/失败模式/空状态）。纯文档零依赖，4 副本经 propagate+build 同步。
+
 - **现状**（勘察 `think.md`）：步骤 1「需求澄清」（"答案不明显才问"）+ 步骤 3「3-5 个可验证验收条件」。已有验收意识。
 - **差距**：澄清是轻量被动（不主动系统扫描欠定义点）；验收条件非结构化格式，欠定义会拖到 plan 才暴露（[[ADR-012]] 已记录同类 plan-error 教训）。
 - **设计**：
@@ -54,6 +56,8 @@ aliases: ["两层架构增强", "coding-flow + self-evolution enhancement"]
 - **风险**：EARS-lite 可能对小任务过重 → 限定 L3+ 任务强制，L0-L2 可选。
 
 ### A2. grader-revise 收敛闭环（review 层）
+
+> **✅ 已实现（2026-05-28）**：见 [[2026-05-28-a2-grader-revise-loop]]。落地与设计一致（A1 后第二次无假设推翻——勘察证 review.md 现状描述准确）：review.md 新增「Rubric-gated revise loop」段（结构化 pass/fail-per-criterion + P0>0 触发 work 微循环 + 仅重 spawn 受影响视角 + N=2 硬限 + L3+/--auto 门控 + 非-auto P0 人工 gate + BLOCKED 不被吞）。纯文档零依赖，4 副本经 propagate+build 同步。设计文档 6 增强全部落地。
 
 - **现状**（勘察 `review.md`）：成熟多视角 spawn（risk-aware dispatch + 4 status 契约 + Gap Detection Walkthrough + 模型分层）。已有 `NEEDS_CONTEXT` retry（≤1）+ `BLOCKED` escalation。
 - **差距**：retry 只针对「context 不足」，**没有「质量分数 < 阈值 → 自动回 work 修 → 重审」的收敛回路**。review 是单遍。对标 Claude Agent SDK Outcomes（rubric + 独立 grader 打回重做）。
@@ -66,6 +70,8 @@ aliases: ["两层架构增强", "coding-flow + self-evolution enhancement"]
 - **风险**：revise loop × 重 spawn = token 成本上升 → 仅 L3+ 或 `--auto` 触发；L0-L2 保持单遍。
 
 ### A3. clarification channel（agent-loop 层）
+
+> **✅ 已实现（2026-05-28）**：见 [[2026-05-28-clarification-channel]]（[[ADR-018]]）。落地推翻设计 1 假设：「复用现有 contract-revision」在 classic 模式不成立——contract-revision/accept-revision 只在 pipeline 模式；classic 的「修正 spec」等价回路是 review→needs-followup→resume re-implement。新 lib `scripts/lib/clarifications.js`（append-only `clarifications.md`）+ handoff/review schema 各加 1 可选字段 + orchestrator classic 路径 wiring；ruling=revise-spec 复用既有 needs-followup 回路，不碰 pipeline。
 
 - **现状**（[[ARCHITECTURE_ISSUES]]）：agent-loop frozen spec 静态单向（Claude freeze → Codex 实现 → Claude review）。已有 contract-revision（问题 13 `accept-revision`）。
 - **差距**：implementer 执行中遇 spec 歧义无法回问 spec-writer，只能整轮重跑（对标 Codex v2 结构化 inter-agent messaging，但那需 runtime 双向通道）。
@@ -95,6 +101,8 @@ aliases: ["两层架构增强", "coding-flow + self-evolution enhancement"]
 - **风险**：trace 可能含敏感信息 → 复用现有 observe.js 脱敏管线（PreToolUse 已脱敏）。
 
 ### B2. trace → eval 自动沉淀（skill-eval 层）
+
+> **✅ 已实现（2026-05-28）**：见 [[2026-05-28-trace-to-eval]]（[[ADR-019]]）。落地推翻设计 2 假设：(1)「从 signal jsonl 里 corrections」——signal record 无 corrections 字段，真实数据源是 B1 的 `skill-traces/{name}.jsonl`；(2) eval case 此前无结构化格式（同 B3 前置缺口）。新建 `skill-evals/{name}/cases/cases.jsonl`（与 B3 results.jsonl 同构）+ `scripts/lib/skill-eval-cases.js` + CLI；护城河靠 `addCase` 的 provenance 写入即拒绝 gate（非 trace 来源 / 缺 source_trace / 缺 --from-trace → exit 2）+ 双层脱敏。traces/cases/results 构成 skill-evals 数据三角。
 
 - **现状**（勘察 `skill-eval.md`）：eval 集手工写，或"基于当前 skill 自动生成 3-5 用例"。安全规则「eval 不可被 skill 修改」已存在（护城河）。
 - **差距**：eval 集不从真实 use trace 沉淀（覆盖滞后）；自动生成的用例与 skill **同源**（自己出题给自己考）。
@@ -150,3 +158,7 @@ aliases: ["两层架构增强", "coding-flow + self-evolution enhancement"]
 | 2026-05-28 | 初版：6 个增强设计（编码流 3 + 自进化 3），均经现状勘察 + 4 原则校验。status: proposed |
 | 2026-05-28 | B3 基线护栏下沉已实现（[[2026-05-28-skill-publish-baseline-guard]]）；勘察推翻原设计 2 假设（pre-commit 入口 + result 已有格式），修正为独立 guard CLI + 补结构化 eval-result。剩余 5 增强仍 proposed |
 | 2026-05-28 | B1 trace-aware 反思已实现（[[2026-05-28-skill-trace-aware-reflection]]）；按数据依赖在 B2 之前做；勘察证 signal schema 是 doc drift（只有 calls），trace 存独立 skill-traces/ + observations 数据源 + 双层脱敏。B2 解除阻塞。剩余 4 增强（A1/A2/A3/B2）proposed |
+| 2026-05-28 | A1 clarify 强化已实现（[[2026-05-28-a1-clarify-enhancement]]）；落地与设计一致无假设推翻；think.md 步骤 3 EARS-lite（L3+ 强制）+ 可选步骤 1.5 澄清扫描（`--clarify`）。剩余 3 增强（A2/A3/B2）proposed |
+| 2026-05-28 | B2 trace→eval 自动沉淀已实现（[[2026-05-28-trace-to-eval]]，[[ADR-019]]）；勘察推翻 2 假设（数据源是 skill-traces 非 signal jsonl + eval case 无结构化格式）；新 `skill-evals/{name}/cases/cases.jsonl` + provenance 写入即拒绝 gate + 双层脱敏，构成 traces/cases/results 数据三角。剩余 A2/A3 proposed |
+| 2026-05-28 | A3 clarification channel 已实现（[[2026-05-28-clarification-channel]]，[[ADR-018]]）；勘察推翻「复用 contract-revision」假设（那是 pipeline-only，classic 复用 needs-followup 回路）；新 `scripts/lib/clarifications.js`（append-only）+ handoff/review schema 各 1 可选字段 + orchestrator classic wiring。剩余 A2 proposed |
+| 2026-05-28 | A2 grader-revise 收敛闭环已实现（[[2026-05-28-a2-grader-revise-loop]]）；落地与设计一致无假设推翻；review.md 新增「Rubric-gated revise loop」段（N=2 硬限 + L3+/--auto 门控 + 非-auto P0 人工 gate + BLOCKED 不被吞）。**设计文档 6 增强（A1/A2/A3/B1/B2/B3）全部落地**，status → implemented |

@@ -28,6 +28,20 @@
     "followUp": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "clarifications": {
+      "type": "array",
+      "description": "Optional. Spec ambiguities encountered during implementation. Record the assumption adopted (do not block) and the open question for the spec-writer to rule on at the next gate.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["assumption", "question"],
+        "properties": {
+          "id": { "type": "string" },
+          "assumption": { "type": "string" },
+          "question": { "type": "string" }
+        }
+      }
     }
   }
 }

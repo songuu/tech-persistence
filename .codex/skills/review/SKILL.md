@@ -118,6 +118,54 @@ STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
 3. **强制人工 gate**：即使 `--auto` 模式也必须问用户（与 `~/.codex/rules/auto-mode.md` 强制人工边界一致：destructive / L4 / scope creep / **BLOCKED**）
 4. 用户选择继续 / 修复阻塞 / 跳过该视角
 
+### Rubric-gated revise loop（收敛闭环，可选）
+
+**目的**：补齐 review 单遍缺口——质量未达标（P0 数 > 0 或 rubric 关键项 fail）时自动回 work 修复并重审，对标 grader + rubric 打回重做，而非单遍出报告即结束。
+
+**触发门控**（两条件任一命中即触发，否则保持单遍）：
+
+- risk 等级 L3 / L4，或
+- `--auto` 模式
+
+L0-L2 且非 `--auto`：跳过 revise loop，单遍 review（轻量 + token 成本门控，与 Dispatch Matrix 同源思路）。
+
+**结构化 rubric**：reviewer findings 在 P0/P1/P2 之外，按视角关键项给出 pass/fail（rubric 关键项 fail 等价于该视角产出 P0）：
+
+```markdown
+## Rubric（每视角关键项 pass/fail）
+| 视角 | 关键项 | pass/fail | 关联 finding |
+|------|--------|-----------|-------------|
+| security 🔒 | 无注入 / 无硬编码密钥 / 输入已验证 | fail | P0-1 |
+| test 🧪 | 高风险文件测试深度匹配 | pass | — |
+```
+
+**收敛回路（N=2 硬限）**：
+
+1. 汇总本轮 reviewer findings → 判定是否命中 revise 条件（P0 数 > 0 或 rubric 关键项 fail）。
+2. 命中 → 触发一次 **work 微循环**：按 work 既有约定修复命中的 P0 / fail 项（不改 work 流程，revise loop 仅编排修复→重审的串接）。
+3. 修复后**仅重 spawn 受影响视角** reviewer（不重审全套——例如仅 security fail 就只重 spawn security），重 spawn 用同视角同模型 + augmented prompt（含上轮 finding + 本轮修复 diff）。
+4. 重审结果再判定：收敛（无 P0 且无 rubric 关键项 fail）→ 进 compound；未收敛 → 回步骤 2。
+5. **轮数硬限 N=2**（类比 NEEDS_CONTEXT retry ≤1）：第 2 轮仍未收敛 → 停止迭代，未收敛项标记为遗留 P0/P1 写入 review 报告，进 compound（不无限循环）。
+
+**人工 gate（不可被 loop 吞掉）**：
+
+- 非 `--auto` 模式：命中 P0 时仍向用户呈现并等待确认——revise loop 仅在 `--auto` 下自动迭代 work 微循环；非 auto 下 loop 退化为「呈现 P0 → 用户确认修 → 重审」的人工驱动版。
+- 任一 reviewer 报 `BLOCKED`：走上方 BLOCKED escalation（强制人工），即使 `--auto` 也不进 revise loop 自动迭代。
+- destructive / L4 任务相关 P0：即使 `--auto` 仍保留人工 gate（与 `~/.codex/rules/auto-mode.md` 强制人工边界一致）。
+
+**Multi-runtime 行为**（runtime gate 与 Spawn 协议一致）：
+
+- spawn-capable runtime：重审走真并行 spawn（仅重 spawn 受影响视角子集）。
+- inline-fallback runtime：无 Agent tool，revise loop 串行执行（主 LLM 单 context 内重新扮演受影响视角）；N=2 硬限与触发门控相同。
+
+**派遣记录扩展**（revise loop 触发时追加，见下方「派遣记录」段）：
+
+```markdown
+- Revise loop: 触发（risk=L3）
+- Revise 轮次: 2/2（轮1: security P0-1 → 修 → 重审; 轮2: 收敛）
+- 收敛: 是 / 否（否则列遗留 P0/P1）
+```
+
 ## Multi-runtime fallback
 
 | runtime | spawn 机制 | 行为 |
@@ -416,10 +464,13 @@ G. Content & Microcopy
 ```
 
 ## 审查后流程
-- P0：立即修复
+
+> **L3+ 或 `--auto`**：P0 处理走上方「Rubric-gated revise loop」收敛回路（自动修 → 仅重 spawn 受影响视角 → N=2 硬限）。**L0-L2 且非 `--auto`**：单遍，按下列处理。
+
+- P0：立即修复（L3+/--auto 进 revise loop 重审收敛；非 auto 仍人工确认后再修）
 - P1：列出后等用户确认
 - P2：记录 backlog
-- 全部处理后 → `/compound`
+- 收敛或达 N=2 上限后 → `/compound`
 
 ## 与本能系统集成
 - 审查时读取 rules/ 中的已知模式

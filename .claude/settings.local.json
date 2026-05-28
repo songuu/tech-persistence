@@ -93,7 +93,11 @@
       "Bash(grep -rE \"sk-[a-zA-Z0-9]{40,}|ghp_[a-zA-Z0-9]{36,}|AIza[a-zA-Z0-9_-]{30,}|xoxb-\" ~/.claude/homunculus/)",
       "Bash(mkdir -p /c/Users/Administrator/.codex/skills/sibling-eval-protocol)",
       "Bash(cp /c/Users/Administrator/.claude/skills/sibling-eval-protocol/SKILL.md /c/Users/Administrator/.codex/skills/sibling-eval-protocol/SKILL.md)",
-      "Bash(grep -nA25 \"function extractSkillFromObservation\" scripts/lib/usage-aggregator.js)"
+      "Bash(grep -nA25 \"function extractSkillFromObservation\" scripts/lib/usage-aggregator.js)",
+      "Bash(ls scripts/test-*.js)",
+      "Bash(head -60 scripts/run-tests.js)",
+      "Bash(ls scripts/*agent* scripts/test/*agent*)",
+      "Bash(echo \"load exit=$?\")"
     ]
   }
 }

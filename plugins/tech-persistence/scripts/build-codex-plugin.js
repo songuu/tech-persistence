@@ -391,6 +391,7 @@ function copyUtilityScripts() {
     'sync-solution-index.js',
     'skill-eval-results.js',
     'skill-traces.js',
+    'skill-eval-cases.js',
   ];
   utilityScripts.forEach((name) => {
     copyTextFile(

@@ -15,6 +15,7 @@ const sliceNormalizerModule = require('./agent-orchestrator/slice-normalizer');
 const driftDetectorModule = require('./agent-orchestrator/drift-detector');
 const reconciliationModule = require('./agent-orchestrator/reconciliation');
 const reviewModule = require('./agent-orchestrator/review');
+const clarifications = require('./lib/clarifications');
 
 const VERSION = 'v7';
 const DEFAULT_RUNS_DIR = '.agent-runs';
@@ -750,6 +751,35 @@ function stringArray(value) {
   }).filter(Boolean);
 }
 
+function normalizeClarifications(value) {
+  return toArray(value)
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const assumption = String(item.assumption || '').trim();
+      const question = String(item.question || item.ambiguity || '').trim();
+      if (!assumption && !question) return null;
+      const entry = { assumption, question };
+      if (typeof item.id === 'string' && item.id.trim()) entry.id = item.id.trim();
+      return entry;
+    })
+    .filter(Boolean);
+}
+
+function normalizeClarificationRulings(value) {
+  const allowed = new Set(['confirm-assumption', 'revise-spec']);
+  return toArray(value)
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const id = String(item.id || '').trim();
+      if (!id) return null;
+      const decision = allowed.has(item.decision) ? item.decision : 'confirm-assumption';
+      const ruling = { id, decision };
+      if (typeof item.note === 'string' && item.note.trim()) ruling.note = item.note.trim();
+      return ruling;
+    })
+    .filter(Boolean);
+}
+
 function normalizeTaskContainer(value) {
   if (Array.isArray(value)) return value;
   if (value && typeof value === 'object') {
@@ -849,6 +879,7 @@ function normalizeHandoff(rawHandoff) {
     validation: stringArray(raw.validation || raw.validations || raw.tests),
     risks: stringArray(raw.risks || raw.warnings),
     followUp: stringArray(raw.followUp || raw.followUpTasks || raw.nextSteps),
+    clarifications: normalizeClarifications(raw.clarifications || raw.questions),
   };
 }
 
@@ -892,6 +923,7 @@ function normalizeReview(rawReview) {
     summary,
     findings: allFindings,
     followUpTasks: stringArray(raw.followUpTasks || raw.followUp || raw.requiredChanges),
+    clarificationRulings: normalizeClarificationRulings(raw.clarificationRulings || raw.rulings),
   };
 }
 
@@ -970,10 +1002,14 @@ function buildImplementationPrompt(state, runDir) {
   const design = safeRead(path.join(runDir, 'technical-design.md'));
   const tasks = safeRead(path.join(runDir, 'task-breakdown.json'));
   const reviewNotes = safeRead(path.join(runDir, 'review.json'));
+  const priorRulings = readPriorRulingsBlock(runDir);
   return [
     'You are the implementation provider in Tech Persistence agent-loop v6.',
     'Implement only the frozen spec. Do not reinterpret or expand requirements.',
-    'If the spec is ambiguous, make the smallest safe implementation and record it in handoff.risks.',
+    'If the spec is ambiguous: adopt the smallest safe assumption, KEEP IMPLEMENTING (do not block),',
+    'and record the ambiguity in handoff.clarifications[] as { assumption, question }.',
+    'The spec-writer will rule on each clarification at the next review gate.',
+    'Honor any prior clarification rulings listed below.',
     'Follow the repository style and keep changes scoped.',
     'Return JSON only. Match the handoff schema.',
     '',
@@ -988,19 +1024,51 @@ function buildImplementationPrompt(state, runDir) {
     '',
     'Task breakdown JSON:',
     tasks,
+    priorRulings ? `\nPrior clarification rulings (honor these):\n${priorRulings}` : '',
     reviewNotes ? `\nPrior review notes JSON:\n${reviewNotes}` : '',
   ].filter(Boolean).join('\n');
+}
+
+function readPriorRulingsBlock(runDir) {
+  const ruled = clarifications.readClarifications(runDir).filter((entry) => entry.status === 'ruled');
+  if (ruled.length === 0) return '';
+  return ruled
+    .map((entry) => `- ${entry.id} [${entry.decision}] assumption: ${entry.assumption}${entry.note ? ` — ruling: ${entry.note}` : ''}`)
+    .join('\n');
+}
+
+function readOpenClarificationsBlock(runDir) {
+  const open = clarifications.listOpenClarifications(runDir);
+  if (open.length === 0) return '';
+  return open
+    .map((entry) => `- ${entry.id} assumption: ${entry.assumption} | question: ${entry.question}`)
+    .join('\n');
 }
 
 function buildReviewPrompt(state, runDir) {
   const reviewContextPath = path.join(runDir, 'review-context.md');
   const reviewContext = safeRead(reviewContextPath) || '(missing review context)';
+  const openClarifications = readOpenClarificationsBlock(runDir);
+  const clarificationGuidance = openClarifications
+    ? [
+      '',
+      'Open clarifications raised by the implementer (rule on EACH one):',
+      openClarifications,
+      '',
+      'For each open clarification, add an entry to clarificationRulings[]:',
+      '- { id, decision: "confirm-assumption" } if the adopted assumption is acceptable.',
+      '- { id, decision: "revise-spec", note } if the spec must change; ALSO add a finding/followUpTask',
+      '  describing the required change so the orchestrator re-implements via the needs-followup loop.',
+      '',
+    ].join('\n')
+    : '';
   return [
     'You are the review provider in Tech Persistence agent-loop v6.',
+    'You are also the spec-writer: rule on any open clarifications raised by the implementer.',
     'Review the implementation strictly against the frozen spec and technical design.',
     'Do not add new product requirements. Return JSON only and match the review schema.',
     'If the diff context is truncated, inspect the repository files directly.',
-    '',
+    clarificationGuidance,
     `Run id: ${state.runId}`,
     `Repository root: ${state.workdir}`,
     `Review context file: ${reviewContextPath}`,
@@ -1306,6 +1374,7 @@ function runImplementationProvider(state, statePath, runDir, options) {
   }
   writeJson(path.join(runDir, 'handoff.json'), handoff);
   writeText(path.join(runDir, 'handoff.md'), renderHandoff(handoff));
+  recordImplementationClarifications(state, runDir, handoff);
   writeGitDiff(state.workdir, runDir);
   writeValidation(state.workdir, runDir, options);
   writeReviewContext(runDir);
@@ -1317,6 +1386,21 @@ function runImplementationProvider(state, statePath, runDir, options) {
   state.files.validation = 'validation.json';
   state.files.reviewContext = 'review-context.md';
   saveState(statePath, state);
+}
+
+function recordImplementationClarifications(state, runDir, handoff) {
+  const entries = normalizeClarifications(handoff && handoff.clarifications);
+  if (entries.length === 0) return;
+  // append-only：implementer 记录假设后不阻塞，等下一个 gate 由 spec-writer 裁决。
+  clarifications.appendClarifications(runDir, entries);
+  state.files.clarifications = clarifications.CLARIFICATIONS_FILE;
+}
+
+function recordReviewRulings(state, runDir, review) {
+  const rulings = normalizeClarificationRulings(review && review.clarificationRulings);
+  if (rulings.length === 0) return;
+  clarifications.appendRulings(runDir, rulings);
+  state.files.clarifications = clarifications.CLARIFICATIONS_FILE;
 }
 
 function renderHandoff(handoff) {
@@ -1511,6 +1595,7 @@ function runReviewProvider(state, statePath, runDir, options) {
   writeJson(path.join(runDir, 'review.raw.json'), rawReview);
   writeJson(path.join(runDir, 'review.json'), review);
   state.files.review = 'review.json';
+  recordReviewRulings(state, runDir, review);
   state.status = statusFromReview(review);
   if (state.status === 'needs-followup' || state.status === 'blocked') writeFollowUpTask(runDir, review);
   saveState(statePath, state);
@@ -1891,6 +1976,27 @@ function runSelfTest() {
   const normalizedReview = normalizeReview(wrappedReview);
   assertSelfTest('review passed alias normalizes to approved', normalizedReview.decision, 'approved');
   assertSelfTest('approved review maps to completed', statusFromReview(normalizedReview), 'completed');
+
+  const handoffClarifications = normalizeHandoff({
+    summary: 's',
+    clarifications: [
+      { assumption: 'use REST', question: 'REST or GraphQL?' },
+      { assumption: '', question: '' },
+    ],
+  }).clarifications;
+  assertSelfTest('handoff clarifications drop empty entries', handoffClarifications.length, 1);
+  assertSelfTest('handoff clarification keeps assumption', handoffClarifications[0].assumption, 'use REST');
+
+  const reviewRulings = normalizeReview({
+    decision: 'approved',
+    clarificationRulings: [
+      { id: 'clr-001', decision: 'revise-spec', note: 'switch to GraphQL' },
+      { id: '', decision: 'confirm-assumption' },
+      { id: 'clr-002', decision: 'bogus' },
+    ],
+  }).clarificationRulings;
+  assertSelfTest('review rulings drop entries without id', reviewRulings.length, 2);
+  assertSelfTest('review ruling normalizes unknown decision to confirm-assumption', reviewRulings[1].decision, 'confirm-assumption');
 
   const summaryApprovedReview = normalizeReview({ summary: 'APPROVED', findings: [] });
   assertSelfTest('summary APPROVED normalizes to approved', summaryApprovedReview.decision, 'approved');

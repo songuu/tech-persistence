@@ -36,6 +36,22 @@ When the command instructions below mention `/skill-eval`, interpret that as thi
 
 自动生成 3-5 个测试用例 + 5-8 个断言（如"每轮问题 <= 5 个"）。
 
+## 从真实 trace 沉淀 case（B2，护城河强化）
+
+自动生成的用例与 skill **同源**（自己出题给自己考），信号弱。真实失败 trace（B1 沉淀在 `skill-traces/{name}.jsonl`）是**最有价值的测试**。半自动把 trace 转为结构化 eval case：
+
+1. 预览 trace：`node scripts/skill-traces.js list <name>`，挑一条值得固化的失败/纠正。
+2. **人工确认 gate** 后转 case（CLI 内部再过一道脱敏，纵深防御 + 强制带 trace 快照）：
+   ```bash
+   node scripts/skill-eval-cases.js add --name <skill> \
+     --input "<触发输入>" --expectation "<期望行为/断言>" \
+     --from-trace '<该条 trace 的 JSON 快照>'
+   ```
+   追加到 `~/.codex/homunculus/skill-evals/{name}/cases/cases.jsonl`（append-only）。
+3. eval 跑测试前读 case 集：`node scripts/skill-eval-cases.js list <name>`。
+
+> **护城河确定性强化**：每条 trace-case 强制带 `provenance=trace` + `source_trace` 快照（`add` 缺 `--from-trace` 直接 `exit 2` 拒绝）。eval case 来自真实使用 trace 而非 skill 自产，**比自动生成的同源用例更隔离**。
+
 ## 输出格式
 ```
 Eval 结果: /{name}

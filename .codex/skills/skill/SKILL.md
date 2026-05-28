@@ -73,7 +73,7 @@ Codex 同义：`$skill <action> <name>`
 
 ### `/skill eval <name>`
 
-用预定义测试集验证 skill 质量。跑完**必须**记录结构化结果（`node scripts/skill-eval-results.js record ...`）供 publish 护栏读取。详细规范见 [skill-eval.md](./skill-eval.md)。
+用预定义测试集验证 skill 质量。测试集除 LLM 自动生成外，可从真实失败 trace 半自动沉淀（`node scripts/skill-eval-cases.js add ...`，护城河强化：case 来自真实使用而非 skill 自产）。跑完**必须**记录结构化结果（`node scripts/skill-eval-results.js record ...`）供 publish 护栏读取。详细规范见 [skill-eval.md](./skill-eval.md)。
 
 ### `/skill improve <name>`
 

@@ -210,6 +210,7 @@ node scripts/agent-orchestrator.js status --run <runId|latest>
 - `handoff.md`: 实现交接（人类可读）。
 - `handoff.json`: canonical 实现交接（normalized）。
 - `handoff.parse-error.json`: handoff JSON 解析失败时记录原始 stdout/last-message 文件位置。
+- `clarifications.md`: append-only 异步澄清通道（A3）。implementer 遇 spec 歧义时记录「采用的假设 + 问题」（status: open），不阻塞继续实现；spec-writer 在下一个 review gate 对每条追加 ruling（confirm-assumption / revise-spec，status: ruled）。ruling=revise-spec 时同时进 review findings/followUpTasks，走 `needs-followup` → resume re-implement 回路（classic 模式；不复用 pipeline 的 accept-revision）。
 - `review.json`: 验收复审（normalized）。
 - `review.raw.json`: provider 原始 review 输出。
 - `review.parse-error.json`: review JSON 解析失败时记录原始 stdout/stderr 文件位置。
@@ -223,7 +224,8 @@ node scripts/agent-orchestrator.js status --run <runId|latest>
 - 分析 provider 不写代码。
 - 实现 provider 不重新解释需求。
 - freeze 前不进入实现。
-- review provider 只对照冻结 spec，不新增产品范围。
+- review provider 只对照冻结 spec，不新增产品范围；同时兼任 spec-writer，对 implementer 提的 open clarification 逐条裁决。
+- implementer 遇 spec 歧义不阻塞：记录假设 + 问题到 `handoff.clarifications[]`，orchestrator append 进 `clarifications.md`，由下一个 gate 异步裁决（刻意不引入双向 runtime 实时通道）。
 - orchestrator 负责状态、日志、重试、恢复、diff 和 validation。
 - `.agent-runs/`、`node_modules/`、构建产物等 managed artifacts 不参与 clean worktree 阻塞。
 - review 真通过时状态必须是 `completed`；`status: passed` / `canMerge: true` 等同义输出必须被归一化。
