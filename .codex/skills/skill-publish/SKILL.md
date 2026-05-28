@@ -26,6 +26,12 @@ When the command instructions below mention `/skill-publish`, interpret that as 
 - `/skill-rollback prototype` — 回滚到上一版本
 
 ## 执行步骤
+0. **确定性护栏（强制，不可跳过）**：发布前先跑护栏脚本，新版通过率 < 旧版（超容差）时脚本 `exit 2` 拒绝，本次发布必须中止：
+   ```bash
+   node scripts/skill-eval-results.js guard <skill-name>
+   # exit 0 → 继续步骤 1；exit 2 → 中止，按脚本提示改进提案后重跑 /skill eval
+   ```
+   护栏读 `skill-evals/{name}/results/results.jsonl` 最新两版比对。无前一版基线时放行（exit 0）。这是 [[ADR-013]] mechanism-over-discipline 的落地：把"eval ≥ 当前版本"从协议下沉为脚本强制。
 1. 检查是否有已验证且通过的提案（`/skill-eval` 通过率 >= 当前版本）
 2. 备份当前版本 → `{skill-name}.v{N}.bak.md`
 3. 应用修改 → 更新 SKILL.md 或 command .md
@@ -42,7 +48,7 @@ When the command instructions below mention `/skill-publish`, interpret that as 
 ```
 
 ## 安全
-- 必须有 eval 验证才能发布（eval 结果 >= 当前版本）
+- 必须有 eval 验证才能发布（eval 结果 >= 当前版本），由步骤 0 护栏脚本 `exit 2` 确定性强制
 - 旧版本完整保留在备份中
 - `/skill-rollback {name}` 随时回滚
 

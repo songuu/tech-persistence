@@ -83,6 +83,8 @@ aliases: ["两层架构增强", "coding-flow + self-evolution enhancement"]
 
 ### B1. trace-aware 反思（skill-improve 层，GEPA 内核）
 
+> **✅ 已实现（2026-05-28）**：见 [[2026-05-28-skill-trace-aware-reflection]]。按数据依赖在 B2 之前实施（ROI 排序倒置）。落地偏差：设计文档"扩展现有 steps_skipped/corrections/duration"建立在错误现状描述上——勘察证 signal jsonl 只有 calls 计数，那些字段是 doc drift。trace 改存独立 `skill-traces/{name}.jsonl`（不污染 calls 聚合），数据源用现成 observations.jsonl（双层脱敏），diagnose 半自动提取 + 人工 gate（[[ADR-017]]）。
+
 - **现状**（勘察 `skill-improve.md`）：基于诊断报告（跳过率/使用率/纠正模式）生成 5 类提案（合并/降级/吸收本能/精简/拆分）。
 - **差距**：信号是**聚合统计**，不含单次执行的完整失败 trace；improve 不读"为什么失败"做反思。对标 GEPA（读 trace 自然语言反思而非塌缩成标量分）。
 - **设计**：
@@ -102,6 +104,8 @@ aliases: ["两层架构增强", "coding-flow + self-evolution enhancement"]
 - **风险**：真实输入可能不可复现（依赖外部状态）→ 转 case 时快照必要上下文。
 
 ### B3. 基线护栏下沉 enforcement（skill-publish 层，[[ADR-013]] 活案例）
+
+> **✅ 已实现（2026-05-28）**：见 [[2026-05-28-skill-publish-baseline-guard]]。落地与原设计两处偏差：(1) enforcement 入口不是 `pre-commit-check`（publish 改 runtime 目录不产生 git commit），改为 publish 流程内调用的独立 guard CLI；(2) 先补齐缺失的结构化 eval-result 格式（`scripts/lib/skill-eval-results.js`），guard 才有可比对基线。record + guard 合并为单 CLI `scripts/skill-eval-results.js`。
 
 - **现状**（勘察 `skill-publish.md`）：协议**已要求** "eval 通过率≥当前版本才能发布"（步骤 1 + 安全段），但靠模型执行命令时遵守。
 - **差距**：**停留文档协议层，未下沉为确定性 enforcement**——无脚本强制 block 退化发布。这正是 [[ADR-013]] mechanism-over-discipline 描述的 3 失效模式（遗忘/省略/漂移）的活靶子。
@@ -144,3 +148,5 @@ aliases: ["两层架构增强", "coding-flow + self-evolution enhancement"]
 | 日期 | 变更 |
 |------|------|
 | 2026-05-28 | 初版：6 个增强设计（编码流 3 + 自进化 3），均经现状勘察 + 4 原则校验。status: proposed |
+| 2026-05-28 | B3 基线护栏下沉已实现（[[2026-05-28-skill-publish-baseline-guard]]）；勘察推翻原设计 2 假设（pre-commit 入口 + result 已有格式），修正为独立 guard CLI + 补结构化 eval-result。剩余 5 增强仍 proposed |
+| 2026-05-28 | B1 trace-aware 反思已实现（[[2026-05-28-skill-trace-aware-reflection]]）；按数据依赖在 B2 之前做；勘察证 signal schema 是 doc drift（只有 calls），trace 存独立 skill-traces/ + observations 数据源 + 双层脱敏。B2 解除阻塞。剩余 4 增强（A1/A2/A3/B2）proposed |

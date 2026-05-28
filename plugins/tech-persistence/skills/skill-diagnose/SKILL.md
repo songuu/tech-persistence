@@ -55,6 +55,21 @@ Progressive disclosure 检查:
   具体改进建议列表
 ```
 
+## 失败 trace 提取（B1 trace-aware，半自动）
+
+诊断时若发现该 skill 有失败/被纠正的真实执行，**半自动**沉淀为结构化 trace 供 `/skill improve` 根因反思：
+
+1. 读 `~/.codex/homunculus/projects/{hash}/observations.jsonl`（已双层脱敏）中 `tool:"Skill"` 且 `error_signal` / `status` 异常、或后续被用户纠正的条目。
+2. 提炼 failure_step（哪一步崩）/ error_excerpt（错误片段）/ correction_diff（用户怎么纠正）/ input_excerpt（触发输入）。
+3. **人工确认 gate** 后写入（CLI 内部再过一道脱敏，纵深防御）：
+   ```bash
+   node scripts/skill-traces.js record --name <skill> \
+     --failure-step "<哪步>" --error-excerpt "<错误>" --correction-diff "<纠正>" --input-excerpt "<输入>"
+   ```
+   追加到 `~/.codex/homunculus/skill-traces/{name}.jsonl`。
+
+> trace 入口是半自动（LLM 提取 + 人工确认），不靠 hook 自动检测——skill 成败是语义判断，无 exit code。
+
 ## 触发时机
 - 手动执行
 - `/retrospective` 时自动附带

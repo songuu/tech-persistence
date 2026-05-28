@@ -37,6 +37,19 @@ Eval 结果: /{name}
 v2 >= v1 ? ✅ 建议发布 : ❌ 回滚
 ```
 
+## 记录结构化结果（publish 护栏前置）
+
+跑完通过率后**必须**记录结构化结果，供 `/skill publish` 的确定性护栏读取（否则护栏无基线可比对，会放行退化发布）：
+
+```bash
+node scripts/skill-eval-results.js record --name <skill> --version <N> --pass-rate <0..1>
+# 例：node scripts/skill-eval-results.js record --name prototype --version 2 --pass-rate 0.93
+```
+
+- `--version` 为本次被评估的 skill 版本号（正整数）。
+- `--pass-rate` 为总计通过率，取 0..1 浮点（93% → 0.93）。
+- 追加写入 `~/.claude/homunculus/skill-evals/{name}/results/results.jsonl`（append-only 时间线）。
+
 ## 安全规则
-- eval 文件不可被 skill 修改（防止 "改考卷通过考试"）
-- eval 结果归档到 `skill-evals/{name}/results/` 供历史对比
+- eval 文件与 `results/results.jsonl` 不可被 skill 修改（防止 "改考卷通过考试"）
+- eval 结果归档到 `skill-evals/{name}/results/` 供历史对比与 publish 护栏读取

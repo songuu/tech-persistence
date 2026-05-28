@@ -17,6 +17,24 @@
 
 ## 决策列表
 
+### ADR-017: skill 进化链的语义信号（失败/纠正）用"LLM 半自动判断 + CLI 结构化 record"捕获，不靠 hook 自动检测 (2026-05-28)
+- **状态**：已采纳
+- **上下文**：[[2026-05-28-two-layer-architecture-enhancement]] §B1（GEPA 内核）要 improve 基于真实失败 trace 反思。设计文档假设"扩展现有 signal jsonl 的 steps_skipped/corrections/duration 字段"。勘察推翻：`aggregateSkillSignals` record 只有 `{skill, calls, source}`——diagnose/improve.md 描述的完成率/热力图/纠正模式全是 doc drift（[[documented-claim-vs-code-reality-drift]]）。更根本：skill 一次执行"成功/失败/被纠正"是**语义判断**，无 exit code，PostToolUse hook 看不到——无法像 observe 那样确定性自动派生。
+- **决策**：(1) skill 的失败/纠正 trace 用"LLM 半自动判断 + 人工 gate + CLI 结构化 record"捕获，不引入 hook 自动失败检测；(2) 数据源复用现成 observations.jsonl（已双层脱敏，含 input/output/error_signal），由 `/skill diagnose` 时 LLM 提取异常条目 → 人工确认 → `node scripts/skill-traces.js record`；(3) trace 存独立 `{baseDir}/skill-traces/{name}.jsonl`，**不混入 skill-signals 的 calls jsonl**（避免污染 `summarizeSkillSignals` 聚合）；(4) recordTrace 内部对所有字符串字段再过 `stripPrivateTags`（纵深防御，即使 observations 已脱敏）。
+- **原因**：(1) 语义信号（成败/纠正）确定性化的边界——能 hook 自动派生的是"工具调用 + error_signal"（已在 observe 做），"这次 skill 用得好不好"必须 LLM 判断，强行 hook 化会产生噪声标注；(2) 复用 observations 避免新建捕获点（[[reuse-existing-infra-before-building-new]]）；(3) 独立目录保持 calls 聚合纯净 + 与 [[ADR-016]] skill-evals/ 同构（parity）；(4) trace 含真实输入，双层脱敏是隐私不可妥协项。
+- **备选**：(a) hook 自动检测 skill 失败——语义判断不可确定性化，否决；(b) trace 混入 signal jsonl——污染 calls 聚合，且语义混杂；(c) 不脱敏（信 observations 已脱敏）——违反纵深防御，否决。
+- **影响**：(1) 这是 [[ADR-016]] 同期确立的 skill 链 deterministic 化的**互补面**——ADR-016 管"能确定性判定的环节下沉 enforcement"，ADR-017 管"语义判定环节保持 LLM + 人工 gate，只把产物结构化"；(2) B2（trace→eval）以本 sprint 的 skill-traces 为数据源解除阻塞；(3) 未来给 LLM-only 子系统加数据捕获时，先问"这个信号是确定性可派生还是语义判断"——后者走"LLM 判断 + CLI record"，不堆 hook。
+- **来源**：`docs/plans/2026-05-28-skill-trace-aware-reflection.md`，`docs/solutions/2026-05-28-skill-trace-aware-reflection.md`。
+
+### ADR-016: skill 进化链引入首个 deterministic gate（publish 基线护栏），enforcement 入口按"动作是否产生 git commit"选址 (2026-05-28)
+- **状态**：已采纳
+- **上下文**：[[2026-05-28-two-layer-architecture-enhancement]] §B3（[[ADR-013]] 活案例）提议把 skill-publish 的"eval 通过率 ≥ 当前版本"从文档协议下沉为确定性 enforcement。设计文档假设"复用 `scripts/pre-commit-check.js` 模式"。实施勘察推翻两个核心假设：(1) `/skill` 明示整条进化链"无 deterministic backing code"，eval 结果只是 LLM 产出的 markdown 表格，**无结构化格式**，护栏无可读基线；(2) `pre-commit-check.js` 由 `git diff --cached` 驱动，但 publish 改的是 runtime 目录 `~/.claude/homunculus/skill-evals/{name}/`，**不产生 git commit**，永远不在 staged files——pre-commit 入口对 publish 动作结构性失效。
+- **决策**：(1) 先补齐结构化 eval-result 格式 `scripts/lib/skill-eval-results.js`（`recordResult`/`readLatestTwo`/`checkRegression`，append-only `results.jsonl`），这是 enforcement 的数据前置；(2) enforcement 入口选址原则——**按"被守护的动作是否产生 git commit"决定挂 pre-commit 还是挂动作流程内的独立 guard**。publish 不产生 commit → 独立 guard CLI（`scripts/skill-eval-results.js guard <name>`，退化 `exit 2`），由 `/skill publish` 步骤 0 强制调用；(3) record + guard 合并为单 CLI（YAGNI，避免两个顶层脚本 + 两个 copyUtilityScripts 项）；(4) 沿用 [[ADR-013]] enforcement 模式：3 层 fail-open（用户可不调 / try-catch exit 0 + `[skill-guard] fail-open:` marker / node 缺失靠调用方）、派生具体修复命令、无基线放行（向后兼容当前全空的 skill-evals）。
+- **原因**：(1) pre-commit 是 git-staged 驱动的 enforcement，只能守护"会进 commit 的改动"；runtime-only 副作用（写 `~/.claude/...`）必须在产生副作用的动作流程内拦截，否则 enforcement 形同虚设；(2) 给 LLM-only 子系统加首个 deterministic gate 合理——[[ADR-013]] mechanism-over-discipline 核心是"高频违反 / 影响一致性的规则下沉为工具拒绝"，退化发布正属此类；(3) 无基线放行保证 enforcement 零误拒启动（[[ADR-013]]§B 边界产物：当前 skill-evals 全空，护栏必须放行而非阻塞）。
+- **备选**：(a) 挂 pre-commit-check——已证结构性失效（publish 不 commit）；(b) 继续靠 skill-publish.md 协议——正是 [[ADR-013]] 批判的"停留文档层"；(c) 引入 DB 存 eval 历史——违反轻量原则，append-only jsonl 足够。
+- **影响**：(1) skill 进化链从"纯 LLM 协议"变为"LLM 协议 + 1 个 deterministic publish gate"，后续 skill 链增强（B1/B2）需注意该 gate 存在；(2) 未来任何"下沉 enforcement"提案必须先问"被守护的动作是否产生 git commit"——产生则 pre-commit，否则动作流程内 guard；(3) guard CLI 进 `copyUtilityScripts` 列表（双 runtime parity），lib 经 `copyHookLibs` glob 自动复制；(4) eval result 结构化格式确立后，B2（trace→eval）有了落地基础。
+- **来源**：`docs/plans/2026-05-28-skill-publish-baseline-guard.md`，`docs/solutions/2026-05-28-skill-publish-baseline-guard.md`。
+
 ### ADR-015: Memory v5 引入 Persona 顶层独立维度（5 字段固定结构）+ 显式区分双 memory 系统 (2026-05-15)
 - **状态**：已采纳
 - **上下文**：TDAI sibling eval（[[2026-05-15-tencentdb-agent-memory-analysis]]）§4 借鉴点 1 提议 TP Memory v5 缺少"用户长期画像"维度——`feedback_*` / `user_*` 散落多个文件，SessionStart 每次靠模型从散链聚合，跨会话稳定性差；同时实施中发现 TP **同时有两套 memory 系统**（Claude Code auto memory at `~/.claude/projects/C--<cwdpath>/memory/` vs Tech-persistence v5 at `~/.claude/homunculus/projects/<gitHash>/memory/`），写入侧 vs 读取侧默认分离——所有现有 `feedback_*`/`user_*` 在 Codex 端**完全不可见**（违反 [[ADR-011]] multi-runtime parity 但此前未发现）。

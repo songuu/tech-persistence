@@ -134,9 +134,9 @@ flowchart TD
     USE["Skill used (/prototype /review ...)"]
     SIG["Signal collection<br/>steps skipped, corrections, duration"]
     DIAG["/skill diagnose<br/>Heatmap + correction patterns"]
-    IMP["/skill-improve<br/>Merge steps, absorb instincts"]
-    EVAL["/skill-eval<br/>A/B pass rate"]
-    PUB["/skill-publish<br/>Backup, deploy, changelog"]
+    IMP["/skill-improve<br/>Merge steps, absorb instincts, trace reflection"]
+    EVAL["/skill-eval<br/>A/B pass rate + record result"]
+    PUB["/skill-publish<br/>Baseline guard (exit 2), backup, changelog"]
 
     USE -->|"every use"| SIG
     SIG -->|"threshold"| DIAG
@@ -559,7 +559,8 @@ node scripts/memory-export.js --format=jsonl --output=memory.jsonl --push=agentm
     ├── instincts/{personal/, inherited/}
     ├── evolved/{skills/, commands/, agents/}
     ├── skill-signals/                  ← 使用信号
-    ├── skill-evals/                    ← 测试集
+    ├── skill-evals/                    ← 测试集 + {name}/results/results.jsonl (publish 护栏基线)
+    ├── skill-traces/                   ← 失败/纠正 trace ({name}.jsonl, improve 根因反思源)
     ├── skill-changelog/                ← 变更记录
     └── projects/{hash}/
         ├── memory/MEMORY.md             ← Memory v5 启动索引 (<200 行 / 25KB)

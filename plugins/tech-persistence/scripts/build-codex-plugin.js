@@ -385,11 +385,14 @@ function copyMcpRuntime() {
 }
 
 function copyUtilityScripts() {
-  [
+  const utilityScripts = [
     'configure-shared-homunculus.js',
     'agent-orchestrator.js',
     'sync-solution-index.js',
-  ].forEach((name) => {
+    'skill-eval-results.js',
+    'skill-traces.js',
+  ];
+  utilityScripts.forEach((name) => {
     copyTextFile(
       path.join(repoRoot, 'scripts', name),
       path.join(pluginRoot, 'scripts', name),
@@ -397,7 +400,7 @@ function copyUtilityScripts() {
     );
   });
   copyAgentOrchestratorSubmodules();
-  return 4;
+  return utilityScripts.length + 1;
 }
 
 function copyAgentOrchestratorSubmodules() {

@@ -132,7 +132,7 @@ function Install-User {
 
     # Directories
     @("commands","rules","skills/memory","skills/continuous-learning/hooks","skills/prototype-workflow","skills/test-strategy","skills/context-handoff") | ForEach-Object { Ensure-Dir (Join-Path $ClaudeHome $_) }
-    @("instincts/personal","instincts/inherited","evolved/skills","evolved/commands","evolved/agents","projects","skill-signals","skill-evals","skill-changelog") | ForEach-Object { Ensure-Dir (Join-Path $HomunculusDir $_) }
+    @("instincts/personal","instincts/inherited","evolved/skills","evolved/commands","evolved/agents","projects","skill-signals","skill-evals","skill-traces","skill-changelog") | ForEach-Object { Ensure-Dir (Join-Path $HomunculusDir $_) }
 
     # CLAUDE.md
     Safe-CopyNew (Join-Path $ScriptDir "user-level/CLAUDE.md") (Join-Path $ClaudeHome "CLAUDE.md")

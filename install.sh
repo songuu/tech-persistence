@@ -163,6 +163,7 @@ install_homunculus() {
   # v4: Skill 自迭代相关目录
   mkdir -p "${HOMUNCULUS_DIR}/skill-signals"
   mkdir -p "${HOMUNCULUS_DIR}/skill-evals"
+  mkdir -p "${HOMUNCULUS_DIR}/skill-traces"
   mkdir -p "${HOMUNCULUS_DIR}/skill-changelog"
 
   # 默认配置

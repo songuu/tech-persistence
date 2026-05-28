@@ -19,7 +19,17 @@ When the command instructions below mention `/skill-improve`, interpret that as 
 
 > **已合并到 `/skill improve <name>`**（行为完全一致，新代码请用 `/skill improve`）。本命令保留作 alias，向后兼容。
 
-读取 `/skill-diagnose` 的诊断报告 + 信号文件 + 相关本能，生成结构化修改提案。
+读取 `/skill-diagnose` 的诊断报告 + 信号文件 + 相关本能 + **失败 trace**，生成结构化修改提案。
+
+## 失败 trace 根因反思（B1，GEPA 内核）
+
+生成提案前先读该 skill 的结构化失败 trace：
+
+```bash
+node scripts/skill-traces.js list <name>   # 预览有多少条失败/纠正 trace
+```
+
+对每条 trace 做**根因反思**（不是把失败塌缩成"跳过率"标量，而是读 failure_step / error_excerpt / correction_diff 自然语言诊断"为什么失败"），把反思结论转为定向的 prompt 修改提案。trace 来自真实使用（`skill-traces/{name}.jsonl`），比同源自动生成的用例更有信号。
 
 ## 用法
 - `/skill-improve prototype` — 为指定 skill 生成改进提案

@@ -69,19 +69,19 @@ Codex 同义：`$skill <action> <name>`
 
 ### `/skill diagnose <name>`
 
-读取 `~/.codex/homunculus/skill-signals/{name}.jsonl`，分析使用情况。详细规范见 [skill-diagnose.md](./skill-diagnose.md)（保留 alias）。
+读取 `~/.codex/homunculus/skill-signals/{name}.jsonl`，分析使用情况。诊断时可半自动从 observations 提取失败 trace（`node scripts/skill-traces.js record ...`，人工确认 gate）供 improve 反思。详细规范见 [skill-diagnose.md](./skill-diagnose.md)（保留 alias）。
 
 ### `/skill eval <name>`
 
-用预定义测试集验证 skill 质量。详细规范见 [skill-eval.md](./skill-eval.md)。
+用预定义测试集验证 skill 质量。跑完**必须**记录结构化结果（`node scripts/skill-eval-results.js record ...`）供 publish 护栏读取。详细规范见 [skill-eval.md](./skill-eval.md)。
 
 ### `/skill improve <name>`
 
-基于 diagnose 报告 + 相关本能生成结构化修改提案。详细规范见 [skill-improve.md](./skill-improve.md)。
+基于 diagnose 报告 + 相关本能 + 失败 trace（`skill-traces/`）生成结构化修改提案；对每条 trace 做根因反思（GEPA 内核）。详细规范见 [skill-improve.md](./skill-improve.md)。
 
 ### `/skill publish <name>`
 
-发布已 eval 验证的提案为新版本，含 backup + changelog + rollback。详细规范见 [skill-publish.md](./skill-publish.md)。
+发布已 eval 验证的提案为新版本，含 backup + changelog + rollback。**发布前强制跑确定性护栏** `node scripts/skill-eval-results.js guard <name>`，新版通过率退化时 `exit 2` 拒绝（[[ADR-013]]）。详细规范见 [skill-publish.md](./skill-publish.md)。
 
 ### `/skill auto <name>`
 
@@ -101,7 +101,8 @@ Phase 3/4: improve <name>
   → 输出 diff 预览，等待人工 'go' 确认
 
 Phase 4/4: publish <name>
-  → 仅在 eval 新版本通过率 ≥ 旧版本时执行
+  → 先跑护栏 node scripts/skill-eval-results.js guard <name>
+  → exit 2（新版通过率退化）→ 中止发布；exit 0 → 继续
   → 备份 + changelog + 标记 absorbed_into
 ```
 
