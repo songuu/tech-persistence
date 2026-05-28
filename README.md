@@ -668,3 +668,5 @@ flowchart LR
 ```
 
 v7 保留 v6 的外部 orchestrator 边界：冻结 spec、Codex 实现、Claude 复审仍由同一条编排链路完成。新增能力集中在压缩层，包括 `$caveman` 精简输出模式、`$caveman-compress` 压缩自然语言 memory 文件，以及围绕 Claude Code / Codex 双运行时的一致性加固。
+
+> **深度演进总结**：V1→V7 与加固期的触发痛点、ADR 因果链、5 条元方法论与 7 项未闭合张力，见 [架构演进全景：V1→V7 与加固期](docs/architecture/2026-05-28-evolution-overview.md)。
