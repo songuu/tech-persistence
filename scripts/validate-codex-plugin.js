@@ -482,6 +482,18 @@ isFile(
   path.join(pluginRoot, 'scripts', 'sync-solution-index.js'),
   'solution-index utility sync-solution-index.js'
 );
+// utility 脚本（agent-orchestrator / skill-eval-* / skill-traces）通过 require('./lib/*')
+// 解析 plugin scripts/lib，与 hook 脚本同样需要闭包校验；否则新增 ./lib 依赖会静默回归
+// （A3 给 agent-orchestrator 引入首个 ./lib 依赖时实证：plugin 副本 Cannot find module）。
+validateLocalRequireClosure(
+  [
+    'agent-orchestrator.js',
+    'skill-eval-results.js',
+    'skill-traces.js',
+    'skill-eval-cases.js',
+  ].map((script) => path.join(pluginRoot, 'scripts', script)),
+  'utility scripts'
+);
 [
   'requirement-spec.schema.json',
   'task-breakdown.schema.json',

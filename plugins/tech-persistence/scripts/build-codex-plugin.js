@@ -401,7 +401,11 @@ function copyUtilityScripts() {
     );
   });
   copyAgentOrchestratorSubmodules();
-  return utilityScripts.length + 1;
+  // utility 脚本里的 require('./lib/*') 相对脚本自身解析到 plugin scripts/lib，
+  // 必须独立于 hooks/lib、mcp/lib 单独落一份——否则 plugin 副本运行时
+  // Cannot find module './lib/...'（A3 给 agent-orchestrator 首次引入 ./lib 依赖后实证回归）。
+  const utilityLibCount = copyHookLibs(path.join(pluginRoot, 'scripts'));
+  return utilityScripts.length + 1 + utilityLibCount;
 }
 
 function copyAgentOrchestratorSubmodules() {
