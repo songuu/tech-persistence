@@ -12,6 +12,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const {
   recordResult,
@@ -20,6 +21,8 @@ const {
   checkRegression,
   resolveResultsFile,
 } = require('./lib/skill-eval-results');
+
+const CLI = path.join(__dirname, 'skill-eval-results.js');
 
 let passed = 0;
 let failed = 0;
@@ -115,6 +118,30 @@ test('readResults skips malformed lines without throwing', () => {
   const records = readResults('compound', { baseDir });
   assert.strictEqual(records.length, 2);
   assert.strictEqual(checkRegression('compound', { baseDir }).status, 'ok');
+});
+
+test('guard PASS message distinguishes tolerance-absorbed drop from true non-regression', () => {
+  const baseDir = makeBaseDir();
+  recordResult('prototype', { version: 1, passRate: 0.9, baseDir });
+  recordResult('prototype', { version: 2, passRate: 0.6, baseDir });
+  // 容差放行：新版实际低于旧版，仅因降幅 ≤ tolerance 才通过 → 文案不得谎称 "≥ 旧版"
+  const tol = spawnSync(
+    process.execPath,
+    [CLI, 'guard', 'prototype', '--tolerance', '0.4', '--base-dir', baseDir],
+    { encoding: 'utf8' }
+  );
+  assert.strictEqual(tol.status, 0, tol.stderr);
+  assert.ok(!/≥ 旧版/.test(tol.stdout), `tolerance PASS must not claim ≥ 旧版: ${tol.stdout}`);
+  assert.ok(/容差/.test(tol.stdout), `tolerance PASS should state it is within 容差: ${tol.stdout}`);
+  // 真不退化：新版 ≥ 旧版 → 保留 "≥ 旧版"
+  recordResult('prototype', { version: 3, passRate: 0.95, baseDir });
+  const ok = spawnSync(
+    process.execPath,
+    [CLI, 'guard', 'prototype', '--base-dir', baseDir],
+    { encoding: 'utf8' }
+  );
+  assert.strictEqual(ok.status, 0, ok.stderr);
+  assert.ok(/≥ 旧版/.test(ok.stdout), `non-regression PASS should keep ≥ 旧版: ${ok.stdout}`);
 });
 
 console.log('');

@@ -112,9 +112,20 @@ function runGuard(positional, flags) {
   if (result.status === 'no-baseline') {
     process.stdout.write(`[skill-guard] PASS: ${name} ${result.reason}\n`);
   } else {
-    process.stdout.write(
-      `[skill-guard] PASS: ${name} v${result.curr.version} pass_rate=${(result.curr.pass_rate * 100).toFixed(1)}% ≥ 旧版 ${(result.prev.pass_rate * 100).toFixed(1)}%\n`
-    );
+    const { prev, curr, tolerance } = result;
+    const currPct = (curr.pass_rate * 100).toFixed(1);
+    const prevPct = (prev.pass_rate * 100).toFixed(1);
+    if (curr.pass_rate < prev.pass_rate) {
+      // 容差放行：新版通过率实际低于旧版，仅因降幅 ≤ tolerance 才通过 →
+      // 文案不能谎称 "≥ 旧版"（60% ≥ 90% 是字面失真），必须如实说明是容差吸收
+      process.stdout.write(
+        `[skill-guard] PASS: ${name} v${curr.version} pass_rate=${currPct}% < 旧版 ${prevPct}%，降幅在容差 ${(tolerance * 100).toFixed(1)}% 内，放行\n`
+      );
+    } else {
+      process.stdout.write(
+        `[skill-guard] PASS: ${name} v${curr.version} pass_rate=${currPct}% ≥ 旧版 ${prevPct}%\n`
+      );
+    }
   }
   process.exit(0);
 }
