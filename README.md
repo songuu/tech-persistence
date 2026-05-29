@@ -559,7 +559,7 @@ node scripts/memory-export.js --format=jsonl --output=memory.jsonl --push=agentm
     ├── instincts/{personal/, inherited/}
     ├── evolved/{skills/, commands/, agents/}
     ├── skill-signals/                  ← 使用信号
-    ├── skill-evals/                    ← 测试集 + {name}/results/results.jsonl (publish 护栏基线)
+    ├── skill-evals/                    ← 测试集 + {name}/cases/cases.jsonl (trace 沉淀用例) + {name}/results/results.jsonl (publish 护栏基线)
     ├── skill-traces/                   ← 失败/纠正 trace ({name}.jsonl, improve 根因反思源)
     ├── skill-changelog/                ← 变更记录
     └── projects/{hash}/

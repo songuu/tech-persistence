@@ -491,6 +491,11 @@ validateLocalRequireClosure(
     'skill-eval-results.js',
     'skill-traces.js',
     'skill-eval-cases.js',
+    // 以下 3 个当前零 ./lib 依赖（只 require 内建 fs/path），纳入闭包列表是为 future-proof：
+    // 任一将来新增 require('./lib/*') 时护栏自动覆盖，不必记得回来补列表（今天它们 trivially 通过）。
+    'configure-shared-homunculus.js',
+    'sync-solution-index.js',
+    'import-claude-homunculus.js',
   ].map((script) => path.join(pluginRoot, 'scripts', script)),
   'utility scripts'
 );
