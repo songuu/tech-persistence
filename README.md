@@ -344,6 +344,18 @@ SessionStart hook 会注入 caveman 规则；如需关闭自动激活，设置 `
 
 `--auto` 与 `--caveman` 正交，可组合：`/sprint --auto --caveman <需求>`。
 
+### 目标驱动循环（--goal）
+
+`/sprint --goal "<目标>"` 把目标提升为一等被追踪对象（写入 sprint 文档 frontmatter，注入每个 Phase 作为 north-star），允许 think→plan→work→review→compound 循环重入直到目标达成或触发终止：
+
+```text
+/sprint --goal "<目标>" <需求>              # 目标驱动循环，人工 gate 全保留
+/sprint --goal "<目标>" --auto <需求>       # 目标驱动 + 自主循环
+/sprint --goal "<目标>" --max-iter 3 --until "npm test" <需求>
+```
+
+终止优先级（确定性优先）：`--until` 命令 exit 0 或迭代达 `--max-iter`（默认 3，硬上限）即停，**优先于** LLM 目标达成自评（仅 advisory，可提前停、不可越天花板）。`--goal` 单独使用不开启自主——自主循环必须显式叠加 `--auto`。`--runtime current|both`（默认 current；both 委托 agent-loop 编排器，本版本仅文档化）。三者正交可组合。完整协议见 `user-level/commands/sprint.md` 的「Goal Loop 协议」段。
+
 ### Obsidian 集成（可选）
 ```powershell
 .\install.ps1 -Obsidian     # 初始化 Obsidian vault
@@ -365,7 +377,7 @@ SessionStart hook 会注入 caveman 规则；如需关闭自动激活，设置 `
 | `/test` | 测试工程师 | 独立风险评估 + 分级测试 |
 | `/review` | 审查团队 | 5 视角审查（含测试覆盖 vs 风险匹配） |
 | `/compound` | 知识管理 | 经验+本能+方案+skill 信号+Obsidian 输出 |
-| `/sprint` | 指挥官 | 全链路编排 + 自动 checkpoint + resume |
+| `/sprint` | 指挥官 | 全链路编排 + 自动 checkpoint + resume + 目标驱动循环 (`--goal`) |
 | `/agent-loop` | 外部编排器 | v7 跨 Agent：冻结 spec → codex 实现 → spec review；caveman 压缩输出；可选 `--pipeline` 分片流水线 |
 
 ### 需求收敛（1 个）

@@ -12,12 +12,16 @@ description: "全流程冲刺：think→plan→work→review→compound，含上
 /sprint <需求描述>       ← 新 sprint
 /sprint --caveman <需求> ← 新 sprint，启用 token 压缩模式
 /sprint --auto <需求>    ← 新 sprint，启用自动审查模式
+/sprint --goal "<目标>" <需求>        ← 目标驱动循环（人工 gate 全保留）
+/sprint --goal "<目标>" --auto <需求> ← 目标驱动 + 自主循环
 /sprint resume           ← 从最近的 checkpoint 恢复
 /sprint resume --caveman ← 从 compact handoff 优先恢复
 /sprint resume --auto    ← 恢复并启用自动审查
 ```
 
-`--caveman` 与 `--auto` 可组合：`/sprint --caveman --auto <需求>`。
+`--goal` 的修饰参数：`--max-iter N`（默认 3，循环硬上限）、`--until "<shell 命令>"`（命令 exit 0 即终止）、`--runtime current|both`（默认 current；both 仅文档化未实装）。
+
+`--caveman` / `--auto` / `--goal` 三者正交，可任意组合：`/sprint --goal "<目标>" --caveman --auto <需求>`。**`--goal` 单独使用不开启自主**——自主循环必须显式叠加 `--auto`。
 
 Codex 中同义：
 
@@ -25,6 +29,8 @@ Codex 中同义：
 $sprint <需求描述>
 $sprint --caveman <需求描述>
 $sprint --auto <需求描述>
+$sprint --goal "<目标>" <需求描述>
+$sprint --goal "<目标>" --auto <需求描述>
 $sprint resume --caveman
 $sprint resume --auto
 ```
@@ -33,6 +39,10 @@ $sprint resume --auto
 
 - `--caveman`：输出 token 压缩，详见下方 Caveman Token Budget Mode。
 - `--auto`：自动审查模式。Phase 1-4 间的 'go' gate 由模型按风险等级 / 用户行为 / 置信度自主判断；强制人工的边界（destructive、L4、scope creep、P0 不平凡修复）仍保留。详见 `~/.codex/rules/auto-mode.md`。
+- `--goal "<目标>"`：目标驱动循环。目标成为一等被追踪对象（写入 sprint 文档 frontmatter，注入每个 Phase 作为 north-star），think→plan→work→review→compound 循环可重入直到目标达成或触发终止。详见下方「Goal Loop 协议」。**`--goal` 不改变 gate 行为**——单独使用时人工 gate 全保留，自主须叠加 `--auto`。
+- `--max-iter N`：循环硬上限，默认 3。无论 LLM 是否判定达成，迭代数到达 N 必停。
+- `--until "<shell 命令>"`：确定性终止条件。每轮收尾经 Bash 真实执行该命令，exit 0 即终止循环（ground truth，优先于 LLM 自评）。
+- `--runtime current|both`：执行运行时。`current`（默认）在当前运行时内闭环；`both` 委托 agent-loop 编排器跨运行时执行——**本版本仅文档化语义，未实装**（见下方「Goal Loop 协议 → 运行时选择」）。
 
 ## 项目文档贯穿全流程
 
@@ -115,6 +125,71 @@ Compound: 只报沉淀数量、路径、是否建议 compact
 
 如果用户要求“完整版本 / 完整架构 / 从源头看”，临时退出 caveman 输出压缩；完整说明后再恢复 compact mode。
 
+## Goal Loop 协议
+
+> 仅当传入 `--goal "<目标>"` 时激活。把"目标"作为贯穿全程的一等对象，并允许 sprint 循环重入直到目标达成或确定性终止。
+
+### 目标作为一等被追踪对象
+
+`--goal` 激活后，sprint 文档 frontmatter 写入（Obsidian 兼容标量）：
+
+```yaml
+goal: "<目标原文>"
+goal_max_iter: 3           # --max-iter，硬上限
+goal_until: "<shell 命令>"  # --until，可选；为空表示无确定性终止命令
+goal_iteration: 0          # 已完成的循环轮次，每轮重入前 +1
+goal_status: in-progress   # in-progress | met | max-iter-reached | terminated
+```
+
+**计数器持久化 + 强制重读**：`goal_iteration` 是循环状态的 single source of truth，**只信 frontmatter 磁盘值，不信压缩后的对话记忆**。每轮重入前必须重新读取 sprint 文档 frontmatter 取当前 `goal_iteration` 再 +1 写回。（`/compact` 会丢失对话内计数，frontmatter 是唯一可靠锚点。）
+
+### 终止优先级（确定性优先于语义）
+
+判定顺序，**确定性条件先于、且压倒 LLM 自评**：
+
+1. **`--until` 命令 exit 0** → 立即终止（`goal_status: met`）。该命令每轮收尾经 Bash 真实执行、读取真实 exit code，不得用 LLM 推测代替。
+2. **`goal_iteration >= goal_max_iter`** → 立即终止（`goal_status: max-iter-reached`），**无论 LLM 是否认为目标已达成**。这是硬天花板。
+3. **LLM 目标达成自评** → 仅 advisory：可让循环**提前**停（`goal_status: met`），但**永远不能突破 max-iter 让循环继续**。
+
+> ⚠️ **确定性上限说明**：`/sprint` 是模型驱动的 markdown 协议，无宿主进程强制计数。max-iter 天花板靠"frontmatter 持久 + 每轮重读 + 强制打印 check 行 + 低默认值 + auto-mode 迭代级强制 gate"多层保证，而非进程级硬计数。这是本协议层可达的确定性上限。若 `--goal --auto` 被证明高频且有价值，再下沉为确定性 helper（见 `docs/plans/2026-05-29-sprint-goal-mode.md` 附录 A）。
+
+### 每轮强制打印 check 行
+
+每次循环判定（Phase 5 Compound 收尾）**必须**打印一行，使任何跳过在 transcript 可见：
+
+```text
+Goal loop: iter <N>/<max>, until=<exit code 或 n/a>, goal-met=<yes|no>, decision=<continue|stop:reason>
+```
+
+### 循环机制
+
+```text
+Phase 5 Compound 收尾
+  ↓ 读 frontmatter goal_iteration（磁盘，不信对话记忆）
+  ↓ 跑 --until（若有）→ 读真实 exit code
+  ↓ 按终止优先级判定 → 打印 check 行
+  ├── 终止 → goal_status 落定，正常收尾
+  └── 继续 → goal_iteration +1 写回 frontmatter → 重入 Phase 1 Think
+              （携带目标 + 上一轮 delta + 未达成原因）
+```
+
+### gate 行为（守 --auto 永不默认）
+
+- **`--goal` 单独使用**：每个 Phase 间人工 gate **全保留**，循环重入也需用户 'go'。人工 gate 本身即天花板——用户不会盲目批准第 4 次重入。
+- **`--goal --auto`**：循环按 auto-mode 决策矩阵自主推进，但 auto-mode 的**强制人工边界**（destructive / L4 / 安全 / scope creep / 测试失败）以及新增的**迭代级边界**（到 max-iter 仍未达成 → 停下问人；跨迭代累积 scope creep → 强制人工）**无视 --auto**，是真正的断路器。详见 `~/.codex/rules/auto-mode.md`。
+
+### 目标范围约束（复用第 6 视角）
+
+`--goal` 激活时，Phase 1 Think 把目标注入 scope/non-scope 定义；后续每轮 Phase 4 Review **复用第 6 视角**（集成连续性）做目标漂移检查——不新增第 7 视角。漂移处理两档：
+
+- **默认 warn-not-silent**：本轮改动偏离 north-star → 打印警告并继续（即便 --auto），不静默。
+- **升级强制 gate**：仅当漂移**同时**触发 auto-mode 既有 scope-creep 边界时，升级为强制人工。（不把每次漂移都变硬 gate，否则每轮自主迭代都被打断，循环失去意义。）
+
+### 运行时选择
+
+- `--runtime current`（默认）：在当前运行时内完成整个目标循环。
+- `--runtime both`：委托 agent-loop 编排器跨运行时执行（spec 与实现分属不同 provider）。**本版本仅文档化语义，未实装**：agent-loop 现无 `--max-iter` / goal-budget 可承接委托，需另设计 seam。传入 `--runtime both` 时按 `current` 执行并提示该限制。
+
 ## 执行流程
 
 ### Phase 1: Think (暂停确认)
@@ -126,6 +201,8 @@ Phase 1/5: Think
 ```
 
 Auto mode：scope 明确、无开放问题且与原始需求无 scope creep 时直接进入 Plan，并打印 `✓ auto: phase 1 → 2`；否则保留人工 gate。
+
+Goal mode：当传入 `--goal` 时，把目标作为 north-star 注入 scope/non-scope 定义并对照检查范围一致性；同时在 sprint 文档 frontmatter 初始化 `goal` / `goal_max_iter` / `goal_until` / `goal_iteration: 0` / `goal_status: in-progress`（详见「Goal Loop 协议」）。
 
 Caveman mode 输出：
 
@@ -230,6 +307,7 @@ Phase 4/5: Review
 3. 是否让前 sprint 的设计意图无法实现（如前 sprint 留的"待 UI 接线"在本 sprint 仍空）
 4. 本 sprint 留的中间状态在下个 sprint 走通整链路要多大工作量
 5. 是否有"半下沉漂移"（shared / web / api 边界中间状态无 timeline）
+6. （仅当 `--goal` 激活）本轮/本 sprint 改动是否偏离 `--goal` north-star 目标——复用本视角，不新增第 7 视角。漂移默认 warn-not-silent（打印警告、不静默继续），仅当同时触发 scope-creep 边界才升级为 P0/强制 gate（详见「Goal Loop 协议 → 目标范围约束」）。
 
 第 6 视角发现破坏 invariant 或新增 dead code 一律视为 P0/P1 必修。
 
@@ -258,7 +336,17 @@ Phase 5/5: Compound
   Checkpoints: N 次
   知识: M 条经验, K 个本能, J 个 skill 信号
   Auto mode: A gates 自动通过 / M gates 强制人工（仅当启用 --auto 时显示）
+  Goal: <met|max-iter-reached|terminated>，迭代 <N>/<max>（仅当启用 --goal 时显示）
 ```
+
+**Goal Loop 收尾（仅当 `--goal` 激活）**：Compound 完成后按「Goal Loop 协议 → 循环机制」判定是否重入，并强制打印 check 行：
+
+```text
+Goal loop: iter <N>/<max>, until=<exit code 或 n/a>, goal-met=<yes|no>, decision=<continue|stop:reason>
+```
+
+- decision=stop → 落定 `goal_status`，正常结束 sprint。
+- decision=continue → 读磁盘 frontmatter，`goal_iteration` +1 写回，重入 Phase 1 Think（携带目标 + 上一轮 delta + 未达成原因）。
 
 Caveman mode 收尾：
 
@@ -437,6 +525,13 @@ tasks_total: 8
 tasks_completed: 8
 tags: [sprint, feature]
 aliases: ["用户导出"]
+
+# === Goal Loop 字段（仅 --goal 激活时写入）===
+goal: "<目标原文>"
+goal_max_iter: 3
+goal_until: ""            # --until shell 命令；空 = 无确定性终止命令
+goal_iteration: 0         # 已完成循环轮次，每轮重入前 +1（计数器 SoT，每轮重读磁盘）
+goal_status: in-progress  # in-progress | met | max-iter-reached | terminated
 
 # === Anti-Drift 扩展字段 ===
 
