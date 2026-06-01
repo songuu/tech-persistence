@@ -1,7 +1,7 @@
 ---
 title: "次级缺陷 B/C/D/E 缓解 roadmap"
 type: roadmap
-status: planning
+status: completed
 created: "2026-06-01"
 updated: "2026-06-01"
 tags: [roadmap, architecture, self-evolution, agentic]
@@ -22,7 +22,7 @@ defects:
   - id: C
     name: "同源验证异构 P0 复核"
     priority: P3
-    status: planned
+    status: deferred
   - id: D
     name: "80/20 规划深度 rule"
     priority: P4
@@ -32,7 +32,7 @@ defects:
 # 次级缺陷 B/C/D/E 缓解 roadmap
 
 > 承接 [[2026-06-01-architecture-defect-analysis]]（缺陷 A 已落地 demand-side telemetry，见 [[ADR-022]] / [[2026-06-01-demand-side-recall-telemetry]]）。
-> 本文档是**规划沉淀**，非执行 sprint。每个缺陷的 execution plan 待逐个开。
+> 本文档是**规划沉淀**，非执行 sprint。B/D/E 已落地；C 经二次勘察降级暂缓。
 > 每个缺陷附「开 execution plan 前置勘察清单」，落地时直接照做（守 [[ADR-012]]：plan 前勘察被改文件）。
 
 ---
@@ -138,9 +138,9 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
 6. 文档同步（新 ADR + README + 本 roadmap 状态更新）
 
 **成功标准**：
-- [ ] 现有 rules/solutions/ADR 全部通过（0 FP，dogfood 验证）
-- [ ] 删除被引用文件 → checker block；改名被引用符号 → checker warn
-- [ ] pre-commit fail-open 保留（`--no-verify` 逃生 + try-catch marker）
+- [x] 现有 rules/solutions/ADR 全部通过（0 FP，dogfood 验证）
+- [x] 删除被引用文件 → checker block；改名被引用符号 → checker warn
+- [x] pre-commit fail-open 保留（`--no-verify` 逃生 + try-catch marker）
 
 **ROI**：高（5 年杠杆——知识库持续增长，drift 检测越老越值钱）。**张力**：假阳性（[[ADR-013]] §B dogfood 边界枚举强制压制，该协议已两次成功应用）；行号漂移（用文件/符号存在性而非行号缓解）。
 
@@ -176,8 +176,8 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
 3. 测试 + parity
 
 **成功标准**：
-- [ ] `--recall` 报告含「本周期 MCP 主动检索次数 / prompt-recall 注入被用率」
-- [ ] 复用现有 demand-side telemetry 管道，零新 jsonl
+- [x] `--recall` 报告含「本周期 MCP 主动检索次数 / prompt-recall 注入被用率」
+- [x] 复用现有 demand-side telemetry 管道，零新 jsonl
 
 **ROI**：中（复用缺陷 A 设施，成本极低）。**张力**：小。**定位**：缺陷 A 的自然延伸——A 测「注入知识被用率」，B 测「主动检索发生率」，同一 telemetry 家族。
 
@@ -208,10 +208,10 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
 3. fallback 档：无 codex → P0 强制实跑测试验证后才放行
 4. 双 runtime parity（propagate review + build + validate）
 
-**成功标准**：
-- [ ] 有 codex：review P0 finding 经 codex 复核，分歧显式呈现给用户
-- [ ] 无 codex：P0 退化为强制 ground-truth 实跑，不静默跳过
-- [ ] BLOCKED escalation 与现有 `review.md` 强制人工 gate 一致
+**若未来启用 C1，成功标准**：
+- 有 codex：review P0 finding 经 codex 复核，分歧显式呈现给用户
+- 无 codex：P0 退化为强制 ground-truth 实跑，不静默跳过
+- BLOCKED escalation 与现有 `review.md` 强制人工 gate 一致
 
 **ROI**：中高（catch 同源盲区 bug 价值高）。**张力**：codex 依赖（非所有用户装）+ 调用成本 + 轻量优先——故只复核 P0、必给 fallback。
 
@@ -238,7 +238,7 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
 **task 骨架**：在 `user-level/CLAUDE.md` 或 `rules/` 加「规划深度自适应」段（零代码）。
 
 **成功标准**：
-- [ ] 一段 rule 定义「任务可逆性 × 规模 → 规划深度档位」，与现有测试深度 L0-L4 同构
+- [x] 一段 rule 定义「任务可逆性 × 规模 → 规划深度档位」，与现有测试深度 L0-L4 同构
 
 **ROI**：代码层低、认知层高（想清楚 80/20 边界 > 写探索代码）。**这是「想清楚比写代码重要」的缺陷。**
 
@@ -275,3 +275,4 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
 | 2026-06-01 | E 落地（[[ADR-023]]，status done）。二次勘察固化（开 plan 前 [[ADR-012]]）：① 发现 B filter `mcp__*` 会静默失效（`normalizeToolName` 剥前缀）→ 修正为 `tp_memory_`；② C 裂 C1（可确定性强制）/C2（撞 [[ADR-021]] 天花板）；③ 结合 persona 重排序 D+B 小批、C 降级。 |
 | 2026-06-01 | D 落地（[[ADR-024]]，status done）。勘察修正落点：CLAUDE.md-only 有 Codex parity 缺口（Codex 不读 `~/.claude/CLAUDE.md`）→ 规则落 `/plan`（propagate）+ CLAUDE.md 摘要。剩 B（待开）、C（降级）。 |
 | 2026-06-01 | B 落地（status done，无新 ADR——复用 [[ADR-022]] 设施）。`active_retrieval_count` 入 demand-side metric，filter `/tp_memory_/`（采纳二次勘察发现 ①）。剩 **C 降级**（C2 撞 [[ADR-021]] 天花板、C1 等 agent-loop 用量）。BCDE 中 B/D/E 已落、C 暂缓——roadmap 主体完成。 |
+| 2026-06-01 | 收尾：roadmap 状态改 completed；B/D/E 成功标准回填完成；C 改 deferred，不伪装落地。 |

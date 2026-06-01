@@ -35,7 +35,7 @@ related:
 2. **Stop**（`evaluate-session.js`）读 manifest + 本会话 observations，经**宽松** `inferSessionDomains`（对齐 `CONFIG.domains` 全词表，宁可多算碰到、少误报沉睡）推断触及 domain → 交集算 `usage_rate` + `dormant_domains`（注入了但没碰到 = 退化核心信号），append 独立 `recall-usage.jsonl`（不污染供给侧 `memory-recall.jsonl`）。
 3. **消费点**（防 dead-on-arrival，[[feedback_enforcement_dead_on_arrival_82pct]]）：cost summary 高频（SessionStart 附 `prior-session demand-side recall` 行）+ `/review-learnings --recall` 低频全量审计。
 
-新 lib `scripts/lib/recall-usage.js`（纯函数 + 读写），18 单测覆盖启发式/边界/脱敏/fail-open。
+新 lib `scripts/lib/recall-usage.js`（纯函数 + 读写），21 单测覆盖启发式/边界/脱敏/fail-open/MCP 主动检索。
 
 ## 预防 / 规则
 
