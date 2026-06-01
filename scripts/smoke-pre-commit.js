@@ -48,6 +48,7 @@ function makeRepo(label) {
     'plugins/tech-persistence/scripts/build-codex-plugin.js',
     'scripts/pre-commit-check.js',
     'scripts/sync-solution-index.js',
+    'scripts/lib/knowledge-drift.js',
   ]) {
     const src = path.join(REAL_REPO, rel);
     const dst = path.join(dir, rel);
@@ -693,6 +694,90 @@ function scenarioSolutionIndexChangedAndSynced() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Knowledge drift scenarios (S16a-e) — 缺陷 E. 用 .claude/rules/*.md 隔离其他 checker。
+// ─────────────────────────────────────────────────────────────
+
+function scenarioDriftKnowledgePass() {
+  // 源码前缀 + 行号 + 文件存在(tracked) → ok, exit 0 (not fail-open)
+  const dir = makeRepo('s16a');
+  clearRequireCache(dir);
+
+  writeFile(dir, 'scripts/real-target.js', '// real\n');
+  writeFile(dir, '.claude/rules/drift-test.md',
+    '# Drift\n\n引用 `scripts/real-target.js:3` 指向真实文件。\n');
+  gitAdd(dir, 'scripts/real-target.js', '.claude/rules/drift-test.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0, got ${res.code}. stderr=${res.stderr}`);
+  assert(
+    !/hook 内部异常已忽略|fail-open 放行|Knowledge drift 检测失败/.test(res.stderr),
+    `expected real pass, got: ${res.stderr}`
+  );
+}
+
+function scenarioDriftKnowledgeBlock() {
+  // 源码前缀 + 行号 + 文件不存在 → block exit 1 (break-test 负样本)
+  const dir = makeRepo('s16b');
+  clearRequireCache(dir);
+
+  writeFile(dir, '.claude/rules/drift-test.md',
+    '# Drift\n\n引用 `scripts/ghost-file.js:10` 指向不存在的源码文件。\n');
+  gitAdd(dir, '.claude/rules/drift-test.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/Knowledge drift 检测失败/.test(res.stderr), `stderr missing drift block marker: ${res.stderr}`);
+  assert(/scripts\/ghost-file\.js/.test(res.stderr), `stderr missing path: ${res.stderr}`);
+}
+
+function scenarioDriftKnowledgeWarn() {
+  // 裸文件名 glob 0 匹配 → warn, 不阻塞 (exit 0) + stderr 含 warn
+  const dir = makeRepo('s16c');
+  clearRequireCache(dir);
+
+  writeFile(dir, '.claude/rules/drift-test.md',
+    '# Drift\n\n引用裸名 `ghost-bare-xyz.js:5`（仓库无此 basename）。\n');
+  gitAdd(dir, '.claude/rules/drift-test.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0 (warn not block), got ${res.code}. stderr=${res.stderr}`);
+  assert(/Knowledge drift 提示/.test(res.stderr), `stderr missing drift warn: ${res.stderr}`);
+  assert(/ghost-bare-xyz\.js/.test(res.stderr), `stderr missing bare name: ${res.stderr}`);
+}
+
+function scenarioDriftKnowledgeSkip() {
+  // ... 简写 + 运行时前缀 → skip, exit 0 无 drift 输出
+  const dir = makeRepo('s16d');
+  clearRequireCache(dir);
+
+  writeFile(dir, '.claude/rules/drift-test.md',
+    '# Drift\n\n简写 `plugins/.../foo.js:10` 与运行时 `.codex/settings.json:3` 都应 skip。\n');
+  gitAdd(dir, '.claude/rules/drift-test.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0 (skip), got ${res.code}. stderr=${res.stderr}`);
+  assert(!/Knowledge drift/.test(res.stderr), `expected no drift output for skipped refs: ${res.stderr}`);
+}
+
+function scenarioDriftKnowledgeFailOpen() {
+  // lib 缺失 → fail-open exit 0 + marker (break-impl 负样本)
+  const dir = makeRepo('s16e');
+  clearRequireCache(dir);
+
+  writeFile(dir, '.claude/rules/drift-test.md', '# Drift\n\n引用 `scripts/ghost.js:1`。\n');
+  gitAdd(dir, '.claude/rules/drift-test.md');
+
+  fs.rmSync(path.join(dir, 'scripts/lib/knowledge-drift.js'));
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0 (fail-open), got ${res.code}. stderr=${res.stderr}`);
+  assert(
+    /hook 内部异常已忽略|fail-open 放行/.test(res.stderr),
+    `expected fail-open diagnostic: ${res.stderr}`
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────
 
@@ -719,6 +804,11 @@ function main() {
   runScenario('S14f: grandfathered date + completed + path missing → exit 0', scenarioPlanCompletionGrandfathered);
   runScenario('S15a: docs/solutions changed but index/projections stale → exit 1', scenarioSolutionIndexChangedNotSynced);
   runScenario('S15b: docs/solutions changed and index/projections synced → exit 0', scenarioSolutionIndexChangedAndSynced);
+  runScenario('S16a: knowledge drift — 源码前缀引用存在文件 → exit 0 (not fail-open)', scenarioDriftKnowledgePass);
+  runScenario('S16b: knowledge drift — 源码前缀引用缺失文件 → exit 1 block', scenarioDriftKnowledgeBlock);
+  runScenario('S16c: knowledge drift — 裸名无匹配 → exit 0 warn (不阻塞)', scenarioDriftKnowledgeWarn);
+  runScenario('S16d: knowledge drift — ... 简写 + 运行时前缀 → exit 0 skip', scenarioDriftKnowledgeSkip);
+  runScenario('S16e: knowledge drift — lib 缺失 → exit 0 fail-open', scenarioDriftKnowledgeFailOpen);
 
   process.stdout.write(`\nresult: ${passed} passed, ${failed} failed\n`);
 

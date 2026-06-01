@@ -453,6 +453,32 @@ function checkSolutionIndexSync(stagedFiles, repoRoot) {
   return failures;
 }
 
+// 缺陷 E: 知识抗腐化 drift checker。校验 staged rules/solutions/ADR 里「带行号代码引用」
+// 所指文件是否还存在。block 仅限源码前缀(dogfood 验证 0 FP)；裸名 glob 0 匹配仅 warn。
+// 详见 docs/plans/2026-06-01-knowledge-drift-checker.md。
+function checkKnowledgeDrift(stagedFiles, repoRoot) {
+  const relevant = stagedFiles.filter((f) =>
+    (f.startsWith('.claude/rules/') || f.startsWith('docs/solutions/')) && f.endsWith('.md')
+  );
+  if (relevant.length === 0) return { blocks: [], warns: [] };
+
+  const drift = require('./lib/knowledge-drift');
+  const known = drift.buildKnownIndex(
+    execSync('git ls-files', { cwd: repoRoot, encoding: 'utf-8' })
+  );
+
+  const blocks = [];
+  const warns = [];
+  for (const rel of relevant) {
+    const text = readIfExists(path.join(repoRoot, rel));
+    if (text == null) continue; // staged 删除（D）的 md 无内容可查
+    const res = drift.analyzeKnowledgeDrift(text, known);
+    res.blocks.forEach((b) => blocks.push({ file: rel, ref: b.ref, lineNum: b.lineNum }));
+    res.warns.forEach((w) => warns.push({ file: rel, ref: w.ref, lineNum: w.lineNum }));
+  }
+  return { blocks, warns };
+}
+
 function formatPlanCompletionError(failures) {
   const lines = [
     '',
@@ -492,6 +518,40 @@ function formatSolutionIndexError(failures) {
   lines.push('    node scripts/sync-solution-index.js --all');
   lines.push('    git add docs/solutions/index.jsonl CLAUDE.md AGENTS.md');
   lines.push('  绕过: git commit --no-verify (不推荐, 会让 Claude/Codex 总结漂移)');
+  lines.push('');
+  return lines.join('\n');
+}
+
+function formatKnowledgeDriftBlockError(blocks) {
+  const lines = [
+    '',
+    '✗ Knowledge drift 检测失败: 文档引用的源码文件已不存在（缺陷 E / 知识抗腐化）',
+    '',
+  ];
+  for (const b of blocks) {
+    lines.push(`  ${b.file}`);
+    lines.push(`    × 引用 ${b.ref}:${b.lineNum} — 源码文件不存在（已删除或路径改变）`);
+  }
+  lines.push('');
+  lines.push('  修复（任选其一）:');
+  lines.push('    A. 更新文档引用指向新路径');
+  lines.push('    B. 若文件确已删除，移除/修订该文档条目');
+  lines.push('    C. 若是文档简写示例，改用省略形式（如 plugins/.../foo.js）');
+  lines.push('  绕过: git commit --no-verify (不推荐, 失去 drift 检测)');
+  lines.push('');
+  return lines.join('\n');
+}
+
+function formatKnowledgeDriftWarn(warns) {
+  const lines = [
+    '',
+    '⚠ Knowledge drift 提示（不阻塞）: 裸文件名引用在仓库中找不到同名文件',
+    '',
+  ];
+  for (const w of warns) {
+    lines.push(`  ${w.file}: ${w.ref}:${w.lineNum} — 仓库无此 basename（可能已删除/改名，或属外部文件）`);
+  }
+  lines.push('  （warn 仅提示不阻塞；只有「源码前缀 + 带行号」的引用文件缺失才会 block）');
   lines.push('');
   return lines.join('\n');
 }
@@ -604,6 +664,12 @@ function main() {
   const topLevelHandoffFailures = checkTopLevelHandoffs(stagedFiles, repoRoot);
   const completionFailures = checkPlanCompletion(stagedFiles, repoRoot);
   const solutionIndexFailures = checkSolutionIndexSync(stagedFiles, repoRoot);
+  const driftResult = checkKnowledgeDrift(stagedFiles, repoRoot);
+
+  // warn 不阻塞 commit，但总是显示（即使其余检查全 pass）
+  if (driftResult.warns.length > 0) {
+    process.stderr.write(formatKnowledgeDriftWarn(driftResult.warns));
+  }
 
   if (
     mismatches.length === 0
@@ -611,6 +677,7 @@ function main() {
     && topLevelHandoffFailures.length === 0
     && completionFailures.length === 0
     && solutionIndexFailures.length === 0
+    && driftResult.blocks.length === 0
   ) {
     process.exit(0);
   }
@@ -620,6 +687,7 @@ function main() {
   if (topLevelHandoffFailures.length > 0) process.stderr.write(formatTopLevelHandoffError(topLevelHandoffFailures));
   if (completionFailures.length > 0) process.stderr.write(formatPlanCompletionError(completionFailures));
   if (solutionIndexFailures.length > 0) process.stderr.write(formatSolutionIndexError(solutionIndexFailures));
+  if (driftResult.blocks.length > 0) process.stderr.write(formatKnowledgeDriftBlockError(driftResult.blocks));
 
   process.exit(1);
 }
@@ -650,6 +718,9 @@ module.exports = {
   checkTopLevelHandoffs,
   checkPlanCompletion,
   checkSolutionIndexSync,
+  checkKnowledgeDrift,
+  formatKnowledgeDriftBlockError,
+  formatKnowledgeDriftWarn,
   parseFrontmatter,
   deriveRepairCommand,
   formatPropagateError,

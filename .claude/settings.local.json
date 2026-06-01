@@ -97,7 +97,14 @@
       "Bash(ls scripts/test-*.js)",
       "Bash(head -60 scripts/run-tests.js)",
       "Bash(ls scripts/*agent* scripts/test/*agent*)",
-      "Bash(echo \"load exit=$?\")"
+      "Bash(echo \"load exit=$?\")",
+      "PowerShell(node C:\\\\tmp\\\\drift-probe.js \"c:\\\\project\\\\my\\\\tech-persistence\")",
+      "PowerShell(node -e \"const pc=require\\('./scripts/pre-commit-check.js'\\);const fs=require\\('fs'\\),path=require\\('path'\\);const root=process.cwd\\(\\);const staged=[];['.claude/rules','docs/solutions'].forEach\\(d=>fs.readdirSync\\(path.join\\(root,d\\)\\).filter\\(f=>f.endsWith\\('.md'\\)\\).forEach\\(f=>staged.push\\(d+'/'+f\\)\\)\\);const r=pc.checkKnowledgeDrift\\(staged,root\\);console.log\\('全量 dogfood -> blocks:',r.blocks.length,'| warns:',r.warns.length\\);r.blocks.forEach\\(b=>console.log\\('  BLOCK',b.file,'->',b.ref+':'+b.lineNum\\)\\);[...new Set\\(r.warns.map\\(w=>w.ref\\)\\)].slice\\(0,12\\).forEach\\(ref=>console.log\\('  warn-ref',ref\\)\\);\")",
+      "PowerShell(node scripts/smoke-pre-commit.js 2>&1 | Select-Object -Last 12)",
+      "PowerShell(node scripts/test-knowledge-drift.js)",
+      "PowerShell(node scripts/smoke-pre-commit.js 2>&1 | Select-Object -Last 16)",
+      "PowerShell(node scripts/sync-solution-index.js --all 2>&1 | Select-Object -Last 10)",
+      "PowerShell(git add *)"
     ]
   }
 }
