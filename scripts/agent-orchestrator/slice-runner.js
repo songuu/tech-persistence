@@ -2,6 +2,23 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+
+const GENERATED_CHANGE_FILES = new Set([
+  'pnpm-lock.yaml',
+  'package-lock.json',
+  'yarn.lock',
+  'bun.lockb',
+]);
+
+const MANAGED_CHANGE_PREFIXES = [
+  '.agent-runs/',
+  'node_modules/',
+  '.next/',
+  'dist/',
+  'build/',
+  'coverage/',
+];
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -57,6 +74,10 @@ function sliceValidationPath(runDir, sliceId) {
   return path.join(sliceDir(runDir, sliceId), 'validation.json');
 }
 
+function sliceChangedFilesGatePath(runDir, sliceId) {
+  return path.join(sliceDir(runDir, sliceId), 'changed-files-gate.json');
+}
+
 function writeSliceHandoff(runDir, sliceId, handoff) {
   writeJson(sliceHandoffPath(runDir, sliceId), handoff);
 }
@@ -67,6 +88,10 @@ function writeSliceDiff(runDir, sliceId, diff) {
 
 function writeSliceValidation(runDir, sliceId, validation) {
   writeJson(sliceValidationPath(runDir, sliceId), validation);
+}
+
+function writeSliceChangedFilesGate(runDir, sliceId, gate) {
+  writeJson(sliceChangedFilesGatePath(runDir, sliceId), gate);
 }
 
 function loadSliceHandoff(runDir, sliceId) {
@@ -84,12 +109,156 @@ function dryRunHandoff(slice) {
   };
 }
 
+function normalizeRepoPath(value) {
+  return String(value || '')
+    .replace(/\\/g, '/')
+    .replace(/^"|"$/g, '')
+    .replace(/^\.\/+/, '')
+    .replace(/^\/+/, '');
+}
+
+function normalizeChangedFileEntries(changedFiles) {
+  if (!Array.isArray(changedFiles)) return [];
+  const seen = new Set();
+  const entries = [];
+  for (const entry of changedFiles) {
+    const rawPath = typeof entry === 'string' ? entry : entry && (entry.path || entry.file || entry.filename);
+    const repoPath = normalizeRepoPath(rawPath);
+    if (!repoPath || seen.has(repoPath)) continue;
+    seen.add(repoPath);
+    entries.push({
+      path: repoPath,
+      status: typeof entry === 'object' && entry ? String(entry.status || '') : '',
+    });
+  }
+  return entries.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function resolveInsideWorkdir(workdir, repoPath) {
+  const root = path.resolve(workdir || process.cwd());
+  const absolutePath = path.resolve(root, normalizeRepoPath(repoPath));
+  const relative = path.relative(root, absolutePath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  return absolutePath;
+}
+
+function fileFingerprint(workdir, repoPath) {
+  const absolutePath = resolveInsideWorkdir(workdir, repoPath);
+  if (!absolutePath) return { exists: false, unsafePath: true };
+  try {
+    const stat = fs.statSync(absolutePath);
+    if (!stat.isFile()) {
+      return { exists: true, type: stat.isDirectory() ? 'directory' : 'other', size: stat.size };
+    }
+    const hash = crypto.createHash('sha256').update(fs.readFileSync(absolutePath)).digest('hex');
+    return { exists: true, type: 'file', size: stat.size, hash };
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { exists: false };
+    return { exists: false, error: error.message };
+  }
+}
+
+function snapshotChangedFiles(workdir, changedFiles) {
+  const files = {};
+  for (const entry of normalizeChangedFileEntries(changedFiles)) {
+    files[entry.path] = {
+      status: entry.status,
+      fingerprint: fileFingerprint(workdir, entry.path),
+    };
+  }
+  return {
+    changedFiles: Object.keys(files).sort(),
+    files,
+  };
+}
+
+function sameFingerprint(left, right) {
+  return JSON.stringify(left || null) === JSON.stringify(right || null);
+}
+
+function changedFilesBetweenSnapshots(beforeSnapshot, afterSnapshot) {
+  const beforeFiles = beforeSnapshot && beforeSnapshot.files ? beforeSnapshot.files : {};
+  const afterFiles = afterSnapshot && afterSnapshot.files ? afterSnapshot.files : {};
+  const paths = new Set([...Object.keys(beforeFiles), ...Object.keys(afterFiles)]);
+  return [...paths].filter((repoPath) => {
+    const before = beforeFiles[repoPath];
+    const after = afterFiles[repoPath];
+    if (!before || !after) return true;
+    return !sameFingerprint(before.fingerprint, after.fingerprint) || before.status !== after.status;
+  }).sort();
+}
+
+function pathMatchesOwnedScope(repoPath, ownedScope) {
+  const file = normalizeRepoPath(repoPath);
+  const scope = normalizeRepoPath(ownedScope);
+  if (!file || !scope) return false;
+  if (scope.endsWith('/**')) return file.startsWith(scope.slice(0, -2));
+  if (scope.endsWith('/*')) return file.startsWith(scope.slice(0, -1));
+  if (scope.endsWith('/')) return file.startsWith(scope);
+  return file === scope || file.startsWith(`${scope}/`);
+}
+
+function classifyChangeException(repoPath) {
+  const normalized = normalizeRepoPath(repoPath);
+  if (GENERATED_CHANGE_FILES.has(normalized)) return 'generated';
+  if (MANAGED_CHANGE_PREFIXES.some((prefix) => normalized === prefix.slice(0, -1) || normalized.startsWith(prefix))) {
+    return 'managed';
+  }
+  return null;
+}
+
+function evaluateSliceChangedFiles(slice, beforeSnapshot, afterSnapshot) {
+  const ownedFiles = Array.isArray(slice && slice.ownedFiles)
+    ? slice.ownedFiles.map(normalizeRepoPath).filter(Boolean)
+    : [];
+  const changedFiles = afterSnapshot && Array.isArray(afterSnapshot.changedFiles) ? afterSnapshot.changedFiles : [];
+  const touchedFiles = changedFilesBetweenSnapshots(beforeSnapshot, afterSnapshot);
+  const allowedFiles = [];
+  const exceptions = [];
+  const outOfScopeFiles = [];
+
+  for (const repoPath of touchedFiles) {
+    if (ownedFiles.some((ownedFile) => pathMatchesOwnedScope(repoPath, ownedFile))) {
+      allowedFiles.push(repoPath);
+      continue;
+    }
+    const exceptionType = classifyChangeException(repoPath);
+    if (exceptionType) {
+      exceptions.push({ path: repoPath, type: exceptionType });
+      continue;
+    }
+    outOfScopeFiles.push(repoPath);
+  }
+
+  return {
+    sliceId: slice && slice.id ? slice.id : null,
+    ok: outOfScopeFiles.length === 0,
+    ownedFiles,
+    changedFiles,
+    touchedFiles,
+    allowedFiles: allowedFiles.sort(),
+    exceptions,
+    outOfScopeFiles: outOfScopeFiles.sort(),
+  };
+}
+
+function assertSliceChangedFilesGate(gate) {
+  if (gate && gate.ok) return;
+  const files = gate && Array.isArray(gate.outOfScopeFiles) ? gate.outOfScopeFiles : [];
+  throw new Error(`changed-files gate failed: out-of-scope file(s): ${files.join(', ') || 'unknown'}`);
+}
+
 module.exports = {
   buildSliceImplementPrompt,
   writeSliceHandoff,
   writeSliceDiff,
   writeSliceValidation,
+  writeSliceChangedFilesGate,
   loadSliceHandoff,
+  snapshotChangedFiles,
+  evaluateSliceChangedFiles,
+  assertSliceChangedFilesGate,
   dryRunHandoff,
   sliceDir,
+  sliceChangedFilesGatePath,
 };

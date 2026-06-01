@@ -149,6 +149,28 @@ function transform(content) {
   );
 }
 
+function preserveAgentLoopProviderProvenance(content) {
+  return content
+    .replace(
+      /pipeline 模式先由 Codex 生成全局契约/g,
+      'pipeline 模式先由 Claude Code provider 生成全局契约'
+    )
+    .replace(
+      /最后由 Codex 做 integration review/g,
+      '最后由 Claude Code provider 做 integration review'
+    )
+    .replace(
+      /Codex 的 `\/agent-loop` 与 Codex 的 `\$agent-loop`/g,
+      'Claude Code plugin 的 `/agent-loop` 与 Codex 的 `$agent-loop`'
+    );
+}
+
+function transformCommandContent(name, content) {
+  const transformed = normalizeLf(transform(content));
+  if (name === 'agent-loop.md') return preserveAgentLoopProviderProvenance(transformed);
+  return transformed;
+}
+
 function normalizeLf(content) {
   return content.replace(/\r\n/g, '\n');
 }
@@ -249,7 +271,7 @@ function titleFromCommandName(name) {
 
 function commandToSkill(name, content) {
   const commandName = path.basename(name, '.md');
-  const { data, body } = parseFrontmatter(normalizeLf(transform(content)));
+  const { data, body } = parseFrontmatter(transformCommandContent(name, content));
   const description = data.description
     || `Run the former /${commandName} workflow in Codex.`;
   const title = titleFromCommandName(commandName);
@@ -474,4 +496,6 @@ module.exports = {
   expectedCommands,
   expectedSkills,
   copyHookLibs,
+  preserveAgentLoopProviderProvenance,
+  transformCommandContent,
 };

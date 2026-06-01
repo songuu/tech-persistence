@@ -13,12 +13,19 @@ const path = require('path');
 
 const {
   detectPendingHandoff,
+  detectPendingPrototype,
   renderContextCostSummary,
   renderContextWithOptionalCostSummary,
   renderSections,
   renderSectionsWithStats,
   shouldIncludeContextCostSummary,
 } = require('./inject-context');
+const {
+  resolvePlanDirectories,
+  resolvePlanPath,
+  resolvePlanWritePath,
+  resolveProjectPlansDir,
+} = require('./lib/runtime-paths');
 
 let passed = 0;
 let failed = 0;
@@ -132,6 +139,78 @@ test('detectPendingHandoff reads gitignored .handoff directory before legacy top
     assert.ok(handoff, 'expected pending handoff');
     assert.strictEqual(handoff.file, 'docs/plans/.handoff/active-sprint-handoff-2.md');
     assert.ok(handoff.content.includes('new handoff'));
+  });
+});
+
+test('plan writes target docs/plans as source of truth', () => {
+  withTempRepo(({ root }) => {
+    const previousRuntime = process.env.TECH_PERSISTENCE_RUNTIME;
+    process.env.TECH_PERSISTENCE_RUNTIME = 'codex';
+    try {
+      assert.strictEqual(resolveProjectPlansDir(root), path.join(root, 'docs', 'plans'));
+      assert.strictEqual(resolvePlanWritePath('next.md', root), path.join(root, 'docs', 'plans', 'next.md'));
+      assert.deepStrictEqual(
+        resolvePlanDirectories(root).map(dir => dir.sourceType),
+        ['sourceOfTruth', 'runtimeCache', 'legacyFallback']
+      );
+      assert.deepStrictEqual(
+        resolvePlanDirectories(root).map(dir => dir.displayPath),
+        ['docs/plans', '.codex/plans', '.claude/plans']
+      );
+    } finally {
+      if (previousRuntime === undefined) delete process.env.TECH_PERSISTENCE_RUNTIME;
+      else process.env.TECH_PERSISTENCE_RUNTIME = previousRuntime;
+    }
+  });
+});
+
+test('resolvePlanPath prefers docs/plans and falls back to runtime cache', () => {
+  withTempRepo(({ root, plansDir }) => {
+    const previousRuntime = process.env.TECH_PERSISTENCE_RUNTIME;
+    process.env.TECH_PERSISTENCE_RUNTIME = 'codex';
+    try {
+      const codexPlansDir = path.join(root, '.codex', 'plans');
+      fs.mkdirSync(codexPlansDir, { recursive: true });
+      fs.writeFileSync(path.join(plansDir, 'shared.md'), 'docs version');
+      fs.writeFileSync(path.join(codexPlansDir, 'shared.md'), 'cache version');
+      fs.writeFileSync(path.join(codexPlansDir, 'cache-only.md'), 'cache only');
+
+      const preferred = resolvePlanPath('shared.md', root);
+      assert.strictEqual(preferred.sourceType, 'sourceOfTruth');
+      assert.strictEqual(preferred.displayPath, 'docs/plans/shared.md');
+
+      const fallback = resolvePlanPath('cache-only.md', root);
+      assert.strictEqual(fallback.sourceType, 'runtimeCache');
+      assert.strictEqual(fallback.displayPath, '.codex/plans/cache-only.md');
+    } finally {
+      if (previousRuntime === undefined) delete process.env.TECH_PERSISTENCE_RUNTIME;
+      else process.env.TECH_PERSISTENCE_RUNTIME = previousRuntime;
+    }
+  });
+});
+
+test('detectPendingPrototype searches docs/plans before hidden runtime caches', () => {
+  withTempRepo(({ root, plansDir }) => {
+    const previousCwd = process.cwd();
+    const previousRuntime = process.env.TECH_PERSISTENCE_RUNTIME;
+    process.env.TECH_PERSISTENCE_RUNTIME = 'codex';
+    try {
+      const codexPlansDir = path.join(root, '.codex', 'plans');
+      fs.mkdirSync(codexPlansDir, { recursive: true });
+      fs.writeFileSync(path.join(codexPlansDir, 'prototype-2026-01-01-status.md'), 'cache draft');
+      fs.writeFileSync(path.join(plansDir, 'prototype-2026-01-02-status.md'), 'docs draft');
+      process.chdir(root);
+
+      const pending = detectPendingPrototype();
+      assert.ok(pending, 'expected pending prototype status');
+      assert.strictEqual(pending.sourceType, 'sourceOfTruth');
+      assert.strictEqual(pending.displayPath, 'docs/plans/prototype-2026-01-02-status.md');
+      assert.ok(pending.content.includes('docs draft'));
+    } finally {
+      process.chdir(previousCwd);
+      if (previousRuntime === undefined) delete process.env.TECH_PERSISTENCE_RUNTIME;
+      else process.env.TECH_PERSISTENCE_RUNTIME = previousRuntime;
+    }
   });
 });
 

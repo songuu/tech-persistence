@@ -15,6 +15,7 @@ const path = require('path');
 const {
   resolveBaseDir,
   resolveCompatReadDirs,
+  resolvePlanDirectories,
   resolveProjectPlansDir,
   resolveSessionId,
 } = require('./lib/runtime-paths');
@@ -333,28 +334,32 @@ function detectActiveSprintTags(plansDir = path.join(process.cwd(), 'docs', 'pla
  * 检测未完成的 prototype 收敛状态
  */
 function detectPendingPrototype() {
-  const plansDir = resolveProjectPlansDir();
-  if (!fs.existsSync(plansDir)) return null;
+  for (const plansLocation of resolvePlanDirectories()) {
+    const plansDir = plansLocation.path;
+    if (!fs.existsSync(plansDir)) continue;
 
-  const statuses = fs.readdirSync(plansDir)
-    .filter(f => f.startsWith('prototype-') && f.endsWith('-status.md'))
-    .sort()
-    .reverse();
+    const statuses = fs.readdirSync(plansDir)
+      .filter(f => f.startsWith('prototype-') && f.endsWith('-status.md'))
+      .sort()
+      .reverse();
 
-  if (statuses.length === 0) return null;
+    if (statuses.length === 0) continue;
 
-  const latest = statuses[0];
-  const content = fs.readFileSync(path.join(plansDir, latest), 'utf-8');
+    const latest = statuses[0];
+    const content = fs.readFileSync(path.join(plansDir, latest), 'utf-8');
 
-  // 如果已收敛完成则不注入
-  if (content.includes('收敛完成') || content.includes('converged')) return null;
+    // Skip converged prototype status files.
+    if (content.includes('收敛完成') || content.includes('converged')) continue;
 
-  const projectConfigDir = path.basename(path.dirname(plansDir));
-  return {
-    file: latest,
-    displayPath: `${projectConfigDir}/plans/${latest}`,
-    content: content.slice(0, 500),
-  }; // 只取摘要
+    return {
+      file: latest,
+      displayPath: `${plansLocation.displayPath}/${latest}`,
+      sourceType: plansLocation.sourceType,
+      content: content.slice(0, 500),
+    };
+  }
+
+  return null;
 }
 
 function main() {
@@ -380,7 +385,7 @@ function main() {
     addSection(
       sections,
       '未完成的原型收敛',
-      `文件: ${prototype.displayPath}\n\n${prototype.content}`,
+      `文件: ${prototype.displayPath}\nsourceType: ${prototype.sourceType}\n\n${prototype.content}`,
       700
     );
   }
@@ -518,6 +523,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  detectPendingPrototype,
   detectPendingHandoff,
   detectActiveSprintTags,
   renderSections,

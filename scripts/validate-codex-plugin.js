@@ -294,9 +294,84 @@ function validateNoClaudeOnlyText(dir, label) {
   listMarkdownFiles(dir).forEach((file) => {
     const relativePath = path.relative(pluginRoot, file).replace(/\\/g, '/');
     if (relativePath.startsWith('skills/caveman')) return;
+    if (relativePath === 'skills/agent-loop/SKILL.md') return;
     const content = fs.readFileSync(file, 'utf-8');
     if (forbidden.test(content)) {
       fail(`${label} contains Claude-only text: ${relativePath}`);
+    }
+  });
+}
+
+function validateAgentLoopProviderProvenance() {
+  const skillPath = path.join(pluginRoot, 'skills', 'agent-loop', 'SKILL.md');
+  if (!fs.existsSync(skillPath)) {
+    fail('agent-loop skill missing for provider provenance validation');
+    return;
+  }
+  const content = fs.readFileSync(skillPath, 'utf-8');
+  [
+    '`claude -p` 只负责需求分析',
+    '`codex exec` 只按冻结 spec 实现',
+    '`claude -p` 只按冻结 spec 做验收复审',
+    'pipeline 模式先由 Claude Code provider 生成全局契约',
+    '最后由 Claude Code provider 做 integration review',
+    'Claude Code plugin 的 `/agent-loop` 与 Codex 的 `$agent-loop`',
+  ].forEach((snippet) => {
+    if (!content.includes(snippet)) {
+      fail(`agent-loop skill lost provider provenance snippet: ${snippet}`);
+    }
+  });
+  [
+    'pipeline 模式先由 Codex 生成全局契约',
+    '最后由 Codex 做 integration review',
+    'Codex 的 `/agent-loop` 与 Codex 的 `$agent-loop`',
+  ].forEach((snippet) => {
+    if (content.includes(snippet)) {
+      fail(`agent-loop skill has false Codex provenance: ${snippet}`);
+    }
+  });
+}
+
+function validatePlanSourceOfTruthProjection() {
+  [
+    path.join(pluginRoot, 'hooks', 'lib', 'runtime-paths.js'),
+    path.join(pluginRoot, 'scripts', 'lib', 'runtime-paths.js'),
+  ].forEach((runtimePathsPath) => {
+    if (!fs.existsSync(runtimePathsPath)) {
+      fail(`${path.relative(pluginRoot, runtimePathsPath)} missing for plan source-of-truth validation`);
+      return;
+    }
+    const content = fs.readFileSync(runtimePathsPath, 'utf-8');
+    [
+      'function resolveDocsPlansDir',
+      'function resolvePlanDirectories',
+      "sourceType: 'sourceOfTruth'",
+      "sourceType: 'runtimeCache'",
+      "sourceType: 'legacyFallback'",
+      'function resolvePlanWritePath',
+      'function resolvePlanPath',
+      'return resolveDocsPlansDir(cwd);',
+    ].forEach((snippet) => {
+      if (!content.includes(snippet)) {
+        fail(`${path.relative(pluginRoot, runtimePathsPath)} missing plan source-of-truth snippet: ${snippet}`);
+      }
+    });
+  });
+
+  const injectContextPath = path.join(pluginRoot, 'hooks', 'inject-context.js');
+  if (!fs.existsSync(injectContextPath)) {
+    fail('hook inject-context.js missing for plan source-of-truth validation');
+    return;
+  }
+  const content = fs.readFileSync(injectContextPath, 'utf-8');
+  [
+    'resolvePlanDirectories',
+    'for (const plansLocation of resolvePlanDirectories())',
+    'sourceType: plansLocation.sourceType',
+    'sourceType: ${prototype.sourceType}',
+  ].forEach((snippet) => {
+    if (!content.includes(snippet)) {
+      fail(`hook inject-context.js missing plan source-of-truth snippet: ${snippet}`);
     }
   });
 }
@@ -392,6 +467,7 @@ if (isDirectory(skillsDir, 'skills dir')) {
       fail(`command skill ${name} must explain the Codex-compatible command entry point`);
     }
   });
+  validateAgentLoopProviderProvenance();
   validateNoClaudeOnlyText(skillsDir, 'skills dir');
 }
 
@@ -522,6 +598,7 @@ if (fs.existsSync(runtimePathsPath)) {
     fail('hook runtime-paths.js must support shared homunculus config');
   }
 }
+validatePlanSourceOfTruthProjection();
 
 const memoryV5Path = path.join(pluginRoot, 'hooks', 'lib', 'memory-v5.js');
 if (fs.existsSync(memoryV5Path)) {

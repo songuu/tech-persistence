@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
+const pipelineState = require('./pipeline-state');
 const globalContract = require('./global-contract');
 const slicePlanner = require('./slice-planner');
 const sliceNormalizer = require('./slice-normalizer');
@@ -22,6 +23,19 @@ function safeRead(file) { return fs.existsSync(file) ? fs.readFileSync(file, 'ut
 function recordProviderRun(state, record) {
   if (!Array.isArray(state.providerRuns)) state.providerRuns = [];
   return { ...state, providerRuns: [...state.providerRuns, record] };
+}
+
+function withProviderRecord(error, record) {
+  if (error && record && !error.providerRecord) error.providerRecord = record;
+  return error;
+}
+
+function transitionRun(stateObj, target, metadata = {}) {
+  return pipelineState.transitionRun(stateObj, target, { source: 'pipeline-providers', ...metadata });
+}
+
+function transitionSlice(stateObj, sliceId, target, metadata = {}) {
+  return pipelineState.transitionSlice(stateObj, sliceId, target, { source: 'pipeline-providers', ...metadata });
 }
 
 function callClaudeStructured(ctx, label, options, runDir, schemaName, prompt, logPrefix) {
@@ -68,10 +82,13 @@ function runGlobalContractProvider(ctx, state, statePath, runDir, options) {
   }
   writeJson(path.join(runDir, 'global-contract.raw.json'), parsed);
   const normalized = globalContract.writeGlobalContract(runDir, parsed, 'initial');
-  let next = recordProviderRun(state, record);
+  let next = transitionRun(
+    recordProviderRun(state, record),
+    pipelineState.RUN_STATES.GLOBAL_CONTRACT_READY,
+    { actor: 'spec-provider', reason: 'global contract generated' }
+  );
   next = {
     ...next,
-    status: 'global-contract-ready',
     files: { ...next.files, globalContract: 'global-contract.json' },
   };
   writeJson(statePath, next);
@@ -111,39 +128,36 @@ function runSlicePlannerProvider(ctx, state, statePath, runDir, options) {
     );
     slicePlanner.writeSliceArtifacts(runDir, normalized, rawSlices[index]);
     q = queueModule.moveToPending(q, normalized.id);
-    nextState = {
-      ...nextState,
-      pipeline: {
-        ...nextState.pipeline,
-        sliceStates: { ...nextState.pipeline.sliceStates, [normalized.id]: 'slice-pending' },
-      },
-    };
+    nextState = transitionSlice(nextState, normalized.id, pipelineState.SLICE_STATES.PENDING, {
+      actor: 'slice-planner-provider',
+      reason: 'slice planned',
+    });
     const staticCheck = sliceNormalizer.evaluateStaticCanStart(normalized);
     if (staticCheck.canStart && !normalized.rejected) {
       q = queueModule.moveToReady(q, normalized.id);
-      nextState = {
-        ...nextState,
-        pipeline: {
-          ...nextState.pipeline,
-          sliceStates: { ...nextState.pipeline.sliceStates, [normalized.id]: 'slice-ready' },
-        },
-      };
+      nextState = transitionSlice(nextState, normalized.id, pipelineState.SLICE_STATES.READY, {
+        actor: 'slice-planner-provider',
+        reason: 'slice static canStart passed',
+      });
     }
   }
   queueModule.saveQueue(runDir, q);
   if (rawSlices.length === 0) {
-    nextState = {
-      ...nextState,
-      status: 'integration-ready',
-      pipeline: { ...nextState.pipeline, lastSliceBatchAt: ctx.nowIso() },
-    };
+    nextState = transitionRun(nextState, pipelineState.RUN_STATES.INTEGRATION_READY, {
+      actor: 'slice-planner-provider',
+      reason: 'slice planner returned no slices',
+    });
+    nextState = { ...nextState, pipeline: { ...nextState.pipeline, lastSliceBatchAt: ctx.nowIso() } };
     ctx.log('[INFO] slice planner returned no new slices; entering integration-ready.');
   } else {
-    nextState = {
-      ...nextState,
-      status: queueModule.hasActiveWork(q) ? 'executing-slices' : 'planning-slices',
-      pipeline: { ...nextState.pipeline, lastSliceBatchAt: ctx.nowIso() },
-    };
+    const target = queueModule.hasActiveWork(q)
+      ? pipelineState.RUN_STATES.EXECUTING_SLICES
+      : pipelineState.RUN_STATES.PLANNING_SLICES;
+    nextState = transitionRun(nextState, target, {
+      actor: 'slice-planner-provider',
+      reason: 'slice planner produced slices',
+    });
+    nextState = { ...nextState, pipeline: { ...nextState.pipeline, lastSliceBatchAt: ctx.nowIso() } };
     ctx.log(`[OK] slice planner produced ${rawSlices.length} slice(s).`);
   }
   writeJson(statePath, nextState);
@@ -153,19 +167,22 @@ function runSlicePlannerProvider(ctx, state, statePath, runDir, options) {
 function runSliceImplementationProvider(ctx, state, statePath, runDir, options, slice) {
   const contract = globalContract.loadGlobalContract(runDir);
   if (!contract) throw new Error('slice impl: global contract not found');
-  const prompt = sliceRunner.buildSliceImplementPrompt(contract, slice, { workdir: ctx.resolveWorkdir(options) });
+  const workdir = ctx.resolveWorkdir(options);
+  const prompt = sliceRunner.buildSliceImplementPrompt(contract, slice, { workdir });
   slicePlanner.writeSlicePrompts(runDir, slice.id, { implement: prompt });
+  const beforeChangedFiles = ctx.listChangedFiles(workdir, runDir);
+  const beforeSnapshot = sliceRunner.snapshotChangedFiles(workdir, beforeChangedFiles);
 
   const stamp = ctx.logStamp();
   const logPrefix = `slice-${slice.id}-impl`;
   const stdoutFile = ctx.stampedLogPath(runDir, logPrefix, 'stdout.log', stamp);
   const stderrFile = ctx.stampedLogPath(runDir, logPrefix, 'stderr.log', stamp);
   const lastMessageFile = ctx.stampedLogPath(runDir, logPrefix, 'last-message.json', stamp);
-  const args = ['exec', '-C', ctx.resolveWorkdir(options), '--json'];
+  const args = ['exec', '-C', workdir, '--json'];
   args.push('--output-last-message', lastMessageFile);
   const sandbox = ctx.codexSandboxMode(options);
   if (sandbox) args.push('--sandbox', sandbox);
-  if (!ctx.isGitRepository(ctx.resolveWorkdir(options)) || ctx.boolOption(options, 'skip-git-repo-check')) {
+  if (!ctx.isGitRepository(workdir) || ctx.boolOption(options, 'skip-git-repo-check')) {
     args.push('--skip-git-repo-check');
   }
   if (!ctx.boolOption(options, 'skip-cli-schema')) {
@@ -178,7 +195,7 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
     ctx.providerLaunch(options, 'implementation'),
     args,
     {
-      cwd: ctx.resolveWorkdir(options),
+      cwd: workdir,
       stdoutFile,
       stderrFile,
       stdin: prompt,
@@ -196,15 +213,24 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
       stdoutFile,
       lastMessageFile,
     });
-    throw new Error(`slice ${slice.id} impl handoff unparseable: ${error.message}`);
+    throw withProviderRecord(new Error(`slice ${slice.id} impl handoff unparseable: ${error.message}`), record);
   }
   sliceRunner.writeSliceHandoff(runDir, slice.id, handoffParsed);
 
-  const diffPatch = ctx.writeGitDiff(ctx.resolveWorkdir(options), runDir);
+  const diffPatch = ctx.writeGitDiff(workdir, runDir);
   sliceRunner.writeSliceDiff(runDir, slice.id, diffPatch);
+  const afterChangedFiles = ctx.listChangedFiles(workdir, runDir);
+  const afterSnapshot = sliceRunner.snapshotChangedFiles(workdir, afterChangedFiles);
+  const changedFilesGate = sliceRunner.evaluateSliceChangedFiles(slice, beforeSnapshot, afterSnapshot);
+  sliceRunner.writeSliceChangedFilesGate(runDir, slice.id, changedFilesGate);
+  try {
+    sliceRunner.assertSliceChangedFilesGate(changedFilesGate);
+  } catch (error) {
+    throw withProviderRecord(error, record);
+  }
 
   const validationCommands = Array.isArray(slice.validationCommands) ? slice.validationCommands : [];
-  const validation = { status: 'skipped', commands: [], generatedAt: ctx.nowIso() };
+  const validation = { status: 'skipped', commands: [], generatedAt: ctx.nowIso(), changedFilesGate };
   if (validationCommands.length > 0) {
     validation.status = 'passed';
     for (let index = 0; index < validationCommands.length; index += 1) {
@@ -224,20 +250,18 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
   }
   sliceRunner.writeSliceValidation(runDir, slice.id, validation);
   if (validation.status === 'failed') {
-    throw new Error(`slice ${slice.id} validation failed; see ${path.join(runDir, 'slices', slice.id, 'validation.json')}`);
+    throw withProviderRecord(
+      new Error(`slice ${slice.id} validation failed; see ${path.join(runDir, 'slices', slice.id, 'validation.json')}`),
+      record
+    );
   }
 
-  let next = recordProviderRun(state, record);
-  next = {
-    ...next,
-    pipeline: {
-      ...next.pipeline,
-      sliceStates: {
-        ...next.pipeline.sliceStates,
-        [slice.id]: 'slice-implemented',
-      },
-    },
-  };
+  let next = transitionSlice(
+    recordProviderRun(state, record),
+    slice.id,
+    pipelineState.SLICE_STATES.IMPLEMENTED,
+    { actor: 'implementation-provider', reason: 'slice implementation provider completed' }
+  );
   writeJson(statePath, next);
   return next;
 }
@@ -247,7 +271,8 @@ function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
   if (!contract) throw new Error('slice review: global contract not found');
   const diffPath = path.join(runDir, 'slices', slice.id, 'diff.patch');
   const handoffPath = path.join(runDir, 'slices', slice.id, 'handoff.json');
-  const prompt = slicePlanner.buildSliceReviewPrompt(contract, slice, { diffPath, handoffPath });
+  const changedFilesGatePath = path.join(runDir, 'slices', slice.id, 'changed-files-gate.json');
+  const prompt = slicePlanner.buildSliceReviewPrompt(contract, slice, { diffPath, handoffPath, changedFilesGatePath });
   slicePlanner.writeSlicePrompts(runDir, slice.id, { review: prompt });
 
   const { record, result } = callClaudeStructured(
@@ -274,16 +299,14 @@ function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
   const driftEntries = [];
 
   if (approved && revisions.length === 0) {
-    next = {
-      ...next,
-      pipeline: {
-        ...next.pipeline,
-        sliceStates: {
-          ...next.pipeline.sliceStates,
-          [slice.id]: 'slice-completed',
-        },
-      },
-    };
+    next = transitionSlice(next, slice.id, pipelineState.SLICE_STATES.REVIEWED, {
+      actor: 'review-provider',
+      reason: 'slice review approved',
+    });
+    next = transitionSlice(next, slice.id, pipelineState.SLICE_STATES.COMPLETED, {
+      actor: 'review-provider',
+      reason: 'slice review approved with no revisions',
+    });
     let q = queueModule.loadQueue(runDir);
     q = queueModule.moveToCompleted(q, slice.id);
     queueModule.saveQueue(runDir, q);
@@ -330,12 +353,18 @@ function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
 
   const escalated = driftEntries.some((entry) => ['cross-cutting', 'breaking'].includes(entry.classification));
   if (escalated) {
+    next = transitionRun(next, pipelineState.RUN_STATES.CONTRACT_CONFLICT, {
+      actor: 'review-provider',
+      reason: 'slice review produced breaking or cross-cutting revision',
+    });
+    next = transitionSlice(next, slice.id, pipelineState.SLICE_STATES.REJECTED, {
+      actor: 'review-provider',
+      reason: 'slice review revision escalated',
+    });
     next = {
       ...next,
-      status: 'contract-conflict',
       pipeline: {
         ...next.pipeline,
-        sliceStates: { ...next.pipeline.sliceStates, [slice.id]: 'slice-rejected' },
         conflictRevisionIds: [...next.pipeline.conflictRevisionIds, ...driftEntries.map((entry) => entry.revisionId)],
         lastDriftReportAt: ctx.nowIso(),
       },
@@ -348,11 +377,18 @@ function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
     return { state: next, drift: driftEntries, revisions };
   }
 
+  next = transitionSlice(next, slice.id, pipelineState.SLICE_STATES.REVIEWED, {
+    actor: 'review-provider',
+    reason: 'slice review accepted local revision',
+  });
+  next = transitionSlice(next, slice.id, pipelineState.SLICE_STATES.COMPLETED, {
+    actor: 'review-provider',
+    reason: 'slice review completed with local revision',
+  });
   next = {
     ...next,
     pipeline: {
       ...next.pipeline,
-      sliceStates: { ...next.pipeline.sliceStates, [slice.id]: 'slice-completed' },
       lastDriftReportAt: ctx.nowIso(),
     },
   };
@@ -397,12 +433,18 @@ function runIntegrationReviewProvider(ctx, state, statePath, runDir, options) {
 
   let next = recordProviderRun(state, record);
   if (review.reviewApproved(reviewParsed)) {
-    next = { ...next, status: 'completed' };
+    next = transitionRun(next, pipelineState.RUN_STATES.COMPLETED, {
+      actor: 'review-provider',
+      reason: 'integration review approved',
+    });
     writeJson(statePath, next);
     ctx.log(`[OK] integration review approved; run ${state.runId} completed.`);
     return next;
   }
-  next = { ...next, status: 'executing-slices' };
+  next = transitionRun(next, pipelineState.RUN_STATES.EXECUTING_SLICES, {
+    actor: 'review-provider',
+    reason: 'integration review requested follow-up',
+  });
   writeJson(statePath, next);
   ctx.log(`[WARN] integration review decision=${reviewParsed.decision || 'unknown'}; run returns to executing-slices for follow-up.`);
   return next;

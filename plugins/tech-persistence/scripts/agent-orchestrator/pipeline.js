@@ -15,7 +15,7 @@ const drift = require('./drift-detector');
 const reconciliation = require('./reconciliation');
 const providers = require('./pipeline-providers');
 
-const { RUN_STATES, SLICE_STATES, assertRunTransition, assertSliceTransition } = state;
+const { RUN_STATES, SLICE_STATES } = state;
 
 const FREEZE_TARGETS = { GLOBAL_CONTRACT: 'global-contract', SLICE: 'slice' };
 const RESOLVE_ACTIONS = {
@@ -84,21 +84,12 @@ function saveState(statePath, draft) {
   return next;
 }
 
-function transitionRun(stateObj, target) {
-  assertRunTransition(stateObj.status, target);
-  return { ...stateObj, status: target };
+function transitionRun(stateObj, target, metadata = {}) {
+  return state.transitionRun(stateObj, target, { source: 'pipeline', ...metadata });
 }
 
-function transitionSlice(stateObj, sliceId, target) {
-  const previous = stateObj.pipeline.sliceStates[sliceId] || SLICE_STATES.PENDING;
-  assertSliceTransition(previous, target);
-  return {
-    ...stateObj,
-    pipeline: {
-      ...stateObj.pipeline,
-      sliceStates: { ...stateObj.pipeline.sliceStates, [sliceId]: target },
-    },
-  };
+function transitionSlice(stateObj, sliceId, target, metadata = {}) {
+  return state.transitionSlice(stateObj, sliceId, target, { source: 'pipeline', ...metadata });
 }
 
 function recordAutoSkip(stateObj, reason) {
@@ -112,7 +103,7 @@ function recordAutoSkip(stateObj, reason) {
 }
 
 function sliceEvidenceComplete(runDir, sliceId) {
-  return ['handoff.json', 'diff.patch', 'validation.json'].every((name) =>
+  return ['handoff.json', 'diff.patch', 'changed-files-gate.json', 'validation.json'].every((name) =>
     fs.existsSync(path.join(runDir, 'slices', sliceId, name))
   );
 }
@@ -542,13 +533,9 @@ function advancePipeline(ctx, options, runDir, statePath, stateObj) {
           const reason = classification.blockedBy.map((entry) => `${entry.file}:${entry.reason}`).join('; ');
           const q2 = queue.moveToBlocked(q, sliceId, reason);
           queue.saveQueue(runDir, q2);
-          current = {
-            ...current,
-            pipeline: {
-              ...current.pipeline,
-              sliceStates: { ...current.pipeline.sliceStates, [sliceId]: 'slice-blocked' },
-            },
-          };
+          current = transitionSlice(current, sliceId, SLICE_STATES.BLOCKED, {
+            reason: `slice lock claim blocked: ${reason}`,
+          });
           saveState(statePath, current);
           ctx.log(`[GATE] slice ${sliceId} blocked: ${reason}`);
           continue;
@@ -562,13 +549,9 @@ function advancePipeline(ctx, options, runDir, statePath, stateObj) {
         let locksNow = locks.loadLocks(runDir);
         locksNow = locks.claimAll(locksNow, slice);
         locks.saveLocks(runDir, locksNow);
-        current = {
-          ...current,
-          pipeline: {
-            ...current.pipeline,
-            sliceStates: { ...current.pipeline.sliceStates, [sliceId]: 'slice-implementing' },
-          },
-        };
+        current = transitionSlice(current, sliceId, SLICE_STATES.IMPLEMENTING, {
+          reason: 'slice dispatch started implementation',
+        });
         saveState(statePath, current);
         try {
           current = providers.runSliceImplementationProvider(ctx, current, statePath, runDir, options, slice);
@@ -586,7 +569,7 @@ function advancePipeline(ctx, options, runDir, statePath, stateObj) {
             statePath,
             runDir,
             slice,
-            new Error('slice is still implementing and lacks complete handoff/diff/validation evidence'),
+            new Error('slice is still implementing and lacks complete handoff/diff/changed-files gate/validation evidence'),
             'implementation evidence incomplete'
           );
           return current;

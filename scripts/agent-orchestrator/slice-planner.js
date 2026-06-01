@@ -99,6 +99,7 @@ function buildSliceReviewPrompt(globalContract, slice, options) {
   lines.push('```');
   if (options && options.diffPath) lines.push('Diff file: ' + options.diffPath);
   if (options && options.handoffPath) lines.push('Handoff file: ' + options.handoffPath);
+  if (options && options.changedFilesGatePath) lines.push('Changed-files gate file: ' + options.changedFilesGatePath);
   return lines.join('\n');
 }
 

@@ -17,6 +17,14 @@
 
 ## 决策列表
 
+### ADR-015: 先补 pipeline 硬门禁，再接 native workflow backend (2026-06-01)
+- **状态**：已采纳
+- **上下文**：Claude Code Dynamic workflows 适合大规模 subagent 编排，但 tech-persistence 的 `/sprint` 是方法论协议，`agent-loop --pipeline` 才是可替换/扩展的执行后端。若在 pipeline 仍缺少真实文件边界和状态门禁时直接接 native workflow，并行能力会放大现有漂移。
+- **决策**：先沿用 `docs/plans/2026-05-12-pipeline-hardening-roadmap.md` 加固 pipeline：落地 `ownedFiles` changed-files gate，并把 run/slice 状态推进统一收口到 `pipeline-state.js` 的 transition helper。native workflow 只能作为未来 backend seam 的一支，不能替代 `/sprint`、`/work`、`/review` 的顶层方法论。
+- **原因**：changed-files gate 能证明 slice 没越界写文件；统一 transition helper 能保证 provider/pipeline 层不会绕过状态机。两者都是接多 agent/多 worker 前的共同前置。
+- **备选**：直接实现 Claude workflow adapter；继续只靠 prompt 约束 `ownedFiles` 和状态流转。前者会引入 Claude-only parity 问题，后者无法阻止 false success。
+- **影响**：后续接 workflow backend 前，必须保留 durable `.agent-runs` artifacts、fallback runtime、provider provenance、budget/permission profile；多 worker 前还需要补 review/validation transaction boundary、shared-contract exception 和 isolated worktree 策略。
+
 ### ADR-014: Hook 架构统一语义源头，按运行时生成配置 (2026-05-14)
 - **状态**：已采纳
 - **上下文**：Tech Persistence 同时支持 Claude Code classic、Claude Code plugin 与 Codex plugin。直接共享同一份 hook 配置会把事件名、matcher、路径占位符、async/timeout 语义混在一起，容易造成某一运行时看似通过、另一运行时实际未注册或双触发。

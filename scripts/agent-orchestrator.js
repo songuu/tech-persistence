@@ -11,6 +11,7 @@ const pipelineQueue = require('./agent-orchestrator/queue');
 const pipelineLocks = require('./agent-orchestrator/locks');
 const globalContractModule = require('./agent-orchestrator/global-contract');
 const slicePlannerModule = require('./agent-orchestrator/slice-planner');
+const sliceRunnerModule = require('./agent-orchestrator/slice-runner');
 const sliceNormalizerModule = require('./agent-orchestrator/slice-normalizer');
 const driftDetectorModule = require('./agent-orchestrator/drift-detector');
 const reconciliationModule = require('./agent-orchestrator/reconciliation');
@@ -1430,8 +1431,9 @@ function writeGitDiff(workdir, runDir) {
   writeJson(path.join(runDir, 'changed-files.json'), changedFiles);
 
   if (!isGitRepository(workdir)) {
-    writeText(path.join(runDir, 'diff.patch'), 'Not a git repository; diff unavailable.\n');
-    return;
+    const noRepoDiff = 'Not a git repository; diff unavailable.\n';
+    writeText(path.join(runDir, 'diff.patch'), noRepoDiff);
+    return noRepoDiff;
   }
 
   const diffArgs = ['diff', '--no-ext-diff', '--binary', '--', '.'];
@@ -1454,7 +1456,9 @@ function writeGitDiff(workdir, runDir) {
     .map((entry) => `Diff omitted for generated or oversized file: ${entry.path}`)
     .join('\n');
 
-  writeText(path.join(runDir, 'diff.patch'), [trackedDiff, syntheticDiffs, omitted].filter(Boolean).join('\n'));
+  const diffPatch = [trackedDiff, syntheticDiffs, omitted].filter(Boolean).join('\n');
+  writeText(path.join(runDir, 'diff.patch'), diffPatch);
+  return diffPatch;
 }
 
 function shouldOmitDiff(filePath) {
@@ -2172,6 +2176,49 @@ function runPipelineSelfTests() {
   assertSelfTest('safe slice passes static canStart', staticCheck.canStart, true);
   assertSelfTest('safe slice is auto-eligible', sliceNormalizerModule.isSliceSafeForAuto(safeSlice), true);
 
+  const gateBase = path.join(os.tmpdir(), `agent-loop-gate-selftest-${process.pid}-${Date.now()}`);
+  fs.mkdirSync(path.join(gateBase, 'src'), { recursive: true });
+  const beforeEmpty = sliceRunnerModule.snapshotChangedFiles(gateBase, []);
+  writeText(path.join(gateBase, 'src', 'allowed.js'), 'allowed\n');
+  const afterAllowed = sliceRunnerModule.snapshotChangedFiles(gateBase, [{ status: '??', path: 'src/allowed.js' }]);
+  const allowedGate = sliceRunnerModule.evaluateSliceChangedFiles(
+    { id: 'slice-gate', ownedFiles: ['src/'] },
+    beforeEmpty,
+    afterAllowed
+  );
+  assertSelfTest('changed-files gate allows owned directory', allowedGate.ok, true);
+  assertSelfTest('changed-files gate records touched owned file', allowedGate.allowedFiles[0], 'src/allowed.js');
+
+  const outOfScopeGate = sliceRunnerModule.evaluateSliceChangedFiles(
+    { id: 'slice-gate', ownedFiles: ['docs/'] },
+    beforeEmpty,
+    afterAllowed
+  );
+  assertSelfTest('changed-files gate blocks out-of-scope file', outOfScopeGate.ok, false);
+  assertSelfTest('changed-files gate reports out-of-scope file', outOfScopeGate.outOfScopeFiles[0], 'src/allowed.js');
+
+  writeText(path.join(gateBase, 'package-lock.json'), '{}\n');
+  const afterGenerated = sliceRunnerModule.snapshotChangedFiles(gateBase, [{ status: '??', path: 'package-lock.json' }]);
+  const generatedGate = sliceRunnerModule.evaluateSliceChangedFiles(
+    { id: 'slice-gate', ownedFiles: ['src/'] },
+    beforeEmpty,
+    afterGenerated
+  );
+  assertSelfTest('changed-files gate classifies generated exception', generatedGate.exceptions[0].type, 'generated');
+  assertSelfTest('changed-files gate allows generated exception', generatedGate.ok, true);
+
+  writeText(path.join(gateBase, 'src', 'previous.js'), 'before\n');
+  const beforeDirty = sliceRunnerModule.snapshotChangedFiles(gateBase, [{ status: ' M', path: 'src/previous.js' }]);
+  writeText(path.join(gateBase, 'src', 'previous.js'), 'after\n');
+  const afterDirty = sliceRunnerModule.snapshotChangedFiles(gateBase, [{ status: ' M', path: 'src/previous.js' }]);
+  const touchedDirtyGate = sliceRunnerModule.evaluateSliceChangedFiles(
+    { id: 'slice-current', ownedFiles: ['src/current.js'] },
+    beforeDirty,
+    afterDirty
+  );
+  assertSelfTest('changed-files gate catches edits to pre-existing dirty files', touchedDirtyGate.outOfScopeFiles[0], 'src/previous.js');
+  fs.rmSync(gateBase, { recursive: true, force: true });
+
   let q = pipelineQueue.emptyQueue();
   q = pipelineQueue.moveToPending(q, 'slice-001');
   q = pipelineQueue.moveToReady(q, 'slice-001');
@@ -2255,6 +2302,29 @@ function runPipelineSelfTests() {
   const planState = pipeline.newPipelineState('/tmp/work', '/tmp/work/.agent-runs/x', 'x', 'requirement');
   assertSelfTest('newPipelineState mode pipeline', planState.mode, 'pipeline');
   assertSelfTest('newPipelineState initial status', planState.status, 'draft');
+  const runTransitionState = pipelineState.transitionRun(planState, pipelineState.RUN_STATES.GLOBAL_CONTRACT_READY, {
+    actor: 'self-test',
+    source: 'pipeline-state-test',
+    reason: 'exercise run transition helper',
+  });
+  const runTransitionEvent = runTransitionState.pipeline.transitionEvents[0];
+  assertSelfTest('pipeline-state transition event records from', runTransitionEvent.from, 'draft');
+  assertSelfTest('pipeline-state transition event records to', runTransitionEvent.to, 'global-contract-ready');
+  assertSelfTest('pipeline-state transition event records actor', runTransitionEvent.actor, 'self-test');
+  assertSelfTest('pipeline-state transition event records source', runTransitionEvent.source, 'pipeline-state-test');
+  assertSelfTest('pipeline-state transition event records reason', runTransitionEvent.reason, 'exercise run transition helper');
+  const sliceTransitionState = pipelineState.transitionSlice(runTransitionState, 'slice-selftest', pipelineState.SLICE_STATES.READY, {
+    actor: 'self-test',
+    source: 'pipeline-state-test',
+    reason: 'exercise slice transition helper',
+  });
+  const sliceTransitionEvent = sliceTransitionState.pipeline.transitionEvents[1];
+  assertSelfTest('pipeline-state slice event records sliceId', sliceTransitionEvent.sliceId, 'slice-selftest');
+  const providerSource = readText(path.join(__dirname, 'agent-orchestrator', 'pipeline-providers.js'));
+  assertSelfTest('provider module avoids direct terminal slice state writes',
+    /sliceStates\s*:\s*\{/.test(providerSource), false);
+  assertSelfTest('provider module avoids direct run status writes',
+    /status:\s*['"](global-contract-ready|integration-ready|executing-slices|contract-conflict|completed)['"]/.test(providerSource), false);
 
   runProviderIntegrationSelfTests();
 }
@@ -2331,18 +2401,57 @@ function runProviderIntegrationSelfTests() {
   assertSelfTest('provider integration: slice state advanced to ready', stateObj.pipeline.sliceStates['slice-001'], 'slice-ready');
   assertSelfTest('provider integration: status executing-slices', stateObj.status, 'executing-slices');
 
+  const slice = require('./agent-orchestrator/slice-planner').loadSlice(tmpBase, 'slice-001');
+  stateObj = pipelineState.transitionSlice(stateObj, slice.id, pipelineState.SLICE_STATES.FROZEN, {
+    source: 'self-test',
+    reason: 'simulate slice freeze before implementation',
+  });
+  stateObj = pipelineState.transitionSlice(stateObj, slice.id, pipelineState.SLICE_STATES.IMPLEMENTING, {
+    source: 'self-test',
+    reason: 'simulate slice dispatch before implementation',
+  });
+  writeJson(statePath, stateObj);
+  const originalRunProcess = mockCtx.runProcess;
+  mockCtx.runProcess = (label, launchOrCommand, args, settings) => {
+    const outcome = originalRunProcess(label, launchOrCommand, args, settings);
+    if (String(label).includes('slice impl provider')) {
+      writeText(path.join(tmpBase, 'mock.txt'), 'implemented\n');
+    }
+    return outcome;
+  };
+  mockCtx.listChangedFiles = () => fs.existsSync(path.join(tmpBase, 'mock.txt'))
+    ? [{ status: '??', path: 'mock.txt' }]
+    : [];
+  mockCtx.writeGitDiff = () => 'diff --git a/mock.txt b/mock.txt\n';
+  mockCtx._stdoutQueue.push(JSON.stringify({
+    summary: 'implemented mock slice',
+    changedFiles: ['mock.txt'],
+    validation: [],
+    risks: [],
+    followUp: [],
+  }));
+  stateObj = providers.runSliceImplementationProvider(mockCtx, stateObj, statePath, tmpBase, {}, slice);
+  assertSelfTest('provider integration: slice implementation advanced to implemented',
+    stateObj.pipeline.sliceStates['slice-001'], 'slice-implemented');
+  assertSelfTest('provider integration: changed-files gate written',
+    fs.existsSync(path.join(tmpBase, 'slices', 'slice-001', 'changed-files-gate.json')), true);
+  assertSelfTest('provider integration: changed-files gate passed',
+    JSON.parse(fs.readFileSync(path.join(tmpBase, 'slices', 'slice-001', 'changed-files-gate.json'), 'utf8')).ok, true);
+
   const reviewApprovedRaw = JSON.stringify({ decision: 'approved', contractRevisions: [], findings: [] });
   mockCtx._stdoutQueue.push(reviewApprovedRaw);
-  const slice = require('./agent-orchestrator/slice-planner').loadSlice(tmpBase, 'slice-001');
   const locksModule = require('./agent-orchestrator/locks');
   locksModule.saveLocks(tmpBase, locksModule.claimAll(locksModule.loadLocks(tmpBase), slice));
   fs.writeFileSync(path.join(tmpBase, 'slices', 'slice-001', 'diff.patch'), 'mock diff');
   fs.writeFileSync(path.join(tmpBase, 'slices', 'slice-001', 'handoff.json'), '{}');
+  const stateBeforeApprovedReview = stateObj;
   const reviewOutcome = providers.runSliceReviewProvider(mockCtx, stateObj, statePath, tmpBase, {}, slice);
   assertSelfTest('provider integration: approved slice marked completed', reviewOutcome.state.pipeline.sliceStates['slice-001'], 'slice-completed');
   assertSelfTest('provider integration: completed-owner lock', JSON.parse(fs.readFileSync(path.join(tmpBase, 'locks.json'), 'utf8')).files['mock.txt'].status, 'completed-owner');
 
-  stateObj = reviewOutcome.state;
+  stateObj = stateBeforeApprovedReview;
+  writeJson(statePath, stateObj);
+  pipelineQueue.saveQueue(tmpBase, pipelineQueue.moveToRunning(pipelineQueue.emptyQueue(), slice.id));
   const reviewBreakingRaw = JSON.stringify({
     decision: 'needs-followup',
     findings: [],

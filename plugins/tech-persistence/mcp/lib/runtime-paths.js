@@ -99,8 +99,69 @@ function resolveProjectDirName() {
   return runtimeFromEnvironment() === 'codex' ? '.codex' : '.claude';
 }
 
-function resolveProjectPlansDir(cwd = process.cwd()) {
+function resolveDocsPlansDir(cwd = process.cwd()) {
+  return path.join(cwd, 'docs', 'plans');
+}
+
+function resolveProjectRuntimePlansDir(cwd = process.cwd()) {
   return path.join(cwd, resolveProjectDirName(), 'plans');
+}
+
+function resolveProjectLegacyPlansDir(cwd = process.cwd()) {
+  return path.join(cwd, runtimeFromEnvironment() === 'codex' ? '.claude' : '.codex', 'plans');
+}
+
+function planDisplayPath(cwd, absolutePath) {
+  return path.relative(cwd, absolutePath).replace(/\\/g, '/');
+}
+
+function resolvePlanDirectories(cwd = process.cwd()) {
+  return [
+    {
+      sourceType: 'sourceOfTruth',
+      path: resolveDocsPlansDir(cwd),
+      displayPath: 'docs/plans',
+    },
+    {
+      sourceType: 'runtimeCache',
+      path: resolveProjectRuntimePlansDir(cwd),
+      displayPath: `${resolveProjectDirName()}/plans`,
+    },
+    {
+      sourceType: 'legacyFallback',
+      path: resolveProjectLegacyPlansDir(cwd),
+      displayPath: planDisplayPath(cwd, resolveProjectLegacyPlansDir(cwd)),
+    },
+  ];
+}
+
+function resolveProjectPlansDir(cwd = process.cwd()) {
+  return resolveDocsPlansDir(cwd);
+}
+
+function resolvePlanWritePath(planFile, cwd = process.cwd()) {
+  return path.join(resolveDocsPlansDir(cwd), planFile);
+}
+
+function resolvePlanPath(planFile, cwd = process.cwd()) {
+  for (const dir of resolvePlanDirectories(cwd)) {
+    const candidate = path.join(dir.path, planFile);
+    if (fs.existsSync(candidate)) {
+      return {
+        ...dir,
+        file: planFile,
+        absolutePath: candidate,
+        displayPath: `${dir.displayPath}/${planFile}`,
+      };
+    }
+  }
+  return {
+    sourceType: 'sourceOfTruth',
+    path: resolveDocsPlansDir(cwd),
+    file: planFile,
+    absolutePath: resolvePlanWritePath(planFile, cwd),
+    displayPath: `docs/plans/${planFile}`,
+  };
 }
 
 function resolveProjectRulesDir(cwd = process.cwd()) {
@@ -129,6 +190,12 @@ module.exports = {
   resolveBaseDir,
   resolveCompatReadDirs,
   resolveConfigPath,
+  resolveDocsPlansDir,
+  resolvePlanDirectories,
+  resolvePlanPath,
+  resolvePlanWritePath,
+  resolveProjectRuntimePlansDir,
+  resolveProjectLegacyPlansDir,
   resolveProjectPlansDir,
   resolveProjectRulesDir,
   resolveProjectInstructionFile,

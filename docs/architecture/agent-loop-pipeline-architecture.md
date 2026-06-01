@@ -33,7 +33,7 @@ Pipeline 模式解决的核心问题：
 scripts/agent-orchestrator.js                  CLI 入口、mode 分流、向后兼容
 scripts/agent-orchestrator/
   ├── pipeline.js                              pipeline 编排入口；状态机驱动、各 phase 调度
-  ├── pipeline-state.js                        run/slice 双层状态机常量与合法转移表
+  ├── pipeline-state.js                        run/slice 双层状态机常量、合法转移表与 transition event 写入口
   ├── global-contract.js                       contractHash canonical 计算、双 history 写入
   ├── slice-planner.js                         provider prompt 模板、slice 文件 I/O
   ├── slice-normalizer.js                      L4 拒绝、敏感域识别、static canStart 判定
@@ -268,6 +268,9 @@ self-test 覆盖（`runPipelineSelfTests`）：
 - reconciliation revision 递归剥离
 - integration validation 命令聚合顺序与去重
 - newPipelineState mode/status 正确
+- transition events 记录 from / to / actor / source / reason
+- provider 模块禁止直接写 terminal slice/run status
+- changed-files gate owned/out-of-scope/generated/dirty baseline 路径
 
 dry-run 端到端验证：
 
@@ -296,20 +299,26 @@ dry-run 端到端验证：
 4. `node scripts/validate-codex-plugin.js` 校验。
 5. `node scripts/agent-orchestrator.js self-test` 全套通过。
 
-## 13. 当前实现限制（2026-05-12）
+## 13. 当前实现限制（2026-06-01）
 
 本文件描述的是 pipeline 目标架构。当前实现已经有 global contract、slice queue、locks、drift detector、contract conflict resolver 和 dry-run 验证，但还没有把所有约束都落成强制门禁。后续修改需要优先消除以下差距。
 
 对应执行路线见 `docs/plans/2026-05-12-pipeline-hardening-roadmap.md`。本节只记录架构现状和限制，具体拆解、代码落点和验收矩阵放在 roadmap 中维护。
 
-### 13.1 状态机还不是唯一写入口
+### 13.1 状态机写入口已收口
 
-`pipeline-state.js` 定义了合法状态转移，但 provider / pipeline 层仍存在直接写 `slice-*` 事件的路径。目标状态应该是：
+**当前状态（2026-06-01）**：`pipeline-state.js` 已提供 `transitionRun()` / `transitionSlice()` 作为统一状态写入口，并写入 `state.pipeline.transitionEvents[]`，事件字段包含 `from` / `to` / `reason` / `actor` / `source`。`pipeline.js` 与 `pipeline-providers.js` 的 run/slice 状态推进已改为调用该 helper，self-test 会扫描 provider 模块，禁止直接写 terminal slice/run status。
 
-- provider 只返回 implementation / review / conflict resolution result。
-- pipeline reducer 统一写 run / slice 状态事件。
+已落地：
+
 - 所有状态写入都经过 transition check。
 - validator 禁止 provider 模块直接写状态终态。
+- review approved 路径显式走 `slice-implemented -> slice-reviewed -> slice-completed`，不再跳过 `slice-reviewed`。
+
+仍待补：
+
+- provider 仍会负责组合状态变更和 artifact 写入；若继续收敛，可以把 provider 输出进一步降成 result object，由 pipeline reducer 单点应用。
+- `pipeline.history.jsonl` 与 `state.pipeline.transitionEvents[]` 仍是两条审计线，后续可在 Task 8 里验证两者一致性。
 
 ### 13.2 slice 执行缺少事务边界
 
@@ -324,16 +333,21 @@ dry-run 端到端验证：
 - lock release / retain 需要显式策略。
 - resume 需要按失败类型决定 retry、block 还是人工介入。
 
-### 13.3 `ownedFiles` 尚未约束真实 diff
+### 13.3 `ownedFiles` changed-files gate 已落地
 
-`ownedFiles` 当前主要用于 planning、lock 和 review 提示。它还没有强制校验最终 changed files 是否越界。
+**当前状态（2026-06-01）**：slice implementation provider 会在执行前后对 git changed-files 做快照，并用文件指纹识别本 slice 实际触碰的文件。触碰文件必须落在 `ownedFiles` 范围内，或命中 `generated` / `managed` exception；否则写入 `changed-files-gate.json` 后抛错，走 implementation failure/block 流程，阻断 `slice-implemented` / `slice-completed`。
 
-下一步应补：
+已落地：
 
-- slice 完成时计算 changed files。
-- changed files 必须是 `ownedFiles` 子集，或命中显式 shared / generated exception。
-- out-of-scope diff 默认阻断 `slice-completed`。
-- integration review 需要按 slice 维度展示 diff，而不是只看全局 diff。
+- slice 完成时计算 provider 前后 touched files，而不是只看全局 diff。
+- out-of-scope diff 默认阻断状态推进。
+- `changed-files-gate.json` 进入 slice evidence 和 review prompt。
+- `generated` / `managed` exception 已有确定性分类。
+
+仍待补：
+
+- `shared-contract` exception 需要和 Task 5/Task 7 的状态事件与计划源头收敛一起定义，避免 provider 自行声明共享写权限。
+- 多 worker 前仍需要 isolated worktree 或更强 per-slice baseline 策略，防止并发写同一 dirty file。
 
 ### 13.4 contract conflict resolver 需要实现闭环审计
 
@@ -354,7 +368,7 @@ dry-run 端到端验证：
 
 扩展到多 worker 前至少需要：
 
-- per-slice changed-files gate。
+- 更强 per-slice baseline 或 isolated worktree 策略。
 - 状态事件唯一写入口。
 - provider failure transaction。
 - shared files conflict policy。
@@ -362,13 +376,15 @@ dry-run 端到端验证：
 
 ### 13.6 Codex projection 必须保留 provenance
 
+**当前状态（2026-06-01）**：已修复。Codex plugin build 对 agent-loop skill 做 provider provenance 保留，`validate-codex-plugin.js` 会检查必备 Claude Code provider 来源片段，并禁止生成“Codex 负责 global contract / integration review”这类与实际 provider 分工不符的文案。
+
 本仓库的来源关系是 Claude Code skill 为 origin，Codex skill 为 projection。生成 Codex plugin 时，不能用全局替换抹掉 provider provenance。
 
-要求：
+已落地：
 
-- projection 文档使用 runtime-neutral provider 词汇。
-- 需要显式说明 origin / projection 关系。
-- validator 应检查 projection 文档是否声称 Codex 执行了当前代码实际不会执行的角色。
+- projection 文档显式保留 Claude Code provider / Codex projection 的来源关系。
+- build 脚本对 agent-loop command-to-skill 转换做定向修正。
+- validator 检查 projection 文档是否声称 Codex 执行了当前代码实际不会执行的角色。
 
 ### 13.7 CLI flag 需要做 docs parity
 
@@ -377,3 +393,19 @@ dry-run 端到端验证：
 classic orchestrator、pipeline 文档和 skill 文档里的 `--auto`、`--auto-evaluate`、`--auto-freeze` 需要统一。当前读者不能只看文档就判断哪个参数是真实入口。
 
 建议先做兼容别名，再收敛到一个 canonical flag，并把 help / docs / skill / README 放进同一条 parity check。
+
+### 13.8 plans source of truth 已收敛
+
+**当前状态（2026-06-01）**：`docs/plans` 已作为 human-readable source of truth。`runtime-paths.js` 提供 `resolvePlanDirectories()` / `resolvePlanPath()` / `resolvePlanWritePath()`，来源类型为 `sourceOfTruth`、`runtimeCache`、`legacyFallback`。隐藏目录 `.codex/plans` / `.claude/plans` 保留为 runtime cache / legacy fallback，不再作为默认计划写入目标。
+
+已落地：
+
+- `resolveProjectPlansDir()` 返回 `docs/plans`，新计划默认写入用户可审阅目录。
+- `inject-context.js` 的 prototype 状态恢复按 `docs/plans` 优先搜索，并在注入上下文里标出 `sourceType`。
+- `test-inject-context-cost-summary.js` 覆盖 plan resolver 优先级和 prototype source-of-truth 注入。
+- `validate-codex-plugin.js` 检查插件副本里的 plan source-of-truth helper 和 `inject-context` 投影。
+
+仍待补：
+
+- 历史 `.codex/plans` / `.claude/plans` artifact 不做批量迁移；只通过 fallback 兼容读取。
+- 后续如果 native workflow backend 落地，需要把 workflow artifact 与 `docs/plans` 的关系写入同一 resolver，而不是新增第四套 plan 目录约定。

@@ -90,6 +90,70 @@ function assertSliceTransition(from, to) {
   }
 }
 
+function transitionEvent(level, from, to, metadata) {
+  return {
+    level,
+    from,
+    to,
+    at: new Date().toISOString(),
+    actor: metadata && metadata.actor ? metadata.actor : 'orchestrator',
+    source: metadata && metadata.source ? metadata.source : 'pipeline-state',
+    reason: metadata && metadata.reason ? metadata.reason : '',
+  };
+}
+
+function appendTransitionEvent(stateObj, event) {
+  const pipeline = stateObj.pipeline || {};
+  const transitionEvents = Array.isArray(pipeline.transitionEvents) ? pipeline.transitionEvents : [];
+  return {
+    ...stateObj,
+    pipeline: {
+      ...pipeline,
+      transitionEvents: [...transitionEvents, event],
+    },
+  };
+}
+
+function transitionRun(stateObj, target, metadata = {}) {
+  const from = stateObj.status || RUN_STATES.DRAFT;
+  assertRunTransition(from, target);
+  let next = {
+    ...stateObj,
+    status: target,
+    updatedAt: new Date().toISOString(),
+  };
+  if (from !== target) {
+    next = appendTransitionEvent(next, transitionEvent('run', from, target, metadata));
+  }
+  return next;
+}
+
+function transitionSlice(stateObj, sliceId, target, metadata = {}) {
+  const pipeline = stateObj.pipeline || {};
+  const sliceStates = pipeline.sliceStates || {};
+  const hadExplicitState = Object.prototype.hasOwnProperty.call(sliceStates, sliceId);
+  const from = hadExplicitState ? sliceStates[sliceId] : SLICE_STATES.PENDING;
+  assertSliceTransition(from, target);
+  let next = {
+    ...stateObj,
+    updatedAt: new Date().toISOString(),
+    pipeline: {
+      ...pipeline,
+      sliceStates: {
+        ...sliceStates,
+        [sliceId]: target,
+      },
+    },
+  };
+  if (from !== target || !hadExplicitState) {
+    next = appendTransitionEvent(next, {
+      ...transitionEvent('slice', from, target, metadata),
+      sliceId,
+    });
+  }
+  return next;
+}
+
 module.exports = {
   RUN_STATES,
   SLICE_STATES,
@@ -99,4 +163,6 @@ module.exports = {
   isValidSliceTransition,
   assertRunTransition,
   assertSliceTransition,
+  transitionRun,
+  transitionSlice,
 };

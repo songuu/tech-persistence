@@ -171,6 +171,6 @@
 - [2026-06-01] [telemetry/demand-side/mcp] MCP 主动检索 measure（缺陷 B）：demand-side telemetry 的主动检索轴 — MCP 主动检索 measure（缺陷 B） → `docs/solutions/2026-06-01-mcp-retrieval-measure.md`
 - [2026-06-01] [enforcement/self-evolution/drift] 知识层 drift checker：enforcement 判定域由 dogfood FP 反推（40→0 FP） — 知识层 drift checker（缺陷 E） → `docs/solutions/2026-06-01-knowledge-drift-checker.md`
 - [2026-06-01] [self-evolution/telemetry/observability] demand-side 召回 telemetry：度量注入知识是否被用（measure-before-enforce） — demand-side 召回 telemetry → `docs/solutions/2026-06-01-demand-side-recall-telemetry.md`
-- [2026-05-29] [sprint/goal-loop/determinism] /sprint --goal 自主目标循环：pure-prompt MVP + '无宿主进程→确定性上限'设计原则 + helper 条件推迟 — 用户要求在当前架构接入 /sprint --goal "<目标 " 自主目标驱动循环：设目标 → think→plan→work→review→compound 重入直到达成或终止，4 维控制（终止条件 / 自动化程度 / 目标范围约束 / 运行时选择）。难点：确定性优先 是项目不可妥协原则，用户明确要"直接控制"终止——天然倾向给 max-iter 天花板写确定性强制代码。 → `docs/solutions/2026-05-29-sprint-goal-mode.md`
+- [2026-06-01] [architecture/claude-code/dynamic-workflows] Claude Code Dynamic workflows 接入 tech-persistence：backend seam 优先，不替换 sprint 方法论 — Claude Code 在 2026-05-25 到 2026-05-29 发布 Dynamic workflows research preview：Claude 可以为任务写 JavaScript orchestration script，并在后台协调大量 subagents。用户问当前 tech-persistence 架构是否有优化空间。 → `docs/solutions/2026-06-01-claude-code-dynamic-workflows-architecture.md`
 
 <!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->
