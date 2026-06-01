@@ -18,7 +18,7 @@ defects:
   - id: B
     name: "主动检索 MCP measure"
     priority: P2
-    status: planned
+    status: done
   - id: C
     name: "同源验证异构 P0 复核"
     priority: P3
@@ -154,6 +154,8 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
 
 ## 缺陷 B：主动检索 MCP measure（P2）
 
+> ✅ **done（2026-06-01）**：`active_retrieval_count` 加入 demand-side metric（`recall-usage.jsonl`），复用 A 管道零新 jsonl。filter 用 `/tp_memory_/`（采纳二次勘察发现 ①：`mcp__` 被 `normalizeToolName` 剥）。贯通 review-learnings `--recall` + SessionStart/Stop cost summary。无新 ADR（[[ADR-022]] 覆盖）。execution plan [[2026-06-01-mcp-retrieval-measure]]、solution [[2026-06-01-mcp-retrieval-measure]]。
+
 **根因**：检索能力已存在，但 agent 主动检索靠自愿调用（**同缺陷 A 根因**）。
 
 **代码现实修正（已勘察）**：B 不是「纯被动注入」——
@@ -254,7 +256,7 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
 
 批次 1（低成本，可立即）:
   D (规划深度 rule) ───────── ✅ done（[[ADR-024]]：落 CLAUDE.md 摘要 + /plan 详版 Codex parity）
-  B (MCP measure) ────────── 修 filter（tp_memory_）后复用 A telemetry，预期确认主动检索≈0
+  B (MCP measure) ────────── ✅ done（active_retrieval_count 复用 A 管道，filter=tp_memory_）
 
 批次 2（等用量信号）:
   C1 (agent-loop 异构 P0) ── 宿主进程在，可确定性强制；但只惠及 agent-loop 用户
@@ -272,3 +274,4 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
 | 2026-06-01 | 创建 roadmap。承接缺陷 A（已落地）；B/C/D/E 详细计划 + 统一视角（B/C/E 是 A 的投影）+ 排序 + 每缺陷前置勘察清单。状态：planning，待逐个开 execution plan。 |
 | 2026-06-01 | E 落地（[[ADR-023]]，status done）。二次勘察固化（开 plan 前 [[ADR-012]]）：① 发现 B filter `mcp__*` 会静默失效（`normalizeToolName` 剥前缀）→ 修正为 `tp_memory_`；② C 裂 C1（可确定性强制）/C2（撞 [[ADR-021]] 天花板）；③ 结合 persona 重排序 D+B 小批、C 降级。 |
 | 2026-06-01 | D 落地（[[ADR-024]]，status done）。勘察修正落点：CLAUDE.md-only 有 Codex parity 缺口（Codex 不读 `~/.claude/CLAUDE.md`）→ 规则落 `/plan`（propagate）+ CLAUDE.md 摘要。剩 B（待开）、C（降级）。 |
+| 2026-06-01 | B 落地（status done，无新 ADR——复用 [[ADR-022]] 设施）。`active_retrieval_count` 入 demand-side metric，filter `/tp_memory_/`（采纳二次勘察发现 ①）。剩 **C 降级**（C2 撞 [[ADR-021]] 天花板、C1 等 agent-loop 用量）。BCDE 中 B/D/E 已落、C 暂缓——roadmap 主体完成。 |

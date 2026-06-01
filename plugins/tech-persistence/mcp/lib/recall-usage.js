@@ -185,6 +185,27 @@ function inferSessionDomains(observations) {
   return [...all].sort();
 }
 
+// 主动检索工具 = read-side MCP memory 调用。注意 normalizeToolName (memory-v5.js) 已剥 `mcp__`
+// 前缀，记录值形如 `tech-persistence-memory__tp_memory_search`，故按 `tp_memory_*` 后缀匹配，
+// 绝不匹配 `mcp__*`（否则永远 0 = 静默失效）。排除 tp_memory_save（写入，非检索）。
+const RETRIEVAL_TOOL_RE = /tp_memory_(?:search|recent|file_history|project_profile)/;
+
+/**
+ * 数本会话「主动检索」次数 = 模型主动调 MCP memory 读取类工具的完成调用数。
+ * 缺陷 B 的需求侧信号：A 测「注入知识被用率」，B 测「主动检索发生率」（measure-only）。
+ * 只数 phase==='post'：observe.js 每次调用写 pre+post 两条，数 post 避免翻倍计数。
+ */
+function countActiveRetrievals(observations) {
+  if (!Array.isArray(observations)) return 0;
+  let count = 0;
+  for (const obs of observations) {
+    if (!obs || typeof obs !== 'object') continue;
+    if (obs.phase !== 'post') continue;
+    if (RETRIEVAL_TOOL_RE.test(String(obs.tool || ''))) count += 1;
+  }
+  return count;
+}
+
 /**
  * 算 demand-side 使用率。dormant_domains（注入了但本会话没碰）是核心退化信号。
  */
@@ -232,6 +253,7 @@ function buildRecallUsageMetric(input) {
       ? manifest.injected_instinct_count
       : 0,
     observation_count: Array.isArray(observations) ? observations.length : 0,
+    active_retrieval_count: countActiveRetrievals(observations),
     manifest_found: Boolean(manifest),
     session_domains: sessionDomains,
     ...usage,
@@ -281,6 +303,7 @@ module.exports = {
   readInjectedManifest,
   inferSessionDomains,
   domainsForObservation,
+  countActiveRetrievals,
   computeDemandSideUsage,
   buildRecallUsageMetric,
   recordRecallUsage,

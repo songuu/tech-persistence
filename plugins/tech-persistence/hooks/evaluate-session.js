@@ -937,12 +937,15 @@ function main() {
     console.log(`   📊 Skill 信号: +${skillSignals.written} (${skillSignals.skills.join(', ')})`);
   }
 
-  if (recallUsage && recallUsage.injected_domain_count > 0) {
+  if (recallUsage && (recallUsage.injected_domain_count > 0 || recallUsage.active_retrieval_count > 0)) {
     const rate = recallUsage.usage_rate === null ? 'n/a' : `${Math.round(recallUsage.usage_rate * 100)}%`;
     const dormant = recallUsage.dormant_domains.length > 0
       ? ` | 沉睡: ${recallUsage.dormant_domains.join(', ')}`
       : '';
-    console.log(`   🎯 召回使用率(demand-side): ${recallUsage.used_domain_count}/${recallUsage.injected_domain_count} domain ${rate}${dormant}`);
+    const retrieval = recallUsage.active_retrieval_count > 0
+      ? ` | 主动检索: ${recallUsage.active_retrieval_count}`
+      : '';
+    console.log(`   🎯 召回使用率(demand-side): ${recallUsage.used_domain_count}/${recallUsage.injected_domain_count} domain ${rate}${dormant}${retrieval}`);
   }
 
   if (warnings.length > 0) {

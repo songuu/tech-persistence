@@ -17,7 +17,7 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 | 进化产物 | `~/.codex/homunculus/evolved/` | 聚类生成的 skill/command |
 | 原始观察 | `~/.codex/homunculus/projects/{id}/observations.jsonl` | 未处理的原始数据 |
 | 会话摘要 | `~/.codex/homunculus/projects/{id}/sessions/` | 历史会话总结 |
-| 召回信号 | `~/.codex/homunculus/telemetry/recall-usage.jsonl` | demand-side 使用率 + 沉睡 domain（measure-only） |
+| 召回信号 | `~/.codex/homunculus/telemetry/recall-usage.jsonl` | demand-side 使用率 + 沉睡 domain + MCP 主动检索（measure-only） |
 
 ## 操作模式
 
@@ -75,11 +75,13 @@ description: "回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索
 - **平均使用率**：`usage_rate` 均值（注入的 domain 中本会话实际触及的比例）
 - **长期沉睡 domain**：在多数会话出现于 `dormant_domains` 的 domain（注入了但持续没被碰到）
 - **趋势**：使用率是否随时间下降
+- **MCP 主动检索**：`active_retrieval_count` 总和 + 每会话均值（模型主动调 `tp_memory_*` 读取类工具的次数）。A（使用率）测被动注入被用率，本项测**主动检索发生率**。**预期偏低**——被动注入是主路径；持续为 0 = 主动检索基本未发生（本身是 finding，非 bug，别当故障修）。measure-only。
 
 ```
 🎯 demand-side 召回审计（最近 30 会话）
   平均使用率: 62%
   长期沉睡: security (28/30 会话), api-design (25/30)
+  MCP 主动检索: 总 4 次 / 0.13 次每会话（被动注入为主，主动检索罕见——符合预期）
   → 建议: 这些域的本能注入了但极少被碰到，考虑裁剪该域低置信本能，
     或确认这些知识是否仍需每次自动注入
 ```

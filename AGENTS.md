@@ -42,10 +42,10 @@ pnpm lint         # 检查
 > Refresh with `node scripts/sync-solution-index.js --all`.
 
 - [2026-06-01] [methodology/planning-depth/parity] 规划深度自适应 rule（缺陷 D）：methodology 规则的 Codex parity 落点 — 规划深度自适应 rule（缺陷 D） → `docs/solutions/2026-06-01-planning-depth-rule.md`
+- [2026-06-01] [telemetry/demand-side/mcp] MCP 主动检索 measure（缺陷 B）：demand-side telemetry 的主动检索轴 — MCP 主动检索 measure（缺陷 B） → `docs/solutions/2026-06-01-mcp-retrieval-measure.md`
 - [2026-06-01] [enforcement/self-evolution/drift] 知识层 drift checker：enforcement 判定域由 dogfood FP 反推（40→0 FP） — 知识层 drift checker（缺陷 E） → `docs/solutions/2026-06-01-knowledge-drift-checker.md`
 - [2026-06-01] [self-evolution/telemetry/observability] demand-side 召回 telemetry：度量注入知识是否被用（measure-before-enforce） — demand-side 召回 telemetry → `docs/solutions/2026-06-01-demand-side-recall-telemetry.md`
 - [2026-05-29] [sprint/goal-loop/determinism] /sprint --goal 自主目标循环：pure-prompt MVP + '无宿主进程→确定性上限'设计原则 + helper 条件推迟 — 用户要求在当前架构接入 /sprint --goal "<目标 " 自主目标驱动循环：设目标 → think→plan→work→review→compound 重入直到达成或终止，4 维控制（终止条件 / 自动化程度 / 目标范围约束 / 运行时选择）。难点：确定性优先 是项目不可妥协原则，用户明确要"直接控制"终止——天然倾向给 max-iter 天花板写确定性强制代码。 → `docs/solutions/2026-05-29-sprint-goal-mode.md`
-- [2026-05-28] [self-evolution/skill-evolution/trace] B2 trace → eval 自动沉淀：失败 trace 半自动转结构化 eval case（provenance gate 护城河 + 双层脱敏） — docs/plans/2026-05-28-two-layer-architecture-enhancement.md §B2 要从真实使用 trace 里「corrections 发生的真实输入」半自动转成 skill eval case（真实失败 = 最有价值的测试）。护城河目标：eval case 来自真实 trace 而非 skill 自产（避免"自己出题给自己考"）。设计文档假设数据源是「signal jsonl 里 cor… → `docs/solutions/2026-05-28-trace-to-eval.md`
 
 <!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->
 ## 当前迭代重点

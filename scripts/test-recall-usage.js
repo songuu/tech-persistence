@@ -22,6 +22,7 @@ const {
   writeInjectedManifest,
   readInjectedManifest,
   inferSessionDomains,
+  countActiveRetrievals,
   computeDemandSideUsage,
   buildRecallUsageMetric,
   recordRecallUsage,
@@ -199,6 +200,57 @@ test('readLatestRecallUsage skips corrupt trailing lines + handles missing', () 
   const latest = readLatestRecallUsage(dir);
   assert.strictEqual(latest.seq, 1);
   assert.strictEqual(readLatestRecallUsage(null), null);
+});
+
+// ─── 缺陷 B：主动检索计数 ───
+
+test('countActiveRetrievals counts post-phase read-side tp_memory_* calls', () => {
+  // normalizeToolName 剥 mcp__ 后的真实记录值形态（tech-persistence-memory__tp_memory_*）
+  const obs = [
+    { phase: 'pre', tool: 'tech-persistence-memory__tp_memory_search' },
+    { phase: 'post', tool: 'tech-persistence-memory__tp_memory_search' },
+    { phase: 'post', tool: 'tech-persistence-memory__tp_memory_recent' },
+    { phase: 'post', tool: 'tech-persistence-memory__tp_memory_project_profile' },
+  ];
+  assert.strictEqual(countActiveRetrievals(obs), 3); // pre 不计；3 个 post 读取
+});
+
+test('countActiveRetrievals dedups pre+post of same call (post-only, 不翻倍)', () => {
+  const obs = [
+    { phase: 'pre', tool: 'tech-persistence-memory__tp_memory_search' },
+    { phase: 'post', tool: 'tech-persistence-memory__tp_memory_search' },
+  ];
+  assert.strictEqual(countActiveRetrievals(obs), 1);
+});
+
+test('countActiveRetrievals excludes save (write) + non-memory tools', () => {
+  const obs = [
+    { phase: 'post', tool: 'tech-persistence-memory__tp_memory_save' }, // 写，非检索
+    { phase: 'post', tool: 'Read' },
+    { phase: 'post', tool: 'Bash', command: 'git status' },
+  ];
+  assert.strictEqual(countActiveRetrievals(obs), 0);
+});
+
+test('countActiveRetrievals handles empty / non-array / malformed', () => {
+  assert.strictEqual(countActiveRetrievals([]), 0);
+  assert.strictEqual(countActiveRetrievals(null), 0);
+  assert.strictEqual(countActiveRetrievals([null, {}, { phase: 'post' }]), 0);
+});
+
+test('buildRecallUsageMetric includes active_retrieval_count (post-only)', () => {
+  const m = buildRecallUsageMetric({
+    project: { id: 'p' },
+    sessionId: 's',
+    manifest: null,
+    observations: [
+      { phase: 'post', tool: 'tech-persistence-memory__tp_memory_search' },
+      { phase: 'pre', tool: 'tech-persistence-memory__tp_memory_search' },
+      { phase: 'post', tool: 'Read' },
+    ],
+    timestamp: 't',
+  });
+  assert.strictEqual(m.active_retrieval_count, 1);
 });
 
 console.log('');

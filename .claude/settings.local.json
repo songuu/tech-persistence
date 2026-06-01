@@ -104,7 +104,8 @@
       "PowerShell(node scripts/test-knowledge-drift.js)",
       "PowerShell(node scripts/smoke-pre-commit.js 2>&1 | Select-Object -Last 16)",
       "PowerShell(node scripts/sync-solution-index.js --all 2>&1 | Select-Object -Last 10)",
-      "PowerShell(git add *)"
+      "PowerShell(git add *)",
+      "PowerShell(node scripts/test-recall-usage.js; \"=== test-recall-usage exit: $LASTEXITCODE ===\")"
     ]
   }
 }

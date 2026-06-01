@@ -489,12 +489,15 @@ function main() {
   let demandSideLine = '';
   try {
     const latest = readLatestRecallUsage(path.join(resolveBaseDir(), 'telemetry'));
-    if (latest && latest.injected_domain_count > 0) {
+    if (latest && (latest.injected_domain_count > 0 || latest.active_retrieval_count > 0)) {
       const rate = latest.usage_rate === null ? 'n/a' : `${Math.round(latest.usage_rate * 100)}%`;
       const dormant = Array.isArray(latest.dormant_domains) && latest.dormant_domains.length > 0
         ? `; dormant=${latest.dormant_domains.join(', ')}`
         : '';
-      demandSideLine = `prior-session demand-side recall: ${latest.used_domain_count}/${latest.injected_domain_count} domains used (${rate})${dormant}`;
+      const retrieval = Number.isFinite(latest.active_retrieval_count) && latest.active_retrieval_count > 0
+        ? `; active-retrieval=${latest.active_retrieval_count}`
+        : '';
+      demandSideLine = `prior-session demand-side recall: ${latest.used_domain_count}/${latest.injected_domain_count} domains used (${rate})${dormant}${retrieval}`;
     }
   } catch {}
 
