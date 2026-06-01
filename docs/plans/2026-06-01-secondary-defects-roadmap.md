@@ -26,7 +26,7 @@ defects:
   - id: D
     name: "80/20 规划深度 rule"
     priority: P4
-    status: planned
+    status: done
 ---
 
 # 次级缺陷 B/C/D/E 缓解 roadmap
@@ -223,6 +223,8 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
 
 ## 缺陷 D：80/20 规划深度 rule（P4 — 补 rule，不写代码）
 
+> ✅ **done（2026-06-01）**：规则落 `user-level/CLAUDE.md`（`## 规划深度规则` 完整矩阵）+ `user-level/commands/plan.md`（`## 规划深度自适应` 精简版，propagate → Codex parity）。parity 落点决策见 [[ADR-024]]；execution plan [[2026-06-01-planning-depth-rule]]、solution [[2026-06-01-planning-depth-rule]]。下方为原始规划，落地时勘察修正了落点（CLAUDE.md-only → 须落 propagate 命令，详见 [[ADR-024]]）。
+
 **根因**：80/20（80% 规划审查）是 pre-agentic 假设（执行贵 → 重规划防返工）。
 
 **代码现实（已勘察）**：sprint 已有 `[P]` task + worktree 并行执行（`work.md` Worker spawn 协议 + Agent `isolation:"worktree"`）。「执行并行」已支持。真缺口 = 规划阶段无「多方案并行探索」。
@@ -251,7 +253,7 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
   E (drift checker) ──────── ✅ done（确定性化 + 直击 #1 回归源，[[ADR-023]]）
 
 批次 1（低成本，可立即）:
-  D (规划深度 rule) ───────── 零代码，仿 L0-L4，认知层高
+  D (规划深度 rule) ───────── ✅ done（[[ADR-024]]：落 CLAUDE.md 摘要 + /plan 详版 Codex parity）
   B (MCP measure) ────────── 修 filter（tp_memory_）后复用 A telemetry，预期确认主动检索≈0
 
 批次 2（等用量信号）:
@@ -269,3 +271,4 @@ return toolName.replace(/^functions\./, '').replace(/^mcp__/, '').slice(0, 80);
 |------|------|
 | 2026-06-01 | 创建 roadmap。承接缺陷 A（已落地）；B/C/D/E 详细计划 + 统一视角（B/C/E 是 A 的投影）+ 排序 + 每缺陷前置勘察清单。状态：planning，待逐个开 execution plan。 |
 | 2026-06-01 | E 落地（[[ADR-023]]，status done）。二次勘察固化（开 plan 前 [[ADR-012]]）：① 发现 B filter `mcp__*` 会静默失效（`normalizeToolName` 剥前缀）→ 修正为 `tp_memory_`；② C 裂 C1（可确定性强制）/C2（撞 [[ADR-021]] 天花板）；③ 结合 persona 重排序 D+B 小批、C 降级。 |
+| 2026-06-01 | D 落地（[[ADR-024]]，status done）。勘察修正落点：CLAUDE.md-only 有 Codex parity 缺口（Codex 不读 `~/.claude/CLAUDE.md`）→ 规则落 `/plan`（propagate）+ CLAUDE.md 摘要。剩 B（待开）、C（降级）。 |

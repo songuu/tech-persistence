@@ -17,6 +17,15 @@
 
 ## 决策列表
 
+### ADR-024: 全局 methodology/preference 规则的 Codex parity 落点是「propagate 的 command/skill」，user-level/CLAUDE.md 只是 Claude 侧摘要（Codex 不读它） (2026-06-01)
+- **状态**：已采纳
+- **上下文**：缺陷 D（[[2026-06-01-secondary-defects-roadmap]] P4）加「规划深度自适应」元规则，roadmap 初稿假设"放 user-level/CLAUDE.md 或 rules/ 一段即可（零代码）"。[[ADR-012]] 勘察推翻：install.ps1 / install.sh 只把 user-level/CLAUDE.md 装到 `~/.claude/CLAUDE.md`（Claude 全局），**Codex 根本不读它**；user-level/rules/ 同理（只装 `~/.claude/rules/`）。根 AGENTS.md 是项目模板（`[项目名称]` 占位）+ sync-solution-index 写「解决方案索引」块，**非方法论镜像**。换言之 user-level/CLAUDE.md-only 的规则对 Codex 不可见 = 违反 [[ADR-011]] multi-runtime parity。佐证：现有 `测试规则` 的 Codex parity 不是靠 CLAUDE.md，而是靠 `.codex/skills/test-strategy`（skill 携带同等内容）。
+- **决策**：全局 methodology/preference 规则若要双运行时 parity，**规则内容必须落在 propagate 到 Codex 的 command/skill**（`propagate-command-changes.js` 列表 + `build-codex-plugin.js`），user-level/CLAUDE.md 只放 Claude 侧摘要/指针。D 落地：完整档位矩阵进 user-level/CLAUDE.md（Claude 方法论摘要，紧邻 `测试规则`）+ 自包含精简版进 user-level/commands/plan.md（→ `.codex/commands/plan.md` + plugin skill = Codex 可读），与 `测试规则`「CLAUDE.md 摘要 + skill/command 详情」模型同构。
+- **原因**：(1) Codex 运行时不读 `~/.claude/CLAUDE.md`，这是 install 映射的硬事实，不是约定——靠"记得也放 Codex"会漏（roadmap 初稿就漏了）；(2) 与 `测试规则` 既有 parity 模型同构，降认知成本；(3) markdown 受控重复（摘要 vs 详版分工，非逐字复制）drift 风险低于代码。
+- **备选**：(a) 只放 user-level/CLAUDE.md——Codex parity 缺口，违反 [[ADR-011]]，否决；(b) 塞根 AGENTS.md——它是项目模板非方法论镜像，语义错位，否决；(c) 新建 user-level/AGENTS.md 全局 Codex 方法论文件——install 无此映射，需改安装器 + 双份全量方法论维护，重，YAGNI 否决（既有 skill/command 路径已够）。
+- **影响**：(1) 今后加任何"全局开发偏好/方法论规则"先问"Codex 读得到吗"——只放 user-level/CLAUDE.md 必留 parity 缺口，内容须落 propagate 命令/skill；(2) 这是 [[ADR-011]] parity 在 **methodology-rule 文本**维度的具体落点（此前 ADR 多讲 hook/lib/script parity，本条补"规则文本"parity）；(3) user-level/CLAUDE.md 定位明确为"Claude 侧方法论摘要"，不是双运行时 single-source。
+- **来源**：`docs/plans/2026-06-01-planning-depth-rule.md`，`docs/solutions/2026-06-01-planning-depth-rule.md`。
+
 ### ADR-023: 知识层 drift 检测下沉 pre-commit——block 档收窄到「带行号 + 源码前缀」(dogfood 40→0 FP)；无行号/运行时/符号引用确定性不可判故 skip/warn (2026-06-01)
 - **状态**：已采纳
 - **上下文**：缺陷 E（[[2026-06-01-secondary-defects-roadmap]] P1）要把"文档引用 vs 代码现实漂移"（本仓库 #1 回归源 [[documented-claim-vs-code-reality-drift]]）从 rules/solutions/ADR 的 append-only 零校验，下沉为 pre-commit enforcement（[[ADR-013]] mechanism-over-discipline 延续）。设计初稿假设"校验文档里路径引用所指文件是否存在"。[[ADR-013]] §B dogfood 探针在 **plan 阶段**推翻 naive 方案：扫现有 42 个 rules/solutions/ADR，naive「带目录路径存在性」would-block **40/42**——三类合法引用被误判：(a) 正则 `js` 在 `json` 前匹配截断（`settings.json`→`settings.js`）；(b) 文档引用**假设/未来文件**（`sprint-goal.js` 是 [[ADR-021]] deferred、`providers/claude.js` 是"如果有人加"假设例）；(c) **运行时路径**（`.claude/persona.md` 是安装位置，repo 内在 `user-level/`）。
