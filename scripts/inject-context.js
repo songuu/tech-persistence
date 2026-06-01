@@ -16,6 +16,7 @@ const {
   resolveBaseDir,
   resolveCompatReadDirs,
   resolveProjectPlansDir,
+  resolveSessionId,
 } = require('./lib/runtime-paths');
 const {
   DEFAULT_MEMORY_CONFIG,
@@ -24,6 +25,7 @@ const {
   parseFrontmatter,
   recordMemoryRecallMetric,
 } = require('./lib/memory-v5');
+const { writeInjectedManifest, readLatestRecallUsage } = require('./lib/recall-usage');
 
 const CONTEXT_BUDGET_CHARS = 12000;
 
@@ -188,11 +190,12 @@ function renderContextCostSummary(stats) {
   ].join('; ');
 }
 
-function renderContextWithOptionalCostSummary(sections, projectName, env = process.env) {
+function renderContextWithOptionalCostSummary(sections, projectName, env = process.env, extras = {}) {
   let rendered = renderSectionsWithStats(sections);
   let finalSections = sections;
   if (shouldIncludeContextCostSummary(rendered.stats, env)) {
-    const summary = renderContextCostSummary(rendered.stats);
+    let summary = renderContextCostSummary(rendered.stats);
+    if (extras.demandSideLine) summary += `\n${extras.demandSideLine}`;
     finalSections = [{ title: 'Context cost summary', body: summary }, ...sections];
     rendered = renderSectionsWithStats(finalSections);
   }
@@ -459,11 +462,43 @@ function main() {
     addSection(sections, '全局本能 (跨项目通用)', instinctLines.join('\n'), 1000);
   }
 
+  // 4. demand-side 召回 manifest：记录本次注入了哪些 instinct domain（measure-before-enforce）。
+  // WHY: 现有 recall 指标只测「注入了多少进索引」（供给侧）；此 manifest 让 Stop hook 能算
+  // 「注入的 domain 本会话有没有被碰到」（需求侧）。只记 domain 名 + 计数，无 body 文本。
+  try {
+    const injectedInstincts = [...projectInstincts.slice(0, 10), ...globalInstincts.slice(0, 5)];
+    writeInjectedManifest(path.join(resolveBaseDir(), 'telemetry'), {
+      session_id: resolveSessionId({ fallback: false }) || '',
+      project_id: project.id,
+      timestamp: new Date().toISOString(),
+      injected_domains: injectedInstincts.map((inst) => inst.domain).filter(Boolean),
+      injected_instinct_count: injectedInstincts.length,
+    });
+  } catch (error) {
+    try {
+      process.stderr.write(`[inject-context] injected manifest failed: ${error && error.message ? error.message : error}\n`);
+    } catch {}
+  }
+
   if (sections.length === 0) {
     process.exit(0);
   }
 
-  const context = renderContextWithOptionalCostSummary(sections, project.name);
+  // demand-side 召回信号消费点 1：上次会话使用率附到 cost summary（高频可见）。
+  // WHY: 让「注入的 domain 上次有没有被碰到」在压力大的会话（cost summary 触发时）可见。
+  let demandSideLine = '';
+  try {
+    const latest = readLatestRecallUsage(path.join(resolveBaseDir(), 'telemetry'));
+    if (latest && latest.injected_domain_count > 0) {
+      const rate = latest.usage_rate === null ? 'n/a' : `${Math.round(latest.usage_rate * 100)}%`;
+      const dormant = Array.isArray(latest.dormant_domains) && latest.dormant_domains.length > 0
+        ? `; dormant=${latest.dormant_domains.join(', ')}`
+        : '';
+      demandSideLine = `prior-session demand-side recall: ${latest.used_domain_count}/${latest.injected_domain_count} domains used (${rate})${dormant}`;
+    }
+  } catch {}
+
+  const context = renderContextWithOptionalCostSummary(sections, project.name, process.env, { demandSideLine });
 
   const output = JSON.stringify({
     hookSpecificOutput: {

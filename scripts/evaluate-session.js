@@ -39,6 +39,11 @@ const {
   yamlEscape,
 } = require('./lib/memory-v5');
 const { aggregateSkillSignals } = require('./lib/skill-signals');
+const {
+  readInjectedManifest,
+  buildRecallUsageMetric,
+  recordRecallUsage,
+} = require('./lib/recall-usage');
 
 // ─── 配置 ───
 const CONFIG = {
@@ -875,6 +880,26 @@ function main() {
     process.stderr.write(`[skill-signals] aggregation failed: ${err.message}\n`);
   }
 
+  // 8.6. demand-side 召回使用率信号（measure-before-enforce，见 ADR-013/021）。
+  // 读 SessionStart 写的 injected manifest，算「注入的 domain 本会话碰到了几个」。
+  // 纯 measure：不阻塞主流程、不做任何 enforcement。dormant_domains 是退化探测核心产物。
+  let recallUsage = null;
+  try {
+    const telemetryDir = path.join(paths.baseDir, 'telemetry');
+    const sessionId = resolveSessionId({ fallback: false }) || '';
+    const manifest = readInjectedManifest(telemetryDir, sessionId);
+    recallUsage = buildRecallUsageMetric({
+      project,
+      sessionId,
+      manifest,
+      observations,
+      timestamp: new Date().toISOString(),
+    });
+    recordRecallUsage(telemetryDir, recallUsage);
+  } catch (err) {
+    process.stderr.write(`[recall-usage] demand-side metric failed: ${err.message}\n`);
+  }
+
   // 9. 输出报告
   console.log('');
   console.log(`📊 会话自学习报告 [${project.name}]`);
@@ -910,6 +935,14 @@ function main() {
 
   if (skillSignals.written > 0) {
     console.log(`   📊 Skill 信号: +${skillSignals.written} (${skillSignals.skills.join(', ')})`);
+  }
+
+  if (recallUsage && recallUsage.injected_domain_count > 0) {
+    const rate = recallUsage.usage_rate === null ? 'n/a' : `${Math.round(recallUsage.usage_rate * 100)}%`;
+    const dormant = recallUsage.dormant_domains.length > 0
+      ? ` | 沉睡: ${recallUsage.dormant_domains.join(', ')}`
+      : '';
+    console.log(`   🎯 召回使用率(demand-side): ${recallUsage.used_domain_count}/${recallUsage.injected_domain_count} domain ${rate}${dormant}`);
   }
 
   if (warnings.length > 0) {

@@ -448,11 +448,11 @@ Skill 优化:       /skill diagnose → /skill-improve → /skill-eval → /skil
 
 | Hook | 脚本 | 作用 |
 |------|------|------|
-| SessionStart | inject-context.js | 注入 Memory v5 索引、本能、会话摘要 + 检测 handoff/prototype 状态 |
+| SessionStart | inject-context.js | 注入 Memory v5 索引、本能、会话摘要 + 检测 handoff/prototype 状态 + 写 demand-side injected manifest（本次注入的 instinct domain） |
 | UserPromptSubmit | prompt-submit.js | 按当前 prompt 召回相关 Memory v5 entries / sessions / instincts（query-aware recall，ASCII + CJK 2-gram + 路径切分） |
 | PreToolUse | observe.js pre | 规范化并脱敏工具输入 |
 | PostToolUse | observe.js post | 捕获工具结果、命令状态、文件路径 |
-| Stop | evaluate-session.js | 模式检测 + Memory v5 写入 + 本能提取 + 衰减 |
+| Stop | evaluate-session.js | 模式检测 + Memory v5 写入 + 本能提取 + 衰减 + demand-side 召回使用率（注入 domain 本会话碰到了几个 → recall-usage.jsonl） |
 
 环境变量 `TECH_PERSISTENCE_DISABLE_PROMPT_RECALL=1` 可关闭 UserPromptSubmit recall（兜底）。
 
@@ -574,6 +574,7 @@ node scripts/memory-export.js --format=jsonl --output=memory.jsonl --push=agentm
     ├── skill-evals/                    ← 测试集 + {name}/cases/cases.jsonl (trace 沉淀用例) + {name}/results/results.jsonl (publish 护栏基线)
     ├── skill-traces/                   ← 失败/纠正 trace ({name}.jsonl, improve 根因反思源)
     ├── skill-changelog/                ← 变更记录
+    ├── telemetry/                      ← demand-side 召回信号 (recall-usage.jsonl + injected manifest，measure-only)
     └── projects/{hash}/
         ├── memory/MEMORY.md             ← Memory v5 启动索引 (<200 行 / 25KB)
         ├── memory/{topic}.md            ← 调试/测试/工具链等细节

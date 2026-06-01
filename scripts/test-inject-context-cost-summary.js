@@ -65,6 +65,29 @@ test('environment flag forces cost summary', () => {
   assert.ok(context.includes('context='));
 });
 
+test('extras.demandSideLine appends to cost summary when shown', () => {
+  const context = renderContextWithOptionalCostSummary(
+    [{ title: 'A', body: 'hello' }],
+    'proj',
+    { TECH_PERSISTENCE_CONTEXT_COST_SUMMARY: '1' },
+    { demandSideLine: 'prior-session demand-side recall: 2/3 domains used (67%); dormant=security' }
+  );
+  assert.ok(context.includes('## Context cost summary'));
+  assert.ok(context.includes('prior-session demand-side recall: 2/3 domains used (67%)'));
+  assert.ok(context.includes('dormant=security'));
+});
+
+test('extras.demandSideLine does not leak when cost summary not shown', () => {
+  const context = renderContextWithOptionalCostSummary(
+    [{ title: 'A', body: 'hello' }],
+    'proj',
+    {},
+    { demandSideLine: 'prior-session demand-side recall: 2/3 domains used (67%)' }
+  );
+  assert.ok(!context.includes('Context cost summary'));
+  assert.ok(!context.includes('demand-side recall'));
+});
+
 test('truncated sections trigger cost summary', () => {
   const sections = [{ title: 'Big', body: 'x'.repeat(200) }];
   const rendered = renderSectionsWithStats(sections, 40);
