@@ -53,10 +53,14 @@ bash install.sh --obsidian
 ### 只初始化 Codex 默认 Vault
 
 ```bash
-node scripts/init-obsidian-vault.js --codex
+bash install-codex.sh --obsidian
 ```
 
-默认路径为 `~/.codex/homunculus`。
+```powershell
+.\install-codex.ps1 -Obsidian
+```
+
+默认路径为 `~/.codex/homunculus`。也可直接调用底层脚本：`node scripts/init-obsidian-vault.js --codex`。
 
 ### 临时覆盖路径
 
@@ -128,15 +132,18 @@ node scripts/init-obsidian-vault.js
 
 ## Graph View 配色方案
 
+配色仅覆盖真正写入 vault 的 6 类产出（与 Dashboard dataview、README 接入表三方一致）：
+
 | Tag | 颜色 | 含义 |
 |-----|------|------|
 | `#instinct` | 紫色 | 本能节点 |
+| `#memory` | 蓝色 | Memory v5 主题记忆 |
 | `#session` | 绿色 | 会话摘要 |
-| `#rule` | 橙色 | 规则文件 |
 | `#solution` | 深绿 | 解决方案 |
-| `#architecture` | 红色 | 架构决策 |
 | `#sprint` | 青色 | Sprint 文档 |
 | `#handoff` | 金色 | Sprint 交接点 |
+
+> 规则（`.claude/rules/`）与架构决策 ADR 是 repo 注入层，文件不在 vault，不配色（早期版本曾配 `#rule` 橙 / `#architecture` 红，因永不命中已于 2026-06-01 移除）。
 
 ## 验证安装
 

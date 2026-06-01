@@ -145,12 +145,14 @@ function generateGraphConfig() {
     hideUnresolved: false,
     showOrphans: true,
     collapse_color: false,
+    // 配色仅覆盖真正写入 vault 的产出类型（与 Dashboard dataview 查询、README 接入表三方一致）。
+    // rule/architecture 是 repo 内的注入层规则（.claude/rules/），不写入 homunculus vault，
+    // 故不配色——否则是永不命中的空转配置（见 docs/plans/2026-06-01-obsidian-integration-completeness.md）。
     colorGroups: [
       { query: 'tag:#instinct', color: { a: 1, rgb: 5373645 } },
+      { query: 'tag:#memory', color: { a: 1, rgb: 3899638 } },
       { query: 'tag:#session', color: { a: 1, rgb: 2263842 } },
-      { query: 'tag:#rule', color: { a: 1, rgb: 16744192 } },
       { query: 'tag:#solution', color: { a: 1, rgb: 65382 } },
-      { query: 'tag:#architecture', color: { a: 1, rgb: 16711680 } },
       { query: 'tag:#sprint', color: { a: 1, rgb: 29695 } },
       { query: 'tag:#handoff', color: { a: 1, rgb: 16761095 } }
     ],
@@ -311,6 +313,7 @@ aliases:
 ## Quick Links
 - [[instinct-index|All Instincts]]
 - [[session-index|Session History]]
+- [[persona|User Persona]]
 
 ## Knowledge Areas
 - \`#debugging\` — Debugging gotchas and patterns
@@ -359,6 +362,23 @@ TABLE date
 FROM #solution
 SORT date DESC
 LIMIT 5
+\`\`\`
+
+## Memory Topics
+\`\`\`dataview
+TABLE topic, project, updated
+FROM #memory
+WHERE type = "memory-topic"
+SORT updated DESC
+LIMIT 10
+\`\`\`
+
+## Recent Sessions
+\`\`\`dataview
+TABLE project, time
+FROM #session
+SORT date DESC
+LIMIT 10
 \`\`\`
 `;
 }
@@ -477,9 +497,19 @@ function main() {
   console.log('');
 }
 
-try {
-  main();
-} catch (err) {
-  console.error('❌ 初始化失败:', err.message);
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (err) {
+    console.error('❌ 初始化失败:', err.message);
+    process.exit(1);
+  }
 }
+
+module.exports = {
+  generateGraphConfig,
+  generateDashboard,
+  generateAppConfig,
+  parseArgs,
+  defaultVaultPath,
+};

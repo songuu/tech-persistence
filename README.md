@@ -358,7 +358,12 @@ SessionStart hook 会注入 caveman 规则；如需关闭自动激活，设置 `
 
 ### Obsidian 集成（可选）
 ```powershell
-.\install.ps1 -Obsidian     # 初始化 Obsidian vault
+.\install.ps1 -Obsidian          # Claude vault (~/.claude/homunculus)
+.\install-codex.ps1 -Obsidian    # Codex vault (~/.codex/homunculus)
+```
+```bash
+bash install.sh --obsidian       # Claude vault
+bash install-codex.sh --obsidian # Codex vault
 ```
 参考 `docs/obsidian-setup.md` 完成 Claude 独立、Codex 独立或共享 vault 配置。
 
@@ -525,16 +530,20 @@ node scripts/memory-export.js --format=jsonl --output=memory.jsonl --push=agentm
 
 所有知识产出统一使用 Obsidian 兼容格式（frontmatter + wikilinks + tags）。共享模式下，Claude Code 和 Codex 会写入同一个 homunculus vault，再由 Obsidian Sync、iCloud、OneDrive、Dropbox 或 Syncthing 做跨设备同步。
 
+**vault 图谱节点**（写入 homunculus vault，带 Graph 配色 + Dashboard dataview 查询，三方一致）：
+
 | 产出 | Tag | Graph 颜色 | 产生方式 |
 |------|-----|-----------|---------|
 | 本能 | `#instinct` | 紫色 | Hook + /compound |
 | Memory | `#memory` | 蓝色 | Stop Hook |
 | 会话 | `#session` | 绿色 | Stop Hook |
 | 解决方案 | `#solution` | 深绿 | /compound |
-| 规则 | `#rule` | 橙色 | /compound /learn |
-| 架构 | `#architecture` | 红色 | /compound |
 | Sprint | `#sprint` | 青色 | /sprint |
-| 交接点 | `#handoff` | 金色 | /checkpoint |
+| 交接点 | `#handoff` | 金色 | Stop Hook + /checkpoint |
+
+**repo 注入层**（写入 git repo 的 `.claude/rules/`，供运行时注入，**不进 vault graph**）：规则（`/compound` `/learn`）、架构决策 ADR（`architecture.md`）。这两类文件物理上不在 vault，故不配色、不进 Dashboard——高价值 ADR 知识通过 Memory topic 与 solution 在 vault 间接可见。
+
+> jsonl 原始采集层（observations / skill-signals / telemetry）被 `.obsidianignore` 排除，不在 Obsidian 浏览；你看到的所有节点都是从 jsonl 派生的 Markdown 产物。
 
 详细配置见 `docs/obsidian-setup.md`，使用方法见 `docs/obsidian-usage.md` 和 `docs/obsidian-sprint-usage.md`。
 

@@ -75,12 +75,15 @@ SORT created DESC
 
 ## 知识类型完整映射（更新版）
 
+vault 图谱节点（带配色，三方一致）：
+
 | 类型 | Tag | 颜色 | 产生方式 | 存储路径 |
 |------|-----|------|---------|---------|
 | 本能 | `#instinct` | 紫色 | Hook + /compound | instincts/ |
+| Memory | `#memory` | 蓝色 | Stop Hook | projects/<id>/memory/ |
 | 会话 | `#session` | 绿色 | Stop Hook | sessions/ |
 | 解决方案 | `#solution` | 深绿 | /compound | docs/solutions/ |
-| 规则 | `#rule` | 橙色 | /compound /learn | .claude/rules/ |
-| 架构决策 | `#architecture` | 红色 | /compound | rules/architecture.md |
 | **Sprint** | **`#sprint`** | **青色** | **/sprint** | **docs/plans/** |
-| **交接点** | **`#handoff`** | **金色** | **/checkpoint** | **docs/plans/*-handoff-*.md** |
+| **交接点** | **`#handoff`** | **金色** | **/checkpoint** | **docs/plans/.handoff/** |
+
+> 规则（`.claude/rules/`）与架构决策 ADR 是 repo 注入层，文件不在 vault，不配色、不进 Dashboard（2026-06-01 诚实化，见 `docs/plans/2026-06-01-obsidian-integration-completeness.md`）。

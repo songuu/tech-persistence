@@ -25,12 +25,15 @@ Usage:
   bash install-codex.sh --all
   bash install-codex.sh --all --import-claude
   bash install-codex.sh --all --shared-homunculus ~/Documents/TechPersistence
+  bash install-codex.sh --obsidian [path]
 
 Options:
   --user           Install the Codex plugin to ~/plugins/tech-persistence and register marketplace.json.
   --project        Create .codex project directories and project templates.
   --all            Run --user and --project.
   --import-claude  Copy ~/.claude/homunculus to ~/.codex/homunculus when the Codex target does not exist.
+  --obsidian [path]
+                   Initialize the Codex homunculus vault (default ~/.codex/homunculus) for Obsidian.
   --shared-homunculus <path>
                    Configure Claude Code and Codex to use one shared homunculus/Obsidian vault.
   --allow-outside-home
@@ -316,9 +319,33 @@ import_claude_homunculus() {
   log_ok "imported Claude homunculus"
 }
 
+install_obsidian() {
+  log_section "Obsidian Vault 集成 (Codex)"
+  require_node
+  local vault_path="${HOMUNCULUS_DIR}"
+  if [[ -n "${OBSIDIAN_VAULT_PATH:-}" ]]; then
+    vault_path="$OBSIDIAN_VAULT_PATH"
+  elif [[ -n "${SHARED_HOMUNCULUS:-}" ]]; then
+    vault_path="$(resolve_user_path "$SHARED_HOMUNCULUS")"
+  fi
+
+  node "${SCRIPT_DIR}/scripts/init-obsidian-vault.js" --vault-path "$vault_path"
+
+  local mcp_snippet="${vault_path}/_mcp-config-snippet.json"
+  if [[ -f "$mcp_snippet" ]]; then
+    echo ""
+    log_warn "将以下 MCP 配置合并到 Codex 的 mcpServers 字段:"
+    cat "$mcp_snippet"
+    echo ""
+  fi
+  log_ok "Obsidian 集成完成: $vault_path"
+}
+
 run_user=false
 run_project=false
 run_import=false
+run_obsidian=false
+OBSIDIAN_VAULT_PATH=""
 SHARED_HOMUNCULUS=""
 ALLOW_OUTSIDE_HOME=false
 
@@ -333,6 +360,13 @@ while [[ $# -gt 0 ]]; do
     --project) run_project=true ;;
     --all) run_user=true; run_project=true ;;
     --import-claude) run_import=true ;;
+    --obsidian)
+      run_obsidian=true
+      if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then
+        OBSIDIAN_VAULT_PATH="$2"
+        shift
+      fi
+      ;;
     --shared-homunculus)
       SHARED_HOMUNCULUS="${2:-}"
       [[ -n "$SHARED_HOMUNCULUS" ]] || { echo "[FAIL] --shared-homunculus requires a path" >&2; exit 1; }
@@ -349,3 +383,4 @@ configure_shared_homunculus
 if [[ "$run_import" == true ]]; then import_claude_homunculus; fi
 if [[ "$run_user" == true ]]; then install_user; fi
 if [[ "$run_project" == true ]]; then install_project; fi
+if [[ "$run_obsidian" == true ]]; then install_obsidian; fi

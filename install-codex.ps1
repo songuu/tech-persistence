@@ -9,6 +9,8 @@ param(
     [switch]$Project,
     [switch]$All,
     [switch]$ImportClaude,
+    [switch]$Obsidian,
+    [string]$VaultPath,
     [string]$SharedHomunculus,
     [switch]$AllowOutsideHome,
     [switch]$Help
@@ -41,12 +43,16 @@ Usage:
   powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All
   powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All -ImportClaude
   powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All -SharedHomunculus "C:\Users\you\Documents\TechPersistence"
+  powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -Obsidian [-VaultPath <path>]
 
 Options:
   -User          Install the Codex plugin to ~/plugins/tech-persistence and register marketplace.json.
   -Project       Create .codex project directories and project templates.
   -All           Run -User and -Project.
   -ImportClaude  Copy ~/.claude/homunculus to ~/.codex/homunculus when the Codex target does not exist.
+  -Obsidian      Initialize the Codex homunculus vault (default ~/.codex/homunculus) for Obsidian.
+  -VaultPath <path>
+                 Override the vault path initialized by -Obsidian.
   -SharedHomunculus <path>
                  Configure Claude Code and Codex to use one shared homunculus/Obsidian vault.
   -AllowOutsideHome
@@ -442,6 +448,22 @@ function Import-ClaudeHomunculus {
     Write-OK "imported Claude homunculus"
 }
 
+function Install-Obsidian {
+    Write-Section "Obsidian Vault 集成 (Codex)"
+    Test-Node
+    $initScript = Join-Path $ScriptDir "scripts\init-obsidian-vault.js"
+    $targetVaultPath = if ($VaultPath) { $VaultPath } elseif ($SharedHomunculus) { Resolve-UserPath $SharedHomunculus } else { $HomunculusDir }
+    if (-not (Test-Path $initScript)) { Write-Warn "scripts/init-obsidian-vault.js not found"; return }
+    & node $initScript --vault-path $targetVaultPath
+    if ($LASTEXITCODE -ne 0) { throw "Obsidian vault initialization failed" }
+    $mcpSnippet = Join-Path $targetVaultPath "_mcp-config-snippet.json"
+    if (Test-Path $mcpSnippet) {
+        Write-Warn "将以下 MCP 配置合并到 Codex 的 mcpServers 字段:"
+        Get-Content $mcpSnippet -Raw | Write-Host
+    }
+    Write-OK "Obsidian 集成完成: $targetVaultPath"
+}
+
 if ($Help) {
     Show-Help
 } else {
@@ -454,6 +476,8 @@ if ($Help) {
         Install-User
     } elseif ($Project) {
         Install-Project
+    } elseif ($Obsidian) {
+        Install-Obsidian
     } else {
         Show-Help
     }

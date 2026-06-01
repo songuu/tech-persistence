@@ -21,15 +21,18 @@
 
 完整的 colorGroups 应该是：
 
+仅覆盖真正写入 vault 的 6 类产出（与 `scripts/init-obsidian-vault.js::generateGraphConfig` 一致）：
+
 | Tag | 颜色 | RGB 值 | 含义 |
 |-----|------|--------|------|
-| `#instinct` | 紫色 | 8667902 | 本能节点 |
-| `#session` | 绿色 | 4559462 | 会话摘要 |
-| `#rule` | 橙色 | 15105570 | 规则文件 |
-| `#solution` | 深绿 | 2930463 | 解决方案 |
-| `#architecture` | 红色 | 14423100 | 架构决策 |
-| `#handoff` | 金色 | 16761095 | Sprint 交接点 (**新增**) |
-| `#sprint` | 青色 | 2263842 | Sprint 文档 (**新增**) |
+| `#instinct` | 紫色 | 5373645 | 本能节点 |
+| `#memory` | 蓝色 | 3899638 | Memory v5 主题记忆 |
+| `#session` | 绿色 | 2263842 | 会话摘要 |
+| `#solution` | 深绿 | 65382 | 解决方案 |
+| `#sprint` | 青色 | 29695 | Sprint 文档 |
+| `#handoff` | 金色 | 16761095 | Sprint 交接点 |
+
+> 规则 / 架构决策是 repo 注入层（`.claude/rules/`），文件不在 vault，不配色（早期 `#rule` 橙 / `#architecture` 红已于 2026-06-01 移除，因永不命中）。
 
 ### `_templates/handoff.md` (新建)
 

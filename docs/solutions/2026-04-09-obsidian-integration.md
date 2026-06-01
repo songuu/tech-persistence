@@ -102,6 +102,8 @@ function yamlEscape(str) {
 | `#rule` | 橙色 | 规则文件 |
 | `#architecture` | 红色 | 架构决策 |
 
+> **勘误（2026-06-01）**：`#rule`/`#architecture` 配色实为空转——这两类文件在 git repo（`.claude/rules/`）而非 homunculus vault，配色永不命中。已移除，诚实化为「repo 注入层」。新增 `#memory` 蓝色。详见 `docs/plans/2026-06-01-obsidian-integration-completeness.md` 与 [[documented-claim-vs-code-reality-drift]]。
+
 ## 预防
 
 1. **任何生成 settings.json hooks 的脚本** → command 字段必须用 bash 语法（Windows 上也是 bash）。建议在测试环境先跑一次，确保无 `exit /b` 报错。

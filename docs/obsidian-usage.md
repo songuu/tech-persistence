@@ -4,15 +4,27 @@
 
 ## 核心概念
 
-tech-persistence 的知识产出分为 5 种类型，每种在 Obsidian 中有对应的 tag 和存储位置：
+tech-persistence 的知识产出分两层：**vault 图谱节点**（写入 homunculus vault，带 tag + 配色，在 Graph View / Dashboard 可见）和 **repo 注入层**（写入 git repo 的 `.claude/rules/`，供运行时注入，不进 vault graph）。
 
-| 类型 | Tag | 存储路径 | 产生方式 |
-|------|-----|----------|---------|
-| 本能 | `#instinct` | `instincts/personal/` 或 `projects/<id>/instincts/` | Hook 自动 + `/compound` |
-| 会话摘要 | `#session` | `projects/<id>/sessions/` | Stop Hook 自动 |
-| 解决方案 | `#solution` | `docs/solutions/` (项目级) | `/compound` 手动 |
-| 规则 | `#rule` | `.claude/rules/` 或 `.codex/rules/` (项目级) | `/compound` `/learn` |
-| 架构决策 | `#architecture` | `.claude/rules/architecture.md` 或 `.codex/rules/architecture.md` | `/compound` |
+### vault 图谱节点（6 类，Graph View + Dashboard 可见）
+
+| 类型 | Tag | Graph 颜色 | 存储路径 | 产生方式 |
+|------|-----|-----------|----------|---------|
+| 本能 | `#instinct` | 紫色 | `instincts/personal/` 或 `projects/<id>/instincts/` | Hook 自动 + `/compound` |
+| Memory | `#memory` | 蓝色 | `projects/<id>/memory/{topic}.md`、`MEMORY.md` | Stop Hook 自动 |
+| 会话摘要 | `#session` | 绿色 | `projects/<id>/sessions/` | Stop Hook 自动 |
+| 解决方案 | `#solution` | 深绿 | `docs/solutions/` (项目级) | `/compound` 手动 |
+| Sprint | `#sprint` | 青色 | `docs/plans/` (项目级) | `/sprint` |
+| 交接点 | `#handoff` | 金色 | `docs/plans/.handoff/` | Stop Hook 自动 + `/checkpoint` |
+
+### repo 注入层（不进 vault graph）
+
+| 类型 | 存储路径 | 产生方式 | 为何不进 vault |
+|------|----------|---------|---------------|
+| 规则 | `.claude/rules/` 或 `.codex/rules/` | `/compound` `/learn` | 文件在 git repo / 运行时注入目录，不在 homunculus vault；无 frontmatter |
+| 架构决策 (ADR) | `.claude/rules/architecture.md` | `/compound` | 同上；高价值 ADR 知识通过 Memory topic + solution 在 vault 间接可见 |
+
+> **历史勘误**：早期文档/配置曾给 `#rule`(橙)/`#architecture`(红) 配色并声称接入 Graph，但这两类文件物理上不在 vault，配色永不命中（空转）。2026-06-01 起诚实化为「repo 注入层」，graph 配色仅覆盖上方 6 类真正写入 vault 的产出。详见 `docs/plans/2026-06-01-obsidian-integration-completeness.md`。
 
 ---
 
@@ -45,7 +57,7 @@ $compound
 `/compound` 会产出：
 - 本能文件（`instincts/*.md`）→ Obsidian 中 `#instinct` 节点
 - 解决方案（`docs/solutions/*.md`）→ Obsidian 中 `#solution` 节点
-- 规则更新（`.claude/rules/*.md` 或 `.codex/rules/*.md`）→ 项目级知识
+- 规则更新（`.claude/rules/*.md` 或 `.codex/rules/*.md`）→ repo 注入层（不进 vault graph）
 
 切换到 Obsidian，刷新即可看到新节点。
 
@@ -54,10 +66,13 @@ $compound
 打开 Obsidian 的 **Graph View**（快捷键 `Ctrl/Cmd + G`）：
 
 - **紫色节点**（`#instinct`）= 你的行为本能
+- **蓝色节点**（`#memory`）= Memory v5 主题记忆
 - **绿色节点**（`#session`）= 会话历史
 - **深绿节点**（`#solution`）= 解决方案
-- **橙色节点**（`#rule`）= 规则
-- **红色节点**（`#architecture`）= 架构决策
+- **青色节点**（`#sprint`）= Sprint 文档
+- **金色节点**（`#handoff`）= Sprint 交接点
+
+> 规则（`.claude/rules/`）与架构决策是 repo 注入层，不在 vault graph 中。
 
 节点之间的连线 = `[[wikilinks]]`，表示知识间的关联。例如：
 - 一个 session 链接到它产生的 instincts
@@ -274,18 +289,34 @@ MCPVault 提供 14 个 MCP 工具：
 
 ```
 Claude Code / Codex 会话
-  ├─ Hook 自动 → observations.jsonl (Obsidian 忽略)
+  ├─ Hook 自动 → observations.jsonl (jsonl，Obsidian 忽略)
   ├─ Stop Hook → sessions/*.md (#session)
+  │            → projects/<id>/memory/{topic}.md, MEMORY.md (#memory)
   ├─ /compound  → instincts/*.md (#instinct)
   │              → docs/solutions/*.md (#solution)
-  │              → .claude/rules/*.md 或 .codex/rules/*.md (#rule)
+  │              → .claude/rules/*.md 或 .codex/rules/*.md (repo 注入层，不进 vault graph)
   └─ /evolve    → evolved/skills/*.md
                  → evolved/rules/*.md
 
-所有 .md 文件 → Obsidian Vault → Graph View 可视化
-                               → Dataview 查询
-                               → 全文搜索
+vault 内 .md 文件 → Obsidian Graph View / Dataview / 全文搜索
 ```
+
+### 为什么看不到原始数据（.jsonl）
+
+`.obsidianignore` 排除所有 `*.jsonl`，因为它们是**机器格式的原始采集层**，不适合人工浏览：
+
+| 文件 | 用途 |
+|------|------|
+| `projects/<id>/observations.jsonl` | Tier 0 工具调用观察 |
+| `skill-signals/*.jsonl` | Skill 使用信号 |
+| `skill-evals/<name>/results.jsonl`、`cases.jsonl` | Skill 评测结果/用例 |
+| `telemetry/recall-usage.jsonl`、`memory-recall.jsonl` | 召回 telemetry |
+
+你看到的所有 Markdown 节点都是 Hook/命令从这些 jsonl 派生出来的高价值产物。需要查原始数据时直接用编辑器打开 jsonl，不经 Obsidian。
+
+### Persona（用户画像）
+
+`projects/<id>/memory/persona.md`（ADR-015 引入的 5 字段画像）由 `/compound` 维护。若希望它在 Graph View / Dashboard 可见，frontmatter 加 `tags: [persona]` 即可（Dashboard Quick Links 已含 `[[persona]]` 跳转）。persona 是单文件低频信号，默认无专属配色。
 
 ---
 
@@ -340,12 +371,20 @@ SORT checkpoint_number ASC
 
 ## 完整知识类型映射
 
+### vault 图谱节点（带 Graph 配色 + Dashboard 查询，三方一致）
+
 | 类型 | Tag | Graph 颜色 | 产生方式 |
 |------|-----|-----------|---------|
 | 本能 | `#instinct` | 紫色 | Hook + /compound |
+| Memory | `#memory` | 蓝色 | Stop Hook |
 | 会话 | `#session` | 绿色 | Stop Hook |
 | 解决方案 | `#solution` | 深绿 | /compound |
-| 规则 | `#rule` | 橙色 | /compound /learn |
-| 架构决策 | `#architecture` | 红色 | /compound |
 | Sprint | `#sprint` | 青色 | /sprint |
 | 交接点 | `#handoff` | 金色 | Stop Hook 自动 + /checkpoint |
+
+### repo 注入层（不进 vault graph）
+
+| 类型 | 路径 | 产生方式 |
+|------|------|---------|
+| 规则 | `.claude/rules/`、`.codex/rules/` | /compound /learn |
+| 架构决策 | `.claude/rules/architecture.md` | /compound |
