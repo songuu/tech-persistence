@@ -373,14 +373,14 @@ function Initialize-Homunculus {
     Update-ObsidianIfExists
 }
 
-# 存在即刷新：vault 已存在则同步最新 tag 类配置（幂等）。不创建新 vault。
+# Refresh existing vault config when present. Do not create a new vault.
 function Update-ObsidianIfExists {
     if (-not (Test-Path (Join-Path $HomunculusDir ".obsidian"))) { return }
     $initScript = Join-Path $ScriptDir "scripts\init-obsidian-vault.js"
     if (-not (Test-Path $initScript)) { return }
     try {
         & node $initScript --vault-path $HomunculusDir *> $null
-        if ($LASTEXITCODE -eq 0) { Write-OK "Obsidian vault 配置已刷新" }
+        if ($LASTEXITCODE -eq 0) { Write-OK "Obsidian vault config refreshed" }
     } catch { }
 }
 
@@ -462,7 +462,7 @@ function Import-ClaudeHomunculus {
 }
 
 function Install-Obsidian {
-    Write-Section "Obsidian Vault 集成 (Codex)"
+    Write-Section "Obsidian Vault integration (Codex)"
     Test-Node
     $initScript = Join-Path $ScriptDir "scripts\init-obsidian-vault.js"
     $targetVaultPath = if ($VaultPath) { $VaultPath } elseif ($SharedHomunculus) { Resolve-UserPath $SharedHomunculus } else { $HomunculusDir }
@@ -471,10 +471,10 @@ function Install-Obsidian {
     if ($LASTEXITCODE -ne 0) { throw "Obsidian vault initialization failed" }
     $mcpSnippet = Join-Path $targetVaultPath "_mcp-config-snippet.json"
     if (Test-Path $mcpSnippet) {
-        Write-Warn "将以下 MCP 配置合并到 Codex 的 mcpServers 字段:"
+        Write-Warn "Merge this MCP config into Codex mcpServers:"
         Get-Content $mcpSnippet -Raw | Write-Host
     }
-    Write-OK "Obsidian 集成完成: $targetVaultPath"
+    Write-OK "Obsidian integration complete: $targetVaultPath"
 }
 
 if ($Help) {
