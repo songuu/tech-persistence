@@ -365,7 +365,7 @@ SessionStart hook 会注入 caveman 规则；如需关闭自动激活，设置 `
 bash install.sh --obsidian       # Claude vault
 bash install-codex.sh --obsidian # Codex vault
 ```
-参考 `docs/obsidian-setup.md` 完成 Claude 独立、Codex 独立或共享 vault 配置。
+**首次需显式 opt-in**（上面的 flag），保持非 Obsidian 用户零打扰。一旦 homunculus dir 成为 vault（含 `.obsidian/`），后续每次 `install`/`-User` 会**自动刷新** graph.json colorGroups 与 Dashboard，使配色/查询随新增产出类型保持同步——刷新幂等（无变化不写、不产生 `.bak`），且保留你在图谱界面调的布局偏好。参考 `docs/obsidian-setup.md` 完成 Claude 独立、Codex 独立或共享 vault 配置。
 
 ---
 

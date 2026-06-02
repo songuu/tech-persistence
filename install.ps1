@@ -176,6 +176,8 @@ function Install-User {
         Set-Content (Join-Path $HomunculusDir "projects.json") "{}" -Encoding UTF8
     }
 
+    Update-ObsidianIfExists
+
     # Settings.json
     $us = Join-Path $ClaudeHome "settings.json"
     if (-not (Test-Path $us)) {
@@ -241,6 +243,17 @@ function Install-Obsidian {
     } else {
         Write-Warn "scripts/init-obsidian-vault.js not found"
     }
+}
+
+# 存在即刷新：homunculus dir 已是 Obsidian vault 时同步最新 tag 类配置（幂等）。不创建新 vault。
+function Update-ObsidianIfExists {
+    if (-not (Test-Path (Join-Path $HomunculusDir ".obsidian"))) { return }
+    $initScript = Join-Path $ScriptDir "scripts/init-obsidian-vault.js"
+    if (-not (Test-Path $initScript)) { return }
+    try {
+        & node $initScript --vault-path $HomunculusDir *> $null
+        if ($LASTEXITCODE -eq 0) { Write-OK "Obsidian vault 配置已刷新" }
+    } catch { }
 }
 
 # Check Node.js

@@ -8,7 +8,8 @@
  *   2. 创建 _templates/ 模板（供 Templater 插件使用）
  *   3. 配置排除规则（.jsonl, archive/ 等非 markdown 文件）
  *   4. 生成 MCP Server 配置片段
- *   5. 不覆盖已有 .obsidian/ 配置
+ *   5. 幂等：已有 vault 只刷新系统管理的派生配置（graph.json colorGroups / Dashboard），
+ *      保留用户偏好（app.json / appearance.json / graph 布局）；无变化则不写、不产生备份
  *
  * 用法：
  *   node scripts/init-obsidian-vault.js [--vault-path <path>] [--claude|--codex|--shared]
@@ -168,6 +169,13 @@ function generateGraphConfig() {
     scale: 1,
     close: false
   };
+}
+
+// ─── graph.json 刷新：只替换系统管理的 colorGroups，保留用户布局偏好 ───
+// colorGroups（tag→color 映射）是随产出类型演化的派生配置，必须与最新 tag 类同步；
+// 其余字段（scale/forces/repelStrength 等）是用户在 Obsidian 图谱界面里调的布局偏好，保留不动。
+function mergeGraphColorGroups(existing) {
+  return { ...existing, colorGroups: generateGraphConfig().colorGroups };
 }
 
 // ─── 模板文件 ───
@@ -410,25 +418,48 @@ function main() {
     console.log('   📁 创建 vault 目录');
   }
 
-  // .obsidian/ 配置
+  // .obsidian/ 配置（缺失项补齐；graph.json 已存在则刷新 colorGroups 保留布局偏好）
   const obsidianDir = path.join(vaultPath, '.obsidian');
-  if (fs.existsSync(obsidianDir)) {
-    console.log('   ⚠️  .obsidian/ 已存在，跳过覆盖');
-  } else {
-    fs.mkdirSync(obsidianDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(obsidianDir, 'app.json'),
-      JSON.stringify(generateAppConfig(), null, 2)
-    );
-    fs.writeFileSync(
-      path.join(obsidianDir, 'appearance.json'),
-      JSON.stringify(generateAppearanceConfig(), null, 2)
-    );
-    fs.writeFileSync(
-      path.join(obsidianDir, 'graph.json'),
-      JSON.stringify(generateGraphConfig(), null, 2)
-    );
+  fs.mkdirSync(obsidianDir, { recursive: true });
+
+  // app.json / appearance.json 是用户偏好，仅在缺失时写入，不覆盖已有自定义
+  const appPath = path.join(obsidianDir, 'app.json');
+  if (!fs.existsSync(appPath)) {
+    fs.writeFileSync(appPath, JSON.stringify(generateAppConfig(), null, 2));
+  }
+  const appearancePath = path.join(obsidianDir, 'appearance.json');
+  if (!fs.existsSync(appearancePath)) {
+    fs.writeFileSync(appearancePath, JSON.stringify(generateAppearanceConfig(), null, 2));
+  }
+
+  // graph.json：缺失则全量生成；已存在则只刷新 colorGroups（与最新产出类型同步），布局偏好保留。
+  // 幂等：合并结果与现状一致时不写、不备份，避免重复安装堆积 .bak 垃圾。
+  const graphPath = path.join(obsidianDir, 'graph.json');
+  if (!fs.existsSync(graphPath)) {
+    fs.writeFileSync(graphPath, JSON.stringify(generateGraphConfig(), null, 2));
     console.log('   ✅ .obsidian/ 配置生成');
+  } else {
+    let existingGraph = null;
+    try {
+      existingGraph = JSON.parse(fs.readFileSync(graphPath, 'utf-8'));
+    } catch {
+      existingGraph = null;
+    }
+    if (!existingGraph || typeof existingGraph !== 'object') {
+      // 解析失败/格式异常：备份后重写为 canonical，避免静默丢弃用户文件
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
+      fs.copyFileSync(graphPath, graphPath + '.bak.' + ts);
+      fs.writeFileSync(graphPath, JSON.stringify(generateGraphConfig(), null, 2));
+      console.log('   ✅ graph.json 损坏已重写 (旧版已备份)');
+    } else {
+      const merged = mergeGraphColorGroups(existingGraph);
+      if (JSON.stringify(merged) !== JSON.stringify(existingGraph)) {
+        fs.writeFileSync(graphPath, JSON.stringify(merged, null, 2));
+        console.log('   ✅ graph.json colorGroups 已刷新 (布局偏好保留)');
+      } else {
+        console.log('   ⚠️  graph.json colorGroups 已是最新，跳过');
+      }
+    }
   }
 
   // .obsidianignore（存在则合并，不覆盖用户自定义）
@@ -461,16 +492,22 @@ function main() {
   const inboxDir = path.join(vaultPath, '_inbox');
   fs.mkdirSync(inboxDir, { recursive: true });
 
-  // Dashboard
+  // Dashboard（系统管理的 MOC；幂等：与 canonical 一致则跳过，避免重复安装堆积 .bak 垃圾）
   const dashboardPath = path.join(vaultPath, 'Dashboard.md');
+  const dashboardContent = generateDashboard();
   if (fs.existsSync(dashboardPath)) {
-    // Backup and regenerate with new queries
-    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
-    fs.copyFileSync(dashboardPath, dashboardPath + '.bak.' + ts);
-    fs.writeFileSync(dashboardPath, generateDashboard());
-    console.log('   ✅ Dashboard.md 更新 (旧版已备份)');
+    const existingDashboard = fs.readFileSync(dashboardPath, 'utf-8');
+    if (existingDashboard === dashboardContent) {
+      console.log('   ⚠️  Dashboard.md 已是最新，跳过');
+    } else {
+      // 内容有差异（drift 或用户手改）才备份后重写
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
+      fs.copyFileSync(dashboardPath, dashboardPath + '.bak.' + ts);
+      fs.writeFileSync(dashboardPath, dashboardContent);
+      console.log('   ✅ Dashboard.md 更新 (旧版已备份)');
+    }
   } else {
-    fs.writeFileSync(dashboardPath, generateDashboard());
+    fs.writeFileSync(dashboardPath, dashboardContent);
     console.log('   ✅ Dashboard.md 知识仪表板');
   }
 
@@ -508,6 +545,7 @@ if (require.main === module) {
 
 module.exports = {
   generateGraphConfig,
+  mergeGraphColorGroups,
   generateDashboard,
   generateAppConfig,
   parseArgs,

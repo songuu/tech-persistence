@@ -2,7 +2,19 @@
 
 > 在已有的 Obsidian vault 中执行以下操作，添加新的 tag 颜色分组。
 
-## 需要更新的文件
+## 最简方式：重跑安装器（存在即刷新，推荐）
+
+自 2026-06-01 起，**只要 homunculus dir 已是 vault（含 `.obsidian/`），重跑安装即自动刷新** graph.json colorGroups 与 Dashboard：
+
+```bash
+bash install.sh --user          # 或 install-codex.sh / -User
+# 也可直接显式刷新：
+node scripts/init-obsidian-vault.js --vault-path ~/.claude/homunculus
+```
+
+刷新是**外科式 + 幂等**：只替换系统管理的 colorGroups（随新增产出类型同步），保留你在图谱界面调的布局偏好（scale/forces 等）；无变化则不写、不产生 `.bak`。下面的手动编辑表仅作为「不重跑安装时」的参考。
+
+## 需要更新的文件（手动 fallback）
 
 ### `.obsidian/graph.json`
 

@@ -180,6 +180,14 @@ install_homunculus() {
     log_ok "projects.json — 项目注册表"
   fi
 
+  # 存在即刷新：homunculus dir 已是 Obsidian vault 时同步最新 tag 类配置（幂等，无变化不写）。
+  # 不创建新 vault——非 Obsidian 用户零打扰；真用户的 graph.json/Dashboard 始终与最新产出类型同步。
+  if [[ -d "${HOMUNCULUS_DIR}/.obsidian" ]]; then
+    if node "${SCRIPT_DIR}/scripts/init-obsidian-vault.js" --vault-path "${HOMUNCULUS_DIR}" >/dev/null 2>&1; then
+      log_ok "Obsidian vault 配置已刷新"
+    fi
+  fi
+
   log_ok "Homunculus 目录结构就绪"
 }
 

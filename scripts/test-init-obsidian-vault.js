@@ -13,7 +13,7 @@
  */
 
 const assert = require('assert');
-const { generateGraphConfig, generateDashboard } = require('./init-obsidian-vault');
+const { generateGraphConfig, mergeGraphColorGroups, generateDashboard } = require('./init-obsidian-vault');
 
 let passed = 0;
 let failed = 0;
@@ -102,6 +102,34 @@ test('NEG: dashboard missing #memory query is flagged as drift', () => {
   const drift = checkThreeWayConsistency(generateGraphConfig(), tampered, EXPECTED_VAULT_TAGS);
   assert.ok(drift.length > 0, '漏 memory 查询后应检测到漂移');
   assert.ok(drift.some((d) => d.includes('dashboard')), '漂移应指向 dashboard dataview');
+});
+
+// ─── 存在即刷新：mergeGraphColorGroups 保留布局偏好，只替换 colorGroups ───
+test('merge refreshes colorGroups to canonical (drift fix)', () => {
+  // 模拟用户 vault 里过期的 graph.json（含 #rule 空转 + 漏 memory + 自定义布局）
+  const stale = {
+    scale: 2.5,
+    repelStrength: 42,
+    customUserField: 'keep-me',
+    colorGroups: [
+      { query: 'tag:#instinct', color: { a: 1, rgb: 5373645 } },
+      { query: 'tag:#rule', color: { a: 1, rgb: 16744192 } },
+    ],
+  };
+  const merged = mergeGraphColorGroups(stale);
+  // colorGroups 刷新为 canonical（6 类，无 rule）
+  assert.deepStrictEqual(graphTags(merged), EXPECTED_VAULT_TAGS);
+  // 用户布局偏好原样保留
+  assert.strictEqual(merged.scale, 2.5, 'scale 布局偏好应保留');
+  assert.strictEqual(merged.repelStrength, 42, 'repelStrength 布局偏好应保留');
+  assert.strictEqual(merged.customUserField, 'keep-me', '未知用户字段应保留');
+});
+
+test('merge is idempotent on canonical config (no junk .bak)', () => {
+  const canonical = generateGraphConfig();
+  const merged = mergeGraphColorGroups(canonical);
+  // 幂等：canonical 再 merge 应字节一致，安装器据此跳过写入、不产生备份
+  assert.strictEqual(JSON.stringify(merged), JSON.stringify(canonical));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

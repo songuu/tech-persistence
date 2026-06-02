@@ -106,7 +106,9 @@
       "PowerShell(node scripts/sync-solution-index.js --all 2>&1 | Select-Object -Last 10)",
       "PowerShell(git add *)",
       "PowerShell(node scripts/test-recall-usage.js; \"=== test-recall-usage exit: $LASTEXITCODE ===\")",
-      "PowerShell(node scripts/test-init-obsidian-vault.js)"
+      "PowerShell(node scripts/test-init-obsidian-vault.js)",
+      "PowerShell(Resolve-Path *)",
+      "Bash(echo \"=== exit: $? ===\")"
     ]
   }
 }

@@ -127,7 +127,7 @@ agent-loop orchestration intent
 
 1. **状态写入口收口（已落地）**：`pipeline-state.js` 已提供 `transitionRun()` / `transitionSlice()` 统一入口，`pipeline.js` 与 `pipeline-providers.js` 的 run/slice 状态推进已收口，transition event 记录 `from` / `to` / `reason` / `actor` / `source`。
 2. **`ownedFiles` diff gate（已落地）**：slice implementation provider 前后会快照 changed files 并做文件指纹比较，touched files 必须落在 `ownedFiles` 或 `generated` / `managed` exception 内；结果写入 `changed-files-gate.json` 并进入 review prompt。架构文档 §13.3 已更新。
-3. **slice transaction boundary（仅 review/validation 侧）**：实现失败侧已落地——`blockFailedSlice`（`pipeline.js:120`）含 `releaseSliceLocks` + 转移到 `IMPLEMENTATION_FAILED`，调用点 `pipeline.js:576/583`。仍缺的是 review / validation 失败的等价 failure artifact、lock release/retain 与 retry 状态。
+3. **slice transaction boundary（仅 review/validation 侧）**：实现失败侧已落地——`blockFailedSlice`（`pipeline.js:111`）含 `releaseSliceLocks` + 转移到 `IMPLEMENTATION_FAILED`，调用点 `pipeline.js:559/566`。仍缺的是 review / validation 失败的等价 failure artifact、lock release/retain 与 retry 状态。
 4. **permission / cost budget artifact（前瞻需求，非既有债务）**：架构文档 §13 限制清单未登记此项，属本 plan 为 backend seam 引入的前瞻需求；且 Claude workflow runtime 已自带 `budget` 对象与并发上限。降级为"随 backend seam 一起做"，不作为独立前置阻塞。
 
 第 1~3 条是 pipeline 自身债务（与 Claude workflow 无关），由上述 in-progress roadmap 推进；第 4 条随 seam 落地。
@@ -201,6 +201,7 @@ Claude workflow 的 same-session resume 很有价值，但不等价于 `agent-lo
 | 2026-06-01 | execution | 继续执行 roadmap Task 6：Codex projection provider provenance 已通过 build 脚本保留并由 plugin validator 检查，roadmap 进度更新为 6/8 |
 | 2026-06-01 | execution | 继续执行 roadmap Task 7：`docs/plans` source-of-truth resolver、prototype sourceType 注入、测试与 plugin projection validator 已落地，roadmap 进度更新为 7/8 |
 | 2026-06-01 | execution | 执行 roadmap Task 8：root/plugin self-test、preflight、pipeline dry-run、plugin/install validators、上下文注入测试、`git diff --check` 已通过，roadmap 完成 8/8 |
+| 2026-06-02 | audit | 完整性核验：§B 全部 "已落地" claim 经代码核实为真（`transitionRun/transitionSlice`、`changed-files-gate.json`、`blockFailedSlice`+`releaseSliceLocks`+`IMPLEMENTATION_FAILED`、roadmap 8/8、solution index 三处同步）。仅 §B3 行号漂移，已校正 `pipeline.js:120→111`、调用点 `576/583→559/566` |
 
 ---
 

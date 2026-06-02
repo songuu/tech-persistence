@@ -163,3 +163,21 @@ T9 一致性测试需枚举边界：(a) 全部 8 类对齐 → pass；(b) 故意
 - **核心成果**：Obsidian 接入从「README 吹 8 类、真接入 5 类」诚实化为「6 类 vault 图谱节点三方一致 + 2 类 repo 注入层明示」。memory 真接入（graph 蓝色 + Dashboard 查询）；install-codex parity 补齐；session Dashboard 漏查补齐。
 - **元经验**：drift-fix sprint 的初次审计（即便 3 个并行 agent）仍会漏掉同类 claim 的次要副本（sprint-usage/update 色表）与「配色有但 Dashboard 漏查」这类非对称 drift。**必须在 Review 阶段对所有 claim 关键词做一次全仓 grep 兜底**，否则修了主文档留了副本 = drift 没真消除。见 [[documented-claim-vs-code-reality-drift]]。
 - **三方一致性测试固化**：`test-init-obsidian-vault.js` 把「graph 配色 == Dashboard 查询 == 期望 vault 类」变成确定性 gate，防止未来重新引入空转配色（[[ADR-013]] mechanism-over-discipline 在 Obsidian 接入维度的落点）。
+
+## Follow-up（2026-06-01）：是否自动接入 → 「存在即刷新」策略
+
+**问题**：用户问"是否需要自动接入 Obsidian"。厘清两层后定策略：
+- **知识持久化层**（hook 写 memory/topic/solution/session markdown）—— 早已自动，不依赖 Obsidian。
+- **vault 可视化脚手架**（graph.json/Dashboard）—— 此前仅 `--obsidian` opt-in；真实痛点是「系统加新 tag 类（如本 sprint 加 `#memory`）后，用户已有 vault 的配置静默过期」。
+
+**决策（用户选）：存在即刷新**——安装时检测 homunculus dir 已有 `.obsidian/` 则自动刷新派生配置，无则不创建。非 Obsidian 用户零打扰（守 `轻量优先`），真用户配置始终与最新产出类型同步。
+
+**关键勘察发现**：`init-obsidian-vault.js` 旧逻辑 `.obsidian/` 存在则**整体跳过**（line 415-416）→ graph.json colorGroups 永不刷新，无法承接"刷新"语义。
+
+**改动**：
+- `init-obsidian-vault.js`：(a) 新增 `mergeGraphColorGroups(existing)`——只替换系统管理的 colorGroups，保留用户布局偏好（scale/forces/未知字段）；(b) `.obsidian/` 存在时 graph.json 改为「解析→merge colorGroups→仅在有差异时写」，解析失败则备份重写；app.json/appearance.json 仅缺失时写（不覆盖用户偏好）；(c) Dashboard 幂等化——与 canonical 一致则跳过，避免重复安装堆 `.bak` 垃圾（[[feedback_ephemeral_artifact_three_piece_set]]）。
+- 4 安装器（install.sh / install.ps1 / install-codex.sh / install-codex.ps1）：homunculus 初始化函数末尾加「`.obsidian/` 存在 → 静默调 init 刷新」，fail-open。双运行时 parity（[[ADR-011]]）。
+- `test-init-obsidian-vault.js`：+2 测试（merge 保留布局偏好/替换 colorGroups；canonical 幂等）。真实 FS dogfood 验证：刷新修 drift（6 类、去 #rule）+ 保留 scale/repelStrength/app 偏好 + 二次运行零新 `.bak`。
+- 验证：8/8 obsidian 测试、全量 22 suite、pre-commit exit 0、4 安装器语法解析全过。
+
+**设计原则沉淀**：派生配置（colorGroups/Dashboard）= 系统管理，应随产出类型演化自动刷新；用户偏好（布局/app/appearance）= 保留不动。两者在同一文件（graph.json）共存时用**外科式字段合并 + 幂等写**区分，而非整体覆盖或整体跳过。

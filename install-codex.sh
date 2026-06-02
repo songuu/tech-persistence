@@ -237,6 +237,13 @@ initialize_homunculus() {
     log_ok "homunculus config.json"
   fi
   [[ -f "${HOMUNCULUS_DIR}/projects.json" ]] || printf '{}\n' > "${HOMUNCULUS_DIR}/projects.json"
+
+  # 存在即刷新：vault 已存在则同步最新 tag 类配置（幂等，无变化不写）。不创建新 vault。
+  if [[ -d "${HOMUNCULUS_DIR}/.obsidian" ]]; then
+    if node "${SCRIPT_DIR}/scripts/init-obsidian-vault.js" --vault-path "${HOMUNCULUS_DIR}" >/dev/null 2>&1; then
+      log_ok "Obsidian vault 配置已刷新"
+    fi
+  fi
 }
 
 install_codex_user_assets() {
