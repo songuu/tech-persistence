@@ -92,8 +92,10 @@ test('upsertSolutionSection inserts technical sediment section when missing', ()
   const entries = collectSolutions(repo);
   const before = fs.readFileSync(path.join(repo, 'AGENTS.md'), 'utf-8');
   const after = upsertSolutionSection(before, entries);
+  const afterSecondRun = upsertSolutionSection(after, entries);
   assert.ok(after.includes('## 技术沉淀（通用经验）'));
   assert.ok(after.indexOf('### 解决方案索引') < after.indexOf('## 当前迭代重点'));
+  assert.strictEqual(afterSecondRun, after);
   fs.rmSync(repo, { recursive: true, force: true });
 });
 

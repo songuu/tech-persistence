@@ -1,6 +1,6 @@
 ---
 name: review
-description: Codex-compatible entry point for the former /review command. 多角度代码审查：安全/性能/架构/质量/测试覆盖(风险自适应)
+description: Codex-compatible entry point for the former /review command. 多角度代码审查：安全/性能/架构/质量/测试覆盖(风险自适应) + design lens 条件触发
 ---
 
 # Review

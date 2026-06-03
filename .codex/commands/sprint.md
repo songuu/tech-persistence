@@ -232,7 +232,7 @@ Caveman mode 输出只展示任务表和验证策略；完整方案写入 sprint
 
 ### Phase 3: Work (含自动 checkpoint)
 
-> 同批 `[P]` task 在支持 Agent spawn 的 runtime 下通过 `/work` 的 **Worker spawn 协议**真并行实施（用 Agent tool 的 `isolation: "worktree"` 隔离）；Codex CLI 端保留 batch fallback。详见 `work.md` 的「Worker spawn 协议」段。
+> 同批 `[P]` task 在 Codex runtime 下通过 `/work` 的 **Worker spawn 协议**真并行实施（用 Agent tool 的 `isolation: "worktree"` 隔离）；Codex CLI 端保留 batch fallback。详见 `work.md` 的「Worker spawn 协议」段。
 
 ```
 Phase 3/5: Work
@@ -291,7 +291,7 @@ Next: Task N+1
 
 ### Phase 4: Review (暂停确认)
 
-> 支持 Agent spawn 的 runtime 下 `/review` 通过 **Spawn 协议**真并行 spawn 5 reviewer 子进程（按 risk-aware dispatch matrix 选定子集），共享 4 status 返回契约（DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED）。任一 reviewer 报 `BLOCKED` 即使 `--auto` 也强制人工 gate。Codex CLI 端保留 inline 5 视角 fallback。详见 `review.md` 的「Spawn 协议」段。
+> Codex runtime 下 `/review` 通过 **Spawn 协议**真并行 spawn 5 reviewer 子进程（按 risk-aware dispatch matrix 选定子集），共享 4 status 返回契约（DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED）。任一 reviewer 报 `BLOCKED` 即使 `--auto` 也强制人工 gate。Codex CLI 端保留 inline 5 视角 fallback。详见 `review.md` 的「Spawn 协议」段。
 
 ```
 Phase 4/5: Review

@@ -9,6 +9,7 @@
  *   - caveman-activate.readConfigMode: 无文件 / 有 bad json / 正常 三种路径
  *   - caveman-activate.VALID_MODES 完整性
  *   - observe.js exports 完整性（getObservationPath 路径派生）
+ *   - guard-handoff-path 顶层 handoff 写入阻断
  *   - 守卫验证：require 不触发 main 副作用
  *
  * 防御：[[2026-05-09 hooks, observability]] hook 守卫纪律 + [[D4]] hook 入口可测性
@@ -267,6 +268,45 @@ test('E3 evaluate-session autoCheckpoint writes handoffs under docs/plans/.hando
       'handoff must not be written to top-level docs/plans'
     );
   });
+});
+
+test('E4 guard-handoff-path blocks direct top-level handoff writes', () => {
+  const guard = require('./guard-handoff-path.js');
+  const payload = JSON.stringify({
+    tool_name: 'Write',
+    input: { file_path: 'docs/plans/2026-06-02-demo-handoff-1.md' },
+  });
+
+  assert.deepStrictEqual(
+    guard.findTopLevelHandoffPaths(payload),
+    ['docs/plans/2026-06-02-demo-handoff-1.md']
+  );
+});
+
+test('E5 guard-handoff-path allows .handoff writes and read-only shell references', () => {
+  const guard = require('./guard-handoff-path.js');
+  const allowedPayload = JSON.stringify({
+    tool_name: 'Write',
+    input: { file_path: 'docs/plans/.handoff/2026-06-02-demo-handoff-1.md' },
+  });
+  const shellPayload = JSON.stringify({
+    tool_name: 'functions.shell_command',
+    input: { command: 'rg "docs/plans/2026-06-02-demo-handoff-1.md" docs' },
+  });
+
+  assert.deepStrictEqual(guard.findTopLevelHandoffPaths(allowedPayload), []);
+  assert.deepStrictEqual(guard.findTopLevelHandoffPaths(shellPayload), []);
+});
+
+test('E6 plugin hook config runs handoff guard before async observe hook', () => {
+  const { buildPluginHookConfig } = require('./lib/hook-registry');
+  const config = buildPluginHookConfig();
+  const preToolUse = config.hooks.PreToolUse.find((entry) => entry.matcher === '*');
+  assert.ok(preToolUse, 'missing PreToolUse * entry');
+  assert.ok(preToolUse.hooks.length >= 2, 'expected guard + observe hooks');
+  assert.ok(preToolUse.hooks[0].command.includes('guard-handoff-path.js'));
+  assert.strictEqual(preToolUse.hooks[0].async, false);
+  assert.ok(preToolUse.hooks[1].command.includes('observe.js pre'));
 });
 
 // ============================================================

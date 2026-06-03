@@ -50,7 +50,7 @@ description: "工程师模式：按计划逐步实现，每步按风险等级自
 
 **目的**：用 Codex Agent tool 真 spawn N 个独立 worker 子进程并行实施 `[P]` 同批 task，达成 3 个核心目标 —— 分工明确（每 worker 单一 task 单一文件清单）+ 减少总时间（N×T → 1×T）+ 提高效率（独立 worktree 隔离 + 模型分层）。
 
-> 以下"真并行 spawn"仅对支持 Agent spawn 的 runtime 生效。Codex CLI 见下方「Multi-runtime fallback」段。
+> 以下"真并行 spawn"仅对 Codex runtime 生效。Codex CLI 见下方「Multi-runtime fallback」段。
 
 ### 触发条件
 

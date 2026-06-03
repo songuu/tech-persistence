@@ -369,19 +369,21 @@ function copyHooks() {
     path.join(targetDir, 'hooks.json'),
     `${JSON.stringify(buildPluginHookConfig(), null, 2)}\n`
   );
-  [
+  const hookScripts = [
     'caveman-activate.js',
     'inject-context.js',
+    'guard-handoff-path.js',
     'observe.js',
     'evaluate-session.js',
     'prompt-submit.js',
-  ].forEach((name) => {
+  ];
+  hookScripts.forEach((name) => {
     copyTextFile(path.join(repoRoot, 'scripts', name), path.join(targetDir, name), false);
   });
   const hookLibCount = copyHookLibs(targetDir);
   writeTextFile(path.join(targetDir, 'run-hook.js'), runHookJs);
   writeTextFile(path.join(targetDir, 'run-hook.cmd'), runHookCmd);
-  return 5 + hookLibCount + 3;
+  return hookScripts.length + hookLibCount + 3;
 }
 
 function copyHomunculusTemplate() {

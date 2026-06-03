@@ -60,6 +60,21 @@ const LOGICAL_HOOKS = Object.freeze([
     },
   },
   {
+    id: 'guard-handoff-path-before-write',
+    lifecycle: 'pre-tool-use',
+    script: 'guard-handoff-path.js',
+    args: [],
+    targets: {
+      [HOOK_TARGETS.PLUGIN_RUNTIME]: {
+        event: 'PreToolUse',
+        matcher: '*',
+        timeout: 1000,
+        async: false,
+        statusMessage: 'Checking handoff path',
+      },
+    },
+  },
+  {
     id: 'observe-tool-before',
     lifecycle: 'pre-tool-use',
     script: 'observe.js',

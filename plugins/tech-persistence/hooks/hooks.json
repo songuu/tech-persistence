@@ -40,6 +40,13 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" guard-handoff-path.js",
+            "async": false,
+            "timeout": 1000,
+            "statusMessage": "Checking handoff path"
+          },
+          {
+            "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" observe.js pre",
             "async": true,
             "timeout": 2000

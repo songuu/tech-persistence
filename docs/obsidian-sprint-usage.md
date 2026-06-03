@@ -13,7 +13,7 @@
   ↓ Task 5 完成
   ↓ Claude 建议 checkpoint
 /checkpoint
-  ↓ 生成 docs/plans/xxx-handoff-1.md (#handoff)
+  ↓ 生成 docs/plans/.handoff/xxx-handoff-1.md (#handoff)
   ↓ Obsidian 自动出现金色节点
 /compact 或关闭会话
   ↓

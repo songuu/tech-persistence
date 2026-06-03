@@ -6,6 +6,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node scripts/guard-handoff-path.js",
+            "timeout": 1000
+          },
+          {
+            "type": "command",
             "command": "node scripts/observe.js pre 2>/dev/null || true",
             "timeout": 2000
           }

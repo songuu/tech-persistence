@@ -68,12 +68,12 @@ $agent-loop self-test
 ## 可选参数
 
 - `--auto`：自动审查模式。orchestrator 在 spec 通过自校验（required 字段齐全、`questions: []` 为空、`assumptions` 不阻塞、acceptance 与 scope 不冲突）时自动 `freeze` 并继续 implementation + review；否则保留人工 freeze gate。review 通过即 `completed`；review 不通过仍按 follow-up 流程，不会绕过 P0。`--auto-evaluate` 与 `--auto-freeze` 是兼容别名，新文档和新调用统一使用 `--auto`。详见 `~/.codex/rules/auto-mode.md`。
-- `--pipeline`：启用 pipeline 流水线模式。默认串行模式（`state.mode = "classic"`）行为完全不变；只有显式传 `--pipeline` 才进入新状态机。pipeline 模式先由 Codex 生成全局契约，冻结后再分批生成可执行 slice，每个 slice 独立冻结、独立 Codex 实现、独立 review，最后由 Codex 做 integration review。详见下方"Pipeline 模式"章节。`--pipeline --auto` 仅自动 freeze "safe" 对象，reconciliation slice 永不自动 freeze。
+- `--pipeline`：启用 pipeline 流水线模式。默认串行模式（`state.mode = "classic"`）行为完全不变；只有显式传 `--pipeline` 才进入新状态机。pipeline 模式先由 Claude Code provider 生成全局契约，冻结后再分批生成可执行 slice，每个 slice 独立冻结、独立 Codex 实现、独立 review，最后由 Claude Code provider 做 integration review。详见下方"Pipeline 模式"章节。`--pipeline --auto` 仅自动 freeze "safe" 对象，reconciliation slice 永不自动 freeze。
 - `--target`、`--slice-id`、`--resolve`、`--revision`、`--unblock`：pipeline 模式 freeze/resume 的细粒度控制。详见下方章节。
 
 ## 一致性保障
 
-- Codex 的 `/agent-loop` 与 Codex 的 `$agent-loop` 必须调用同一个 orchestrator。
+- Claude Code plugin 的 `/agent-loop` 与 Codex 的 `$agent-loop` 必须调用同一个 orchestrator。
 - orchestrator 会自动解析 Windows npm shim，例如 `claude.cmd` 和 `codex.cmd`，不要求用户手动传真实 `.exe`。
 - spec、implementation、review prompt 都通过 stdin 或 artifact 文件传输，避免 Windows argv 过长。
 - provider 原始输出必须先归一化为 canonical spec / handoff / review，再驱动状态机。

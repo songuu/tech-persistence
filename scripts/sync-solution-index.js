@@ -197,14 +197,14 @@ function insertSection(content, section) {
     }
     const before = lines.slice(0, insertAt).join('\n').replace(/\s*$/, '\n\n');
     const after = lines.slice(insertAt).join('\n').replace(/^\s*/, '');
-    return `${before}${section}\n\n${after}`.replace(/\n{3,}/g, '\n\n');
+    return `${before}${section}\n${after}`.replace(/\n{3,}/g, '\n\n');
   }
 
   const currentIdx = lines.findIndex((line) => /^##\s+当前迭代重点/.test(line));
   const insertAt = currentIdx >= 0 ? currentIdx : lines.length;
   const before = lines.slice(0, insertAt).join('\n').replace(/\s*$/, '\n\n');
   const after = lines.slice(insertAt).join('\n').replace(/^\s*/, '');
-  return `${before}## 技术沉淀（通用经验）\n\n${section}\n\n${after}`.replace(/\n{3,}/g, '\n\n');
+  return `${before}## 技术沉淀（通用经验）\n\n${section}\n${after}`.replace(/\n{3,}/g, '\n\n');
 }
 
 function upsertSolutionSection(content, entries, options = {}) {
