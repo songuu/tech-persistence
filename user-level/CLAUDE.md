@@ -29,7 +29,7 @@
 | /review | 审查团队 | 安全/性能/架构/质量/测试 | 功能需求 |
 | /compound | 知识管理 | 经验提取、模式识别 | 当前实现 |
 
-节奏：大任务 `/sprint` | 中任务 `/plan→/review→/compound` | 小任务 直接做→`/compound` | 修 bug `/debug-journal→/compound`
+节奏：大任务 `/sprint` | 中任务 `/plan→/review→/compound` | 小任务 直接做→`/compound` | 修 bug `隐式 /work bug 分支→/debug-journal→/compound`
 
 ---
 
@@ -45,9 +45,14 @@
 
 ## 需求输入路由
 
+当用户直接描述 bug、粘贴错误日志/堆栈、或上传 bug 截图时，**隐式进入 bug 调试路由**，不要求用户显式输入 `/work` 或 `/debug-journal`：
+- 已知根因 / 小 bug → 直接修复 → 按风险等级跑测试 → `/compound`
+- 根因不明 / 行为偏差与 root cause 不直接对应 / 测试连续失败 → 隐式执行 `/work` 的「非平凡 bug 调试入口规则」：先建立最小反馈环，再修改代码
+- 解决了非平凡 bug（3+ 轮）→ `/debug-journal` 记录调试过程，再 `/compound`
+
 当用户上传了图片，**不要直接写代码**，先判断：
 - 原型/设计截图 → 执行 `/prototype` 进入多轮需求收敛
-- Bug 截图 → 正常调试流程
+- Bug 截图 → 隐式进入 `/work` bug 调试路由
 - 参考图/说明图 → 作为上下文理解
 
 ---

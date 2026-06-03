@@ -20,6 +20,7 @@ const fs = require('fs');
 const path = require('path');
 
 const repoRoot = path.resolve(__dirname, '..');
+const buildCodexPlugin = require(path.join(repoRoot, 'plugins', 'tech-persistence', 'scripts', 'build-codex-plugin.js'));
 
 const codexReplacements = [
   [/在 Claude Code runtime 下/g, '在支持 Agent spawn 的 runtime 下'],
@@ -67,6 +68,10 @@ function injectIntoSkillWrapper(skillContent, newCommandBody) {
   return `${header}\n\n${stripFrontmatter(newCommandBody).trimStart()}\n`;
 }
 
+function commandSkillWrapper(name, sourceText) {
+  return buildCodexPlugin.commandToSkill(`${name}.md`, sourceText);
+}
+
 function stripFrontmatter(content) {
   if (!content.startsWith('---\n')) return content;
   const end = content.indexOf('\n---\n', 4);
@@ -108,18 +113,12 @@ function propagateCommand(name) {
     {
       label: 'plugin skill',
       path: path.join(repoRoot, 'plugins', 'tech-persistence', 'skills', name, 'SKILL.md'),
-      transform: (skill, body) => {
-        const merged = injectIntoSkillWrapper(skill, body);
-        return merged ? applyCodexRegex(merged) : null;
-      },
+      transform: (_skill, body) => commandSkillWrapper(name, body),
     },
     {
       label: 'codex skill',
       path: path.join(repoRoot, '.codex', 'skills', name, 'SKILL.md'),
-      transform: (skill, body) => {
-        const merged = injectIntoSkillWrapper(skill, body);
-        return merged ? applyCodexRegex(merged) : null;
-      },
+      transform: (_skill, body) => commandSkillWrapper(name, body),
     },
     {
       label: 'user-level skill',
@@ -178,6 +177,7 @@ if (require.main === module) main();
 module.exports = {
   applyCodexRegex,
   injectIntoSkillWrapper,
+  commandSkillWrapper,
   stripFrontmatter,
   propagateCommand,
   propagateRule,

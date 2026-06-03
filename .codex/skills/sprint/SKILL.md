@@ -71,6 +71,22 @@ Phase 4 → 填写「审查结果」               → status: reviewing
 Phase 5 → 填写「复利记录」               → status: completed
 ```
 
+## 需求输入路由（隐式 skill 调用）
+
+`/sprint <需求描述>` 先判定输入类型，再决定是否进入完整 sprint。用户不需要显式输入 `/work`、`/prototype` 或 `/debug-journal`；路由命中时由当前工作流隐式唤起对应 skill。
+
+| 输入类型 | 隐式路由 | 关键约束 |
+|----------|----------|----------|
+| 直接描述 bug、粘贴错误日志/堆栈、描述页面异常 | 小/已知根因 → 不启动完整 sprint，直接进入 `/work` bug 修复分支；根因不明/影响面大 → 先用 sprint 建计划，再由 Phase 3 调用 `/work` | 必须先建立可运行反馈环；Bug 修复必须有回归测试 |
+| Bug 截图 | 先识别为 bug 证据，不按原型处理；隐式进入 `/work` 的「非平凡 bug 调试入口规则」 | 截图信息不足时只追问复现所需的最小信息 |
+| 原型/设计截图 | `/prototype` 多轮需求收敛 | 不直接写代码 |
+| 参考图/说明图 | 作为上下文理解 | 不自动改变工作流 |
+
+**Bug 路由落点**：
+1. 复现或构建最小 pass/fail signal（测试、curl/CLI fixture、浏览器脚本、trace replay、throwaway harness）。
+2. 按 `/work` 风险等级修改代码，并加载测试策略。
+3. 修复后跑回归测试；非平凡 bug（3+ 轮）收尾必须 `/debug-journal` → `/compound`。
+
 ## Caveman Token Budget Mode
 
 触发方式：
@@ -584,6 +600,6 @@ deadcode_until:
 - 长任务（8+ Task）自动 checkpoint 保证不丢失进度
 
 ## 不适用
-- 小 bug → 直接修 → /compound
+- 小 bug / 已知根因 bug → 隐式 `/work` bug 分支直接修 → 回归测试 → /compound
 - 探索调研 → 自由对话 → /learn
 

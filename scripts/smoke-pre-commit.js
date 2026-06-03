@@ -194,6 +194,29 @@ function scenarioUserLevelChangedAndSynced() {
   );
 }
 
+function scenarioPropagateRefreshesCommandSkillDescription() {
+  const dir = makeRepo('s2b');
+  clearRequireCache(dir);
+
+  const build = require(path.join(dir, 'plugins/tech-persistence/scripts/build-codex-plugin.js'));
+  const propagate = require(path.join(dir, 'scripts/propagate-command-changes.js'));
+
+  writeFile(dir, 'user-level/commands/sprint.md', SPRINT_V2);
+  writeFile(dir, '.codex/commands/sprint.md', propagate.applyCodexRegex(SPRINT_V1));
+  writeFile(dir, 'plugins/tech-persistence/commands/sprint.md', build.normalizeLf(SPRINT_V1));
+  writeFile(dir, 'plugins/tech-persistence/skills/sprint/SKILL.md', build.commandToSkill('sprint.md', SPRINT_V1));
+  writeFile(dir, '.codex/skills/sprint/SKILL.md', build.commandToSkill('sprint.md', SPRINT_V1));
+
+  propagate.propagateCommand('sprint');
+
+  const pluginSkill = fs.readFileSync(path.join(dir, 'plugins/tech-persistence/skills/sprint/SKILL.md'), 'utf8');
+  const codexSkill = fs.readFileSync(path.join(dir, '.codex/skills/sprint/SKILL.md'), 'utf8');
+  assert(pluginSkill.includes('test command v2 (modified)'), 'plugin skill description was not refreshed');
+  assert(codexSkill.includes('test command v2 (modified)'), 'codex skill description was not refreshed');
+  assert(!pluginSkill.includes('test command v1'), 'plugin skill kept stale v1 description');
+  assert(!codexSkill.includes('test command v1'), 'codex skill kept stale v1 description');
+}
+
 function scenarioRulesPathOutOfSync() {
   const dir = makeRepo('s6');
   clearRequireCache(dir);
@@ -785,6 +808,7 @@ function main() {
   process.stdout.write('\nsmoke: pre-commit-check.js\n');
   runScenario('S1: user-level changed but derived not synced → exit 1', scenarioUserLevelChangedNotSynced);
   runScenario('S2: user-level changed and derived synced → exit 0 (not fail-open)', scenarioUserLevelChangedAndSynced);
+  runScenario('S2b: propagate refreshes command skill descriptions', scenarioPropagateRefreshesCommandSkillDescription);
   runScenario('S3: new plan doc missing 关键假设验证 → exit 1', scenarioPlanMissingAssumptionSection);
   runScenario('S4: new plan doc with 关键假设验证 → exit 0', scenarioPlanWithAssumptionSection);
   runScenario('S5: grandfathered old plan (filename date < 2026-05-12) → exit 0', scenarioGrandfatheredPlan);
