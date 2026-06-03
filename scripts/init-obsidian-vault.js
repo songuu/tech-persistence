@@ -125,15 +125,81 @@ function generateAppearanceConfig() {
   };
 }
 
+// ─── 跨设备同步排除：单一事实源 ───
+// 这些文件跨设备/跨终端同步会丢数据或损坏 vault，必须被同步工具排除。
+// 见 docs/solutions/2026-06-02-obsidian-cross-device.md。
+// targets 指该规则应进入哪些目标的 ignore（不同工具语义不同）：
+//   obsidian  → .obsidianignore（Obsidian 索引/视图排除）
+//   git       → vault 内 .gitignore（git-based 同步，桌面推荐）
+//   syncthing → vault 内 .stignore（Syncthing 同步）
+const SYNC_EXCLUDES = [
+  { pattern: '*.jsonl', targets: ['obsidian', 'git', 'syncthing'] },             // append-only 无锁遥测，文件级同步丢行
+  { pattern: '.agent-runs/', targets: ['obsidian', 'git', 'syncthing'] },        // agent-loop 运行态临时目录
+  { pattern: 'archive/', targets: ['obsidian', 'git', 'syncthing'] },            // 归档历史，无需跨设备
+  { pattern: 'node_modules/', targets: ['obsidian', 'git', 'syncthing'] },       // 依赖目录
+  { pattern: '*.bak.*', targets: ['obsidian', 'git', 'syncthing'] },             // 本地备份
+  { pattern: '.obsidian/workspace.json', targets: ['git', 'syncthing'] },        // 高频重写的桌面布局，双向同步永久冲突
+  { pattern: '.obsidian/workspace-mobile.json', targets: ['git', 'syncthing'] }, // 移动端布局，与桌面天生不同
+  { pattern: '.git/', targets: ['obsidian', 'syncthing'] }                       // git 内部目录：obsidian=不索引 git 对象；syncthing=文件级同步会损坏 refs；.gitignore 列它无意义故不入 git 目标
+];
+
+function excludesForTarget(target) {
+  return SYNC_EXCLUDES.filter((entry) => entry.targets.includes(target)).map((entry) => entry.pattern);
+}
+
 // ─── 文件排除配置 ───
+// .obsidianignore：Obsidian 索引/视图排除。向后兼容——原有 5 条规则全部保留，仅新增 .agent-runs/ 防御。
 function generateUserIgnores() {
+  return excludesForTarget('obsidian').join('\n');
+}
+
+// vault 内 .gitignore：git-based 跨设备同步（桌面推荐路径）开箱即排除危险文件，无需用户手动配置。
+function generateGitignore() {
   return [
-    '*.jsonl',
-    'archive/',
-    'node_modules/',
-    '.git/',
-    '*.bak.*'
+    '# tech-persistence vault — git-based 跨设备同步排除（init-obsidian-vault.js 自动生成）',
+    '# 见 docs/solutions/2026-06-02-obsidian-cross-device.md。铁律：一个 vault 只能有一个同步权威。',
+    ...excludesForTarget('git')
   ].join('\n');
+}
+
+// vault 内 .stignore：Syncthing 跨设备同步排除（Syncthing 用 // 作注释）。
+function generateStignore() {
+  return [
+    '// tech-persistence vault — Syncthing 跨设备同步排除（init-obsidian-vault.js 自动生成）',
+    '// 见 docs/solutions/2026-06-02-obsidian-cross-device.md',
+    ...excludesForTarget('syncthing')
+  ].join('\n');
+}
+
+// 同步排除文件的幂等写入：存在则只补缺失规则（不覆盖用户自定义），不存在则新建。
+// 注释行（# 或 //）不计入"缺失规则"检测，只用于新建时的文件头。
+function upsertIgnoreFile(vaultPath, filename, content) {
+  const targetPath = path.join(vaultPath, filename);
+  const requiredRules = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && !line.startsWith('//'));
+  if (fs.existsSync(targetPath)) {
+    const existing = fs.readFileSync(targetPath, 'utf-8');
+    // 按规则行精确匹配（不是子串）：剥离 existing 的注释/空行后比对整行，
+    // 否则 'logs/*.jsonl.bak' 会吞没 '*.jsonl'、注释提到 '.git/' 会误判已存在 → 数据安全级规则静默漏补。
+    const existingRules = new Set(
+      existing
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#') && !line.startsWith('//'))
+    );
+    const missing = requiredRules.filter((rule) => !existingRules.has(rule));
+    if (missing.length > 0) {
+      fs.appendFileSync(targetPath, '\n' + missing.join('\n') + '\n');
+      console.log(`   ✅ ${filename} 补充 ${missing.length} 条规则`);
+    } else {
+      console.log(`   ⚠️  ${filename} 已存在且完整，跳过`);
+    }
+  } else {
+    fs.writeFileSync(targetPath, content.endsWith('\n') ? content : content + '\n');
+    console.log(`   ✅ ${filename} 排除规则`);
+  }
 }
 
 // ─── Graph View 配置 ───
@@ -462,22 +528,14 @@ function main() {
     }
   }
 
-  // .obsidianignore（存在则合并，不覆盖用户自定义）
-  const ignorePath = path.join(vaultPath, '.obsidianignore');
-  const requiredIgnores = generateUserIgnores().split('\n').filter(Boolean);
-  if (fs.existsSync(ignorePath)) {
-    const existing = fs.readFileSync(ignorePath, 'utf-8');
-    const missing = requiredIgnores.filter(rule => !existing.includes(rule));
-    if (missing.length > 0) {
-      fs.appendFileSync(ignorePath, '\n' + missing.join('\n') + '\n');
-      console.log(`   ✅ .obsidianignore 补充 ${missing.length} 条规则`);
-    } else {
-      console.log('   ⚠️  .obsidianignore 已存在且完整，跳过');
-    }
-  } else {
-    fs.writeFileSync(ignorePath, requiredIgnores.join('\n') + '\n');
-    console.log('   ✅ .obsidianignore 排除规则');
-  }
+  // 同步排除文件（幂等合并，不覆盖用户自定义）：
+  //   .obsidianignore → Obsidian 索引/视图排除
+  //   .gitignore      → git-based 跨设备同步（桌面推荐）开箱排除危险文件
+  //   .stignore       → Syncthing 跨设备同步排除
+  // 注：Obsidian Sync / iCloud / Dropbox 的排除需在各自 App 内配置，无法靠 vault 文件自动化（见 obsidian-setup.md）。
+  upsertIgnoreFile(vaultPath, '.obsidianignore', generateUserIgnores());
+  upsertIgnoreFile(vaultPath, '.gitignore', generateGitignore());
+  upsertIgnoreFile(vaultPath, '.stignore', generateStignore());
 
   // _templates/
   const templatesDir = path.join(vaultPath, '_templates');
@@ -550,4 +608,10 @@ module.exports = {
   generateAppConfig,
   parseArgs,
   defaultVaultPath,
+  SYNC_EXCLUDES,
+  excludesForTarget,
+  generateUserIgnores,
+  generateGitignore,
+  generateStignore,
+  upsertIgnoreFile,
 };

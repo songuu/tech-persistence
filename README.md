@@ -530,6 +530,8 @@ node scripts/memory-export.js --format=jsonl --output=memory.jsonl --push=agentm
 
 所有知识产出统一使用 Obsidian 兼容格式（frontmatter + wikilinks + tags）。共享模式下，Claude Code 和 Codex 会写入同一个 homunculus vault，再由 Obsidian Sync、iCloud、OneDrive、Dropbox 或 Syncthing 做跨设备同步。
 
+跨设备同步有两个结构性硬伤需规避：append-only jsonl 文件级同步会丢行、`.git/` 被云盘逐文件同步会损坏 refs。`init-obsidian-vault.js` 因此自动在 vault 生成 `.gitignore`（git-based 同步推荐）与 `.stignore`（Syncthing），开箱排除危险文件；Obsidian Sync/iCloud/Dropbox 需在各自 App 内手动排除。铁律：**一个 vault 只能有一个同步权威**。完整优缺点与方案见 `docs/solutions/2026-06-02-obsidian-cross-device.md`。
+
 **vault 图谱节点**（写入 homunculus vault，带 Graph 配色 + Dashboard dataview 查询，三方一致）：
 
 | 产出 | Tag | Graph 颜色 | 产生方式 |

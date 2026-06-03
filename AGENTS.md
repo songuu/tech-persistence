@@ -41,11 +41,11 @@ pnpm lint         # 检查
 > Generated from `docs/solutions/*.md`; do not edit this block manually.
 > Refresh with `node scripts/sync-solution-index.js --all`.
 
+- [2026-06-02] [obsidian/cross-device/sync] Obsidian 跨终端/跨设备同步对 tech-persistence 架构的优缺点与方案 — 用户问：不同终端 / 不同设备之间用 Obsidian 同步本项目的知识 vault，优缺点是什么，尤其针对当前这种架构。结论是知识层天生贴合 Obsidian 跨设备同步（4 不可妥协原则里 3 条正向加分），但「多设备双写」撞两个结构性硬伤：append-only jsonl 文件级同步会丢行、Claude auto-memory 用 cwd-key 路径根本不 portable。因此桌面多设备首选 git-based 同步（与现… → `docs/solutions/2026-06-02-obsidian-cross-device.md`
 - [2026-06-01] [methodology/planning-depth/parity] 规划深度自适应 rule（缺陷 D）：methodology 规则的 Codex parity 落点 — 规划深度自适应 rule（缺陷 D） → `docs/solutions/2026-06-01-planning-depth-rule.md`
 - [2026-06-01] [telemetry/demand-side/mcp] MCP 主动检索 measure（缺陷 B）：demand-side telemetry 的主动检索轴 — MCP 主动检索 measure（缺陷 B） → `docs/solutions/2026-06-01-mcp-retrieval-measure.md`
 - [2026-06-01] [enforcement/self-evolution/drift] 知识层 drift checker：enforcement 判定域由 dogfood FP 反推（40→0 FP） — 知识层 drift checker（缺陷 E） → `docs/solutions/2026-06-01-knowledge-drift-checker.md`
 - [2026-06-01] [self-evolution/telemetry/observability] demand-side 召回 telemetry：度量注入知识是否被用（measure-before-enforce） — demand-side 召回 telemetry → `docs/solutions/2026-06-01-demand-side-recall-telemetry.md`
-- [2026-06-01] [architecture/claude-code/dynamic-workflows] Claude Code Dynamic workflows 接入 tech-persistence：backend seam 优先，不替换 sprint 方法论 — Claude Code 在 2026-05-25 到 2026-05-29 发布 Dynamic workflows research preview：Claude 可以为任务写 JavaScript orchestration script，并在后台协调大量 subagents。用户问当前 tech-persistence 架构是否有优化空间。 → `docs/solutions/2026-06-01-claude-code-dynamic-workflows-architecture.md`
 
 <!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->
 ## 当前迭代重点

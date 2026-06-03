@@ -13,7 +13,20 @@
  */
 
 const assert = require('assert');
-const { generateGraphConfig, mergeGraphColorGroups, generateDashboard } = require('./init-obsidian-vault');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const {
+  generateGraphConfig,
+  mergeGraphColorGroups,
+  generateDashboard,
+  SYNC_EXCLUDES,
+  excludesForTarget,
+  generateUserIgnores,
+  generateGitignore,
+  generateStignore,
+  upsertIgnoreFile,
+} = require('./init-obsidian-vault');
 
 let passed = 0;
 let failed = 0;
@@ -130,6 +143,89 @@ test('merge is idempotent on canonical config (no junk .bak)', () => {
   const merged = mergeGraphColorGroups(canonical);
   // 幂等：canonical 再 merge 应字节一致，安装器据此跳过写入、不产生备份
   assert.strictEqual(JSON.stringify(merged), JSON.stringify(canonical));
+});
+
+// ─── 跨设备同步排除：单一事实源 + 三投影（docs/solutions/2026-06-02-obsidian-cross-device.md）───
+
+// 提取 ignore 文本里的规则行（去掉 # / // 注释和空行）。
+function ignorePatterns(text) {
+  return text
+    .split('\n')
+    .filter((line) => line && !line.startsWith('#') && !line.startsWith('//'));
+}
+
+// 跨设备同步的高危项：文件级同步会丢数据或损坏 vault。任一从 canonical 漏掉即数据安全回归。
+const HIGH_SEVERITY = ['*.jsonl', '.agent-runs/'];
+
+test('SYNC_EXCLUDES 覆盖所有高危项（漏一个 = 数据安全回归）', () => {
+  const patterns = SYNC_EXCLUDES.map((e) => e.pattern);
+  for (const critical of HIGH_SEVERITY) {
+    assert.ok(patterns.includes(critical), `高危项 ${critical} 必须在 SYNC_EXCLUDES 中`);
+  }
+});
+
+test('.gitignore 排除 jsonl/.agent-runs/workspace，且不含无意义的 .git/', () => {
+  const rules = ignorePatterns(generateGitignore());
+  assert.ok(rules.includes('*.jsonl'), 'git 同步必须排除 append-only jsonl（丢行）');
+  assert.ok(rules.includes('.agent-runs/'), 'git 同步必须排除运行态目录');
+  assert.ok(rules.includes('.obsidian/workspace.json'), 'git 同步必须排除高频重写的 workspace.json');
+  assert.ok(rules.includes('.obsidian/workspace-mobile.json'), 'git 同步必须排除移动端 workspace');
+  // .gitignore 里列 .git/ 无意义（git 永不追踪自身），故 git 投影不含它
+  assert.ok(!rules.includes('.git/'), '.gitignore 不应列 .git/（git 语义下无意义）');
+});
+
+test('.stignore 排除 .git/（Syncthing 文件级同步会损坏 refs）+ jsonl + 运行态', () => {
+  const rules = ignorePatterns(generateStignore());
+  assert.ok(rules.includes('.git/'), 'Syncthing 必须排除 .git/ 防 refs 损坏');
+  assert.ok(rules.includes('*.jsonl'), 'Syncthing 必须排除 jsonl');
+  assert.ok(rules.includes('.agent-runs/'), 'Syncthing 必须排除运行态目录');
+});
+
+test('.obsidianignore 向后兼容：原有 5 条规则全部保留', () => {
+  const rules = ignorePatterns(generateUserIgnores());
+  for (const legacy of ['*.jsonl', 'archive/', 'node_modules/', '.git/', '*.bak.*']) {
+    assert.ok(rules.includes(legacy), `.obsidianignore 必须保留历史规则 ${legacy}（merge 向后兼容）`);
+  }
+});
+
+// 有判别力的反向 invariant：高危项不得从任一"同步" projection 漏掉。
+// （"投影⊆canonical" 由 excludesForTarget 的 filter+map 实现构造保证，恒真无信号，故不测。）
+// 这条会在有人误把某高危 entry 的 git/syncthing target 删掉时 fail——正是本 sprint 要防的数据安全回归。
+test('高危项不得从 git / syncthing 任一同步投影漏掉（per-target）', () => {
+  for (const target of ['git', 'syncthing']) {
+    const projection = excludesForTarget(target);
+    for (const critical of HIGH_SEVERITY) {
+      assert.ok(
+        projection.includes(critical),
+        `${target} 同步投影必须含高危项 ${critical}（漏掉 = 数据安全回归）`
+      );
+    }
+  }
+});
+
+// upsertIgnoreFile 合并行为：existing 含子串行 / 注释提及时，高危规则仍必须被追加（守 P1 修复，防子串误匹配回归）。
+test('upsertIgnoreFile：existing 含子串/注释不致漏补高危规则 + 幂等', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-ignore-'));
+  try {
+    const filename = '.stignore';
+    const target = path.join(tmpDir, filename);
+    // 故意构造会让子串匹配误判的 existing：'logs/*.jsonl.bak' 含 '*.jsonl'，注释提到 '.git/'
+    fs.writeFileSync(target, ['logs/*.jsonl.bak', '// my notes about .git/ internals', 'archive/'].join('\n') + '\n');
+    upsertIgnoreFile(tmpDir, filename, generateStignore());
+    const after = fs.readFileSync(target, 'utf-8');
+    const rules = new Set(
+      after.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !l.startsWith('//'))
+    );
+    assert.ok(rules.has('*.jsonl'), '*.jsonl 不能被 logs/*.jsonl.bak 子串吞没而漏补');
+    assert.ok(rules.has('.git/'), '.git/ 不能被注释行子串命中而漏补');
+    assert.ok(rules.has('.agent-runs/'), '.agent-runs/ 必须补上');
+    // 幂等：完整后二次运行不再追加
+    const before2 = fs.readFileSync(target, 'utf-8');
+    upsertIgnoreFile(tmpDir, filename, generateStignore());
+    assert.strictEqual(fs.readFileSync(target, 'utf-8'), before2, '二次 upsert 应幂等不追加');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

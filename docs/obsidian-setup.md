@@ -20,6 +20,47 @@
 
 持续共享推荐使用第三种模式：把共享 homunculus 目录本身作为 Obsidian vault，再用 Obsidian Sync、iCloud、OneDrive、Dropbox 或 Syncthing 同步这个目录。`--import-claude` 只适合一次性迁移历史数据，不适合长期双向同步。
 
+## 跨设备 / 跨终端同步
+
+知识层是纯 markdown + frontmatter，天生适合跨设备同步，但有几条**不可违背**的铁律（违反会丢遥测数据或损坏 vault）：
+
+### 铁律 1：一个 vault 只能有一个同步权威
+
+绝不让同一 vault 被两套同步工具同时管理（如「共享 homunculus 目录已被 iCloud 同步」+ 再开 Obsidian Sync）。双权威是几乎所有 vault corruption / 重复 / 文件消失的共同根因。git / Obsidian Sync / 云盘 / Syncthing **三选一**。
+
+### 铁律 2：排除运行态与 append-only 文件
+
+`*.jsonl`（observations / memory-recall / recall-usage / skill-traces 等遥测）是**无锁追加**写入，文件级同步会把两设备的追加判为冲突并静默丢行；`.agent-runs/` 是运行态临时目录。两类都必须排除出同步。
+
+`init-obsidian-vault.js` **已自动在 vault 生成同步工具原生的 ignore 文件**（单一事实源派生，幂等刷新，不覆盖用户自定义）：
+
+| 文件 | 服务于 | 排除内容 |
+|------|--------|----------|
+| `.obsidianignore` | Obsidian 索引/视图 | `*.jsonl`、`.agent-runs/`、`archive/`、`node_modules/`、`*.bak.*`、`.git/` |
+| `.gitignore` | git-based 同步（桌面推荐） | 上述 + `.obsidian/workspace.json`、`workspace-mobile.json`；**不含 `.git/`**（git 语义下无意义） |
+| `.stignore` | Syncthing 同步 | 上述全部 + `.git/`（Syncthing 文件级同步 `.git/` 会损坏 refs） |
+
+- **git / Syncthing 用户**：开箱即排除，无需手动配置。
+- **Obsidian Sync / iCloud / Dropbox 用户**：这些工具**不读** vault 内的 ignore 文件，必须在各自 App 设置里手动排除同样的 `.agent-runs/`、`*.jsonl`、`archive/`、`*.bak.*`、`.obsidian/workspace*.json`（iCloud/Dropbox 另需排除 `.git/`）。
+- 若必须跨设备聚合遥测：按设备分文件 `telemetry/<device-id>/*.jsonl` 再离线聚合，绝不双向同步同一文件。
+
+### 铁律 3：portability 只在「克隆同一 git remote」时成立
+
+Memory v5 用 git remote URL 的 hash 作项目身份 key，所以只有当多台设备**克隆的是同一 origin URL** 时，知识才落在同一项目目录、跨机器可见。无 remote 的本地仓库会退化为 git-root / cwd 路径 hash，换设备即漂移，不要依赖其跨设备 portability。
+
+> ⚠️ Claude Code 自身的 auto-memory（`~/.claude/projects/<cwd-slug>/memory/`，存放手写的 `feedback_*` / `user_*`）用 **cwd 路径**作 key，跨设备 / Codex **不可见**，无法靠同步弥补。高价值的用户画像观察请沉到 v5 vault 的 `persona.md`。
+
+### 各场景推荐
+
+| 场景 | 推荐方案 | 理由 |
+|------|----------|------|
+| 单人多设备、桌面为主、知识只读 recall | **git-based 同步**（唯一权威）+ jsonl/`.agent-runs` gitignore | 几乎不触发并发写冲突，与现有 pre-commit/drift 工作流零摩擦、零成本，提交级可审计 |
+| 多设备双写（多台都主动跑 sprint） | 仍 git 唯一权威：markdown 走 commit/merge（冲突显式暴露），jsonl 按设备分文件离线聚合，严禁叠云盘 | git 让 md 冲突可见、jsonl 可隔离；云盘会静默丢追加行 |
+| 移动端查看（只读 / 随手记） | 官方 **Obsidian Sync** + Excluded folders 排除 `.agent-runs`/`*.jsonl`/`telemetry`/`workspace*.json`，或建只含 markdown 的裁剪子 vault | 移动端只有官方 Sync 一等支持且对 md 三方 merge；海量小 jsonl 会触发移动端重索引死循环 |
+| 双运行时（Claude + Codex）+ 跨设备 | 先 `configure-shared-homunculus` 收敛 parity，再 git 同步该共享目录作唯一跨设备权威 | 共享目录解决「同机两运行时」，git 解决「跨设备」；两者正交，但同步权威仍须唯一 |
+
+> 完整优缺点分析与代码依据见 `docs/solutions/2026-06-02-obsidian-cross-device.md`。
+
 ## 快速安装
 
 ### 推荐：Claude Code 与 Codex 共享同一个 Vault
@@ -83,7 +124,9 @@ node scripts/init-obsidian-vault.js
 ```
 <homunculus-vault>/
 ├── .obsidian/               # Obsidian 配置（app.json, graph.json 等）
-├── .obsidianignore          # 排除 .jsonl, archive/ 等
+├── .obsidianignore          # Obsidian 视图排除（.jsonl, archive/ 等）
+├── .gitignore               # git-based 跨设备同步排除（自动生成）
+├── .stignore                # Syncthing 跨设备同步排除（自动生成）
 ├── _templates/              # Obsidian 模板
 │   ├── instinct.md
 │   ├── session-summary.md
@@ -153,6 +196,7 @@ node scripts/init-obsidian-vault.js
 ✅ Graph View 显示颜色分组
 ✅ _templates/ 下有 4 个模板文件
 ✅ .obsidianignore 排除了 .jsonl 文件
+✅ .gitignore / .stignore 已生成（跨设备同步开箱排除危险文件）
 ✅ 共享模式下 ~/.tech-persistence/config.json 指向同一个 homunculusHome
 ```
 
@@ -167,7 +211,7 @@ node scripts/init-obsidian-vault.js --codex
 node scripts/init-obsidian-vault.js --vault-path ~/Documents/TechPersistence
 ```
 
-`.obsidianignore` 会以合并模式更新，只补充缺失规则，不覆盖用户自定义内容。`Dashboard.md` 会备份旧版后重新生成。
+`.obsidianignore` / `.gitignore` / `.stignore` 都以合并模式更新，只补充缺失规则，不覆盖用户自定义内容。`Dashboard.md` 会备份旧版后重新生成。
 
 ## 故障排查
 

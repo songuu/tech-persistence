@@ -106,10 +106,14 @@ LIMIT 5
 \```
 ```
 
-### `.obsidianignore` 追加
+### 同步排除文件追加（`.obsidianignore` / `.gitignore` / `.stignore`）
+
+重跑安装会幂等刷新三个 ignore 文件（合并模式，只补缺失规则、不覆盖用户自定义）：`.obsidianignore`（Obsidian 视图）、`.gitignore`（git-based 跨设备同步）、`.stignore`（Syncthing）。三者由 `init-obsidian-vault.js` 的 `SYNC_EXCLUDES` 单一事实源派生。手动维护时参考：
 
 ```
 # 已有的忽略规则保持不变，追加：
 *.jsonl.bak
 *.bak.*
 ```
+
+> 跨设备同步排除的完整清单与原因见 `docs/obsidian-setup.md` 的「跨设备 / 跨终端同步」段。
