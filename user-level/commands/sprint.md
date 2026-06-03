@@ -66,13 +66,21 @@ Phase 5 → 填写「复利记录」               → status: completed
 |----------|----------|----------|
 | 直接描述 bug、粘贴错误日志/堆栈、描述页面异常 | 小/已知根因 → 不启动完整 sprint，直接进入 `/work` bug 修复分支；根因不明/影响面大 → 先用 sprint 建计划，再由 Phase 3 调用 `/work` | 必须先建立可运行反馈环；Bug 修复必须有回归测试 |
 | Bug 截图 | 先识别为 bug 证据，不按原型处理；隐式进入 `/work` 的「非平凡 bug 调试入口规则」 | 截图信息不足时只追问复现所需的最小信息 |
-| 原型/设计截图 | `/prototype` 多轮需求收敛 | 不直接写代码 |
+| 原型/设计截图（只要求理解需求） | `/prototype` 多轮需求收敛 | 不直接写代码 |
+| Figma URL/node、设计截图 + “按图实现 / 1:1 / 像素级 / fidelity” | 加载 `figma-fidelity` 规则；小/局部 UI → `/work`；核心页面/多断点 → 完整 sprint | 必须先做 preflight；没拿到设计 screenshot 不能声明视觉 1:1 |
+| 用户反馈“Figma/设计图还原不准” | 视为视觉 bug：隐式进入 `/work` bug 分支 + `figma-fidelity` 视觉反馈环 | baseline 截图 → 当前实现截图 → screenshot diff；无 diff 不能宣称像素级完成 |
 | 参考图/说明图 | 作为上下文理解 | 不自动改变工作流 |
 
 **Bug 路由落点**：
 1. 复现或构建最小 pass/fail signal（测试、curl/CLI fixture、浏览器脚本、trace replay、throwaway harness）。
 2. 按 `/work` 风险等级修改代码，并加载测试策略。
 3. 修复后跑回归测试；非平凡 bug（3+ 轮）收尾必须 `/debug-journal` → `/compound`。
+
+**Figma Fidelity 路由落点**：
+1. Preflight 收集：`get_design_context`、`get_screenshot`、`get_variable_defs`、组件映射/设计系统线索。
+2. Token/component mapping 先落表，再改 UI；禁止把 Figma 的 hex/px 直接散落到业务组件。
+3. 像素级场景必须建立 visual diff 回路，默认阈值 `maxDiffPixelRatio: 0.03`；跨 OS 字体抗锯齿差异登记为 unsupported。
+4. Review 阶段强制触发 design lens；核心页面至少按 L3 跑截图回归。
 
 ## Caveman Token Budget Mode
 

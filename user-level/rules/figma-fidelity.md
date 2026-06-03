@@ -1,6 +1,25 @@
 # Figma Fidelity Protocol
 
-> 目标：把 Figma -> code 从“看图猜实现”升级为可审计的 1:1 还原流程。触发条件：用户给出 Figma URL / node、上传设计截图并要求按图实现、或明确要求 design-to-code / 1:1 / fidelity。
+> 目标：把 Figma -> code 从“看图猜实现”升级为可审计的 1:1 还原流程。触发条件：用户给出 Figma URL / node、上传设计截图并要求按图实现、明确要求 design-to-code / 1:1 / pixel-level / fidelity，或反馈“设计还原不准确 / Figma 还原有偏差”。
+
+## 0. 输入路由与像素级修复
+
+先判定用户是在做“需求收敛”还是“设计还原”：
+
+| 输入 | 路由 | 说明 |
+|---|---|---|
+| 设计截图/原型图 + 只要求理解需求 | `/prototype` | 输出假设驱动需求，不直接写代码 |
+| Figma URL/node 或设计截图 + “按图实现 / 1:1 / 像素级 / fidelity” | 本规则 + `/work` | 先 preflight，再实现 |
+| 用户反馈“还原不准 / 和 Figma 不一致 / spacing、font、color、layout 偏了” | 本规则 + `/work` bug 分支 | 先建立视觉反馈环，再修改 |
+
+像素级修复必须建立**视觉反馈环**：
+
+1. Baseline：Figma MCP `get_screenshot` 导出目标 node；若只有设计截图，用用户截图作为 baseline，并注明 token/组件语义未知。
+2. Actual：用浏览器/Playwright 截取当前实现的同尺寸截图。
+3. Diff：用截图 diff 或 Playwright `toHaveScreenshot` 比对；默认 `maxDiffPixelRatio: 0.03`。
+4. Loop：每轮只修一类偏差（color/font/spacing/layout/asset），重跑 diff 后再继续。
+
+没有 baseline + actual + diff 时，不能声明“像素级已完成”，只能声明“静态/结构还原”。
 
 ## 1. Preflight 必收集上下文
 

@@ -50,9 +50,15 @@
 - 根因不明 / 行为偏差与 root cause 不直接对应 / 测试连续失败 → 隐式执行 `/work` 的「非平凡 bug 调试入口规则」：先建立最小反馈环，再修改代码
 - 解决了非平凡 bug（3+ 轮）→ `/debug-journal` 记录调试过程，再 `/compound`
 
+当用户给 Figma URL / node、设计截图，或反馈“还原不准 / 像素级 / 1:1 / fidelity”时，**隐式进入 Figma Fidelity 路由**：
+- 只要求理解设计/需求 → `/prototype`
+- 要求按图实现、像素级还原、或修复与设计稿的偏差 → 加载 `figma-fidelity` 规则 + `/work`
+- 必须建立视觉反馈环：设计 baseline 截图 → 当前实现截图 → screenshot diff；没有 diff 不能声明“像素级完成”
+
 当用户上传了图片，**不要直接写代码**，先判断：
 - 原型/设计截图 → 执行 `/prototype` 进入多轮需求收敛
 - Bug 截图 → 隐式进入 `/work` bug 调试路由
+- Figma/设计还原不准截图 → 隐式进入 Figma Fidelity + `/work` 视觉 bug 路由
 - 参考图/说明图 → 作为上下文理解
 
 ---

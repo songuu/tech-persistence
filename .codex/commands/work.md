@@ -217,15 +217,24 @@ worker 完成后，Agent tool 返回 worktree path + branch（有 changes 时）
 **触发条件**（满足任一即适用）：
 - Task 测试连续失败 ≥ 2 轮且根因不明
 - 用户直接描述 bug、粘贴错误日志/堆栈、或上传 bug 截图，且行为偏差与 root cause 不直接对应
+- 用户反馈 Figma/设计图还原不准确、像素级偏差、或 color/font/spacing/layout 与设计稿不一致
 - `/sprint` 外的临时调试场景（同样适用，本规则不限于 `/work` 内）
 
 **核心规则**：进入单假设修复前，必须先建立**最小反馈环**——一个快速、确定、agent 可运行的 pass/fail signal。可选形式（按优先级）：
 
 1. 失败测试（最常用，最确定）
-2. curl / CLI fixture
-3. 浏览器脚本 / DevTools snippet / trace replay
-4. throwaway harness（一次性可执行复现器）
-5. git bisect / differential loop（已知好版本 vs 坏版本）
+2. Figma/设计还原视觉回路（baseline 设计截图 + 当前实现截图 + screenshot diff）
+3. curl / CLI fixture
+4. 浏览器脚本 / DevTools snippet / trace replay
+5. throwaway harness（一次性可执行复现器）
+6. git bisect / differential loop（已知好版本 vs 坏版本）
+
+**Figma/设计还原 bug 的特殊要求**：
+- 先加载 `figma-fidelity` 规则，区分“需求理解”与“像素级还原修复”
+- 有 Figma URL/node 时先拿 `get_screenshot`；只有设计截图时把用户截图作为 baseline，并标注 token/组件映射未知
+- 用浏览器/Playwright 截当前实现，保持相同 viewport / frame 尺寸
+- 每轮只修一类偏差（color/font/spacing/layout/asset），重跑 diff；默认阈值 `maxDiffPixelRatio: 0.03`
+- 未建立 visual diff 时，禁止宣称“像素级/1:1 完成”
 
 **没有反馈环时禁止进入单假设修复**。必须显式报告：
 - 已尝试构建反馈环的手段
