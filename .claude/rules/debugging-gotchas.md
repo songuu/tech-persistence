@@ -44,4 +44,6 @@
 
 ## MEDIUM — 偶尔遇到
 
+- [2026-06-05] [build, validator, scripts-lib, inventory-coupling] **validator-only / dev-time helper lib 放 `scripts/`，不要放 `scripts/lib/`**。`validate-codex-plugin.js` 的 `expectedHookLibs = listTopLevelJsNames(scripts/lib)` 把 `scripts/lib/*.js` **全量**纳入 plugin `hooks/lib` inventory 校验——任何放进 `scripts/lib/` 的文件都会被要求复制进 plugin 副本（build 的 copyHookLibs glob 会复制它，inventory 才不 mismatch），即使它只被 dev-time validator 消费、与 hook runtime 完全无关。ECC-eval adapt#1 新增 `plugin-manifest-checks.js`（只被 `validate-codex-plugin.js` 用）时放 `scripts/` 而非 `scripts/lib/`：因为 `validate-codex-plugin.js` 本身**不进 plugin 副本**（不在 `build-codex-plugin.js` 的 copyUtilityScripts 列表），它 `require('./plugin-manifest-checks')` 的 repo-only lib 无 [[ADR-020]] parity 负担。规则：**判断新 lib 放哪 → 先问"它是否被'进 plugin 的 hook/utility'消费？" 否 → `scripts/`（repo-only，零 parity 表面）；是 → `scripts/lib/`（接受 plugin 复制 + require-closure 校验）。** 误放 `scripts/lib/` = 无谓 P0c 表面（plugin 多一个 dead 文件 + inventory 绑定）。这是 [[ADR-020]]（plugin lib 按消费方目录填充）的逆向推论。
+
 ## LOW — 边缘情况
