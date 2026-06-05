@@ -15,6 +15,13 @@ const {
   getHookEventNames,
   getHookScriptNames,
 } = require('./lib/hook-registry');
+const {
+  checkClaudeManifest,
+  extractMcpToolNames,
+  buildMcpFqNames,
+  findOverlongMcpNames,
+  MCP_FQ_NAME_MAX,
+} = require('./plugin-manifest-checks');
 
 function listTopLevelMarkdownNames(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -390,6 +397,24 @@ if (isFile(manifestPath, 'plugin manifest')) {
   }
 }
 
+// Claude manifest 的要求与 Codex manifest **相反**：Claude 自动发现 agents/hooks，
+// 显式声明会破坏安装；故按 runtime 分别断言，不可统一（详见 .claude-plugin/PLUGIN_SCHEMA_NOTES.md）。
+const claudeManifestPath = path.join(pluginRoot, '.claude-plugin', 'plugin.json');
+if (isFile(claudeManifestPath, 'claude plugin manifest .claude-plugin/plugin.json')) {
+  const claudeManifest = readJson(claudeManifestPath);
+  if (claudeManifest) {
+    const manifestErrors = checkClaudeManifest(claudeManifest);
+    if (manifestErrors.length > 0) {
+      manifestErrors.forEach(fail);
+    } else {
+      ok('.claude-plugin manifest minimal (no forbidden agents/hooks keys, array shapes valid)');
+    }
+    if (claudeManifest.name !== 'tech-persistence') {
+      fail('.claude-plugin manifest name must be tech-persistence');
+    }
+  }
+}
+
 const mcpManifestPath = path.join(pluginRoot, '.codex-plugin', '.mcp.json');
 if (isFile(mcpManifestPath, 'mcp manifest .mcp.json')) {
   const mcpManifest = readJson(mcpManifestPath);
@@ -413,6 +438,33 @@ if (isFile(mcpManifestPath, 'mcp manifest .mcp.json')) {
           }
         }
       }
+    }
+  }
+}
+
+// MCP 全限定工具名守卫：Claude gateway 暴露 `mcp__<server>__<tool>`，整体须 <=64 字符。
+// 当前最长 mcp__tech-persistence-memory__tp_memory_project_profile = 55（余量 9）；
+// 本守卫防未来新增长工具名/重命名 server 静默突破限制（P0a 防回归）。
+const memoryToolsSource = path.join(root, 'scripts', 'lib', 'memory-tools.js');
+if (isFile(memoryToolsSource, 'mcp tool source scripts/lib/memory-tools.js')) {
+  const toolNames = extractMcpToolNames(fs.readFileSync(memoryToolsSource, 'utf-8'));
+  if (toolNames.length === 0) {
+    fail('could not extract any tp_* tool names from scripts/lib/memory-tools.js (regex drift?)');
+  } else {
+    // server 名取自已校验的 .mcp.json（随重命名自动跟踪），缺省回退到既有约定名。
+    const mcpServersConfig = readJson(mcpManifestPath);
+    const serverNames = mcpServersConfig && mcpServersConfig.mcpServers
+      ? Object.keys(mcpServersConfig.mcpServers)
+      : ['tech-persistence-memory'];
+    const fqNames = serverNames.flatMap((server) => buildMcpFqNames(server, toolNames));
+    const overlong = findOverlongMcpNames(fqNames);
+    if (overlong.length > 0) {
+      overlong.forEach(({ name, length }) => {
+        fail(`MCP fully-qualified tool name too long (${length} > ${MCP_FQ_NAME_MAX}): ${name}`);
+      });
+    } else {
+      const longest = Math.max(...fqNames.map((name) => name.length));
+      ok(`MCP fully-qualified tool names within ${MCP_FQ_NAME_MAX}-char limit (${toolNames.length} tools, longest ${longest})`);
     }
   }
 }
