@@ -12,6 +12,7 @@ const {
   collectSolutions,
   renderIndexJsonl,
   upsertSolutionSection,
+  syncObsidianSolutionProjection,
   syncSolutionIndex,
 } = require('./sync-solution-index');
 
@@ -110,6 +111,46 @@ test('syncSolutionIndex writes one canonical jsonl and two projections', () => {
   const jsonl = renderIndexJsonl(result.entries).trim();
   assert.deepStrictEqual(JSON.parse(jsonl), result.entries[0]);
   fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('syncObsidianSolutionProjection mirrors solutions into vault project dir and stays idempotent', () => {
+  const repo = makeRepo();
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-obsidian-vault-'));
+  writeSolution(repo, '2026-05-18-a.md', 'title: "A"\ndate: 2026-05-18\ntags: [solution, alpha]', '# A\n\n## Problem\n\nAlpha problem.');
+  writeSolution(repo, '2026-05-19-b.md', 'title: "B"\ndate: 2026-05-19\ntags: [solution, beta]', '# B\n\n## Problem\n\nBeta problem.');
+
+  const targetDir = path.join(vault, 'projects', 'proj123', 'solutions');
+  fs.mkdirSync(targetDir, { recursive: true });
+  fs.writeFileSync(path.join(targetDir, 'stale.md'), '# stale\n');
+
+  const first = syncObsidianSolutionProjection(repo, {
+    obsidianVault: vault,
+    projectId: 'proj123',
+    projectName: 'tech-persistence',
+  });
+
+  assert.ok(fs.existsSync(path.join(targetDir, '2026-05-18-a.md')));
+  assert.ok(fs.existsSync(path.join(targetDir, '2026-05-19-b.md')));
+  assert.ok(!fs.existsSync(path.join(targetDir, 'stale.md')), 'stale projected files should be removed');
+  assert.strictEqual(first.written, 2);
+  assert.strictEqual(first.removed, 1);
+  assert.strictEqual(first.changed, true);
+  assert.strictEqual(
+    fs.readFileSync(path.join(targetDir, '2026-05-18-a.md'), 'utf-8'),
+    fs.readFileSync(path.join(repo, 'docs', 'solutions', '2026-05-18-a.md'), 'utf-8')
+  );
+
+  const second = syncObsidianSolutionProjection(repo, {
+    obsidianVault: vault,
+    projectId: 'proj123',
+    projectName: 'tech-persistence',
+  });
+  assert.strictEqual(second.changed, false);
+  assert.strictEqual(second.written, 0);
+  assert.strictEqual(second.removed, 0);
+
+  fs.rmSync(repo, { recursive: true, force: true });
+  fs.rmSync(vault, { recursive: true, force: true });
 });
 
 console.log('');

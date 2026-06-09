@@ -140,6 +140,8 @@ node scripts/init-obsidian-vault.js
 └── projects/
 ```
 
+当你从项目根运行 `node scripts/init-obsidian-vault.js --shared`（或 `--vault-path`）时，脚本还会把当前 repo 的 `docs/solutions/*.md` 幂等投影到 `projects/<project-id>/solutions/`。repo 内 `docs/solutions/` 仍是唯一 canonical source；vault 里的 solution 文件是便于 Graph / Dataview 浏览的副本。
+
 ## 用 Obsidian 打开 Vault
 
 1. 启动 Obsidian
@@ -198,6 +200,7 @@ node scripts/init-obsidian-vault.js
 ✅ .obsidianignore 排除了 .jsonl 文件
 ✅ .gitignore / .stignore 已生成（跨设备同步开箱排除危险文件）
 ✅ 共享模式下 ~/.tech-persistence/config.json 指向同一个 homunculusHome
+✅ 如当前 repo 有 `docs/solutions/*.md`，则 `projects/<project-id>/solutions/` 已生成对应投影
 ```
 
 ## 重新初始化
@@ -211,7 +214,7 @@ node scripts/init-obsidian-vault.js --codex
 node scripts/init-obsidian-vault.js --vault-path ~/Documents/TechPersistence
 ```
 
-`.obsidianignore` / `.gitignore` / `.stignore` 都以合并模式更新，只补充缺失规则，不覆盖用户自定义内容。`Dashboard.md` 会备份旧版后重新生成。
+`.obsidianignore` / `.gitignore` / `.stignore` 都以合并模式更新，只补充缺失规则，不覆盖用户自定义内容。`Dashboard.md` 会备份旧版后重新生成；当前 repo 的 `docs/solutions/*.md` 也会同步刷新到 `projects/<project-id>/solutions/`。
 
 ## 故障排查
 

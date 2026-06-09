@@ -13,7 +13,7 @@ tech-persistence 的知识产出分两层：**vault 图谱节点**（写入 homu
 | 本能 | `#instinct` | 紫色 | `instincts/personal/` 或 `projects/<id>/instincts/` | Hook 自动 + `/compound` |
 | Memory | `#memory` | 蓝色 | `projects/<id>/memory/{topic}.md`、`MEMORY.md` | Stop Hook 自动 |
 | 会话摘要 | `#session` | 绿色 | `projects/<id>/sessions/` | Stop Hook 自动 |
-| 解决方案 | `#solution` | 深绿 | `docs/solutions/` (项目级) | `/compound` 手动 |
+| 解决方案 | `#solution` | 深绿 | `projects/<id>/solutions/`（由 repo `docs/solutions/` 投影） | `/compound` + solution sync |
 | Sprint | `#sprint` | 青色 | `docs/plans/` (项目级) | `/sprint` |
 | 交接点 | `#handoff` | 金色 | `docs/plans/.handoff/` | Stop Hook 自动 + `/checkpoint` |
 
@@ -42,7 +42,7 @@ Stop Hook 生成会话摘要 (带 #session tag)
 会话摘要自动出现在 Obsidian 中
 ```
 
-你不需要做任何事情。每次 Claude Code 或 Codex 会话结束，知识自动流入 Obsidian。共享模式下，两边会写入同一个 homunculus vault。
+你不需要做任何事情来同步 session / memory / instinct。每次 Claude Code 或 Codex 会话结束，这三类知识会自动流入 Obsidian。共享模式下，两边会写入同一个 homunculus vault。repo 里的 `docs/solutions/*.md` 仍是 canonical source，需要通过 `node scripts/sync-solution-index.js --all --obsidian-vault shared` 或重跑 `node scripts/init-obsidian-vault.js --shared` 刷新 vault 投影。
 
 ### 2. /compound 后查看新知识
 
@@ -56,10 +56,10 @@ $compound
 
 `/compound` 会产出：
 - 本能文件（`instincts/*.md`）→ Obsidian 中 `#instinct` 节点
-- 解决方案（`docs/solutions/*.md`）→ Obsidian 中 `#solution` 节点
+- 解决方案 canonical（`docs/solutions/*.md`）→ 通过 solution sync 投影到 `projects/<id>/solutions/*.md`，再出现在 Obsidian `#solution` 节点
 - 规则更新（`.claude/rules/*.md` 或 `.codex/rules/*.md`）→ repo 注入层（不进 vault graph）
 
-切换到 Obsidian，刷新即可看到新节点。
+切换到 Obsidian 前，若这次新增了 solution，先跑一次 `node scripts/sync-solution-index.js --all --obsidian-vault shared`（或重跑 `node scripts/init-obsidian-vault.js --shared`）；其余自动产物直接刷新即可看到。
 
 ### 3. 用 Graph View 发现关联
 
@@ -293,7 +293,8 @@ Claude Code / Codex 会话
   ├─ Stop Hook → sessions/*.md (#session)
   │            → projects/<id>/memory/{topic}.md, MEMORY.md (#memory)
   ├─ /compound  → instincts/*.md (#instinct)
-  │              → docs/solutions/*.md (#solution)
+  │              → docs/solutions/*.md (canonical source)
+  │              → sync-solution-index --obsidian-vault → projects/<id>/solutions/*.md (#solution)
   │              → .claude/rules/*.md 或 .codex/rules/*.md (repo 注入层，不进 vault graph)
   └─ /evolve    → evolved/skills/*.md
                  → evolved/rules/*.md

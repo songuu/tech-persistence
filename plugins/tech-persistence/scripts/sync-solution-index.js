@@ -11,6 +11,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const { detectProjectIdentity } = require('./lib/memory-v5');
+const { resolveBaseDir, resolveConfiguredBaseDir } = require('./lib/runtime-paths');
 
 const DEFAULT_KEEP = 5;
 const SECTION_ANCHOR = '### 解决方案索引';
@@ -229,6 +231,100 @@ function renderIndexJsonl(entries) {
     .concat(entries.length > 0 ? '\n' : '');
 }
 
+function resolveObsidianVault(repoRoot, options = {}) {
+  const requested = options.obsidianVault;
+  if (!requested) return null;
+  if (requested === 'shared') {
+    const configured = resolveConfiguredBaseDir();
+    if (!configured) {
+      throw new Error('shared homunculus 未配置，请先运行 scripts/configure-shared-homunculus.js');
+    }
+    return configured;
+  }
+  if (requested === 'auto') return resolveBaseDir();
+  return path.resolve(repoRoot, requested);
+}
+
+function buildObsidianProjectionState(repoRoot, options = {}) {
+  const vaultPath = resolveObsidianVault(repoRoot, options);
+  if (!vaultPath) return null;
+
+  const detectedProject = detectProjectIdentity(repoRoot);
+  const project = {
+    id: String(options.projectId || detectedProject.id),
+    name: String(options.projectName || detectedProject.name),
+  };
+  const solutionsDir = path.resolve(repoRoot, options.solutionsDir || 'docs/solutions');
+  const targetDir = path.join(vaultPath, 'projects', project.id, 'solutions');
+  const files = fs.existsSync(solutionsDir)
+    ? fs.readdirSync(solutionsDir)
+      .filter((name) => name.endsWith('.md'))
+      .sort()
+      .map((name) => ({
+        name,
+        sourcePath: path.join(solutionsDir, name),
+        targetPath: path.join(targetDir, name),
+        content: fs.readFileSync(path.join(solutionsDir, name), 'utf-8'),
+      }))
+    : [];
+
+  return { vaultPath, project, solutionsDir, targetDir, files };
+}
+
+function applyObsidianProjection(state, dryRun = false) {
+  if (!state) return null;
+  const changeDetails = [];
+  let written = 0;
+  let removed = 0;
+
+  if (!dryRun) {
+    fs.mkdirSync(state.targetDir, { recursive: true });
+  }
+
+  state.files.forEach((file) => {
+    const changed = writeIfChanged(file.targetPath, file.content, dryRun);
+    if (changed) {
+      written += 1;
+      changeDetails.push({
+        type: 'write',
+        path: file.targetPath,
+        name: file.name,
+      });
+    }
+  });
+
+  if (fs.existsSync(state.targetDir)) {
+    const expected = new Set(state.files.map((file) => file.name.toLowerCase()));
+    fs.readdirSync(state.targetDir)
+      .filter((name) => name.endsWith('.md') && !expected.has(name.toLowerCase()))
+      .forEach((name) => {
+        removed += 1;
+        if (!dryRun) fs.rmSync(path.join(state.targetDir, name), { force: true });
+        changeDetails.push({
+          type: 'remove',
+          path: path.join(state.targetDir, name),
+          name,
+        });
+      });
+  }
+
+  return {
+    changed: changeDetails.length > 0,
+    written,
+    removed,
+    changeDetails,
+  };
+}
+
+function syncObsidianSolutionProjection(repoRoot, options = {}) {
+  const state = buildObsidianProjectionState(repoRoot, options);
+  if (!state) return null;
+  return {
+    ...state,
+    ...applyObsidianProjection(state, Boolean(options.dryRun)),
+  };
+}
+
 function targetDocs(repoRoot, options = {}) {
   const requested = options.targets || ['claude', 'codex'];
   const docs = [];
@@ -281,7 +377,18 @@ function syncSolutionIndex(repoRoot, options = {}) {
       changed: writeIfChanged(doc.path, doc.expectedContent, dryRun),
     });
   });
-  return { ...state, changes };
+  const obsidianProjection = syncObsidianSolutionProjection(repoRoot, options);
+  if (obsidianProjection) {
+    changes.push({
+      type: 'obsidian',
+      path: obsidianProjection.targetDir,
+      vaultPath: obsidianProjection.vaultPath,
+      changed: obsidianProjection.changed,
+      written: obsidianProjection.written,
+      removed: obsidianProjection.removed,
+    });
+  }
+  return { ...state, changes, obsidianProjection };
 }
 
 function parseArgs(argv) {
@@ -304,6 +411,8 @@ function parseArgs(argv) {
       options.claudeMd = argv[++i];
     } else if (arg === '--agents-md') {
       options.agentsMd = argv[++i];
+    } else if (arg === '--obsidian-vault') {
+      options.obsidianVault = argv[++i];
     } else if (arg === '--help') {
       options.help = true;
     } else {
@@ -317,11 +426,12 @@ function parseArgs(argv) {
 
 function usage() {
   return [
-    'Usage: node scripts/sync-solution-index.js [--all] [--target claude|codex] [--keep N] [--dry-run]',
+    'Usage: node scripts/sync-solution-index.js [--all] [--target claude|codex] [--keep N] [--dry-run] [--obsidian-vault shared|auto|PATH]',
     '',
     'Examples:',
     '  node scripts/sync-solution-index.js --all',
     '  node scripts/sync-solution-index.js --target codex --keep 3',
+    '  node scripts/sync-solution-index.js --all --obsidian-vault shared',
   ].join('\n');
 }
 
@@ -334,6 +444,12 @@ function main() {
   const repoRoot = process.cwd();
   const result = syncSolutionIndex(repoRoot, options);
   result.changes.forEach((change) => {
+    if (change.type === 'obsidian') {
+      const rel = toPosixPath(path.relative(change.vaultPath, change.path));
+      const suffix = `(${change.written} synced, ${change.removed} removed)`;
+      console.log(`${change.changed ? '[updated]' : '[ok]'} obsidian:${rel} ${suffix}`);
+      return;
+    }
     const rel = toPosixPath(path.relative(repoRoot, change.path));
     console.log(`${change.changed ? '[updated]' : '[ok]'} ${rel}`);
   });
@@ -361,6 +477,9 @@ module.exports = {
   renderSolutionSection,
   renderIndexJsonl,
   upsertSolutionSection,
+  resolveObsidianVault,
+  buildObsidianProjectionState,
+  syncObsidianSolutionProjection,
   buildExpectedState,
   syncSolutionIndex,
 };

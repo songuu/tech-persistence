@@ -17,6 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { syncObsidianSolutionProjection } = require('./sync-solution-index');
 
 // ─── 参数解析 + 路径安全校验 ───
 function parseArgs() {
@@ -567,6 +568,18 @@ function main() {
   } else {
     fs.writeFileSync(dashboardPath, dashboardContent);
     console.log('   ✅ Dashboard.md 知识仪表板');
+  }
+
+  const solutionProjection = syncObsidianSolutionProjection(process.cwd(), {
+    obsidianVault: vaultPath,
+  });
+  if (solutionProjection) {
+    const rel = path.relative(vaultPath, solutionProjection.targetDir).replace(/\\/g, '/');
+    if (solutionProjection.changed) {
+      console.log(`   ✅ ${rel}/ 解决方案投影 (${solutionProjection.written} synced, ${solutionProjection.removed} removed)`);
+    } else {
+      console.log(`   ⚠️  ${rel}/ 解决方案投影已是最新`);
+    }
   }
 
   // evolved/ 目录（确保存在）
