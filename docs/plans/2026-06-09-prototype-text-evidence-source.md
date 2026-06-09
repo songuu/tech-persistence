@@ -51,6 +51,16 @@ propagate-command-changes.js prototype → build-codex-plugin.js → validate-co
 
 结果：4 副本同步（plugin command / codex command / plugin skill / codex skill），Codex 转换正确（Claude→Codex 未撞车，墨刀/PRD 文本保留），pre-commit exit 0。
 
+## v2 增强（2026-06-09 同日，消费侧再加强）
+
+来源 0（文字证据源）落地后，把"文字需求"的应用从一句原则展开为三个具体产物强化（pm-skills sibling-eval 方向锁定后，用户选「prototype 消费侧再加强」而非借 create-prd）。全部在 `prototype` skill 内扩展，**0 新命令**，集中落在「假设置信度来源 0」一处避免散落：
+
+1. **字段 → 数据结构**：PRD 写明的字段/类型/必填/长度/枚举值，覆盖截图列名推断，标 `✅确认 (PRD 明示)`。数据结构 example heading 改「PRD 字段优先，截图列兜底」。
+2. **需求 → 验收清单**：PRD 每条明示需求 1:1 落成 `/prototype checklist` 的 `【PRD】` 必过项，与"从视觉推断"普通项分开。checklist example 加 `【PRD 明示需求】` 组。
+3. **冲突 → 裁决表**：文字 vs 截图冲突进结构化裁决表让用户拍板，不静默选边。
+
+风险仍 L1（纯 prompt），parity 链全绿（validate passed / pre-commit exit 0），codex 副本 `Claude→Codex` 转换正确、墨刀/PRD 保留、无 runtime-label 撞车。
+
 ## 未做（YAGNI / 守 LT）
 
 - 场景 1（自己画 PRD，`think --prd` 精简档）— 用户标「后续」，等真当 PM 再落，不提前建。
@@ -59,3 +69,4 @@ propagate-command-changes.js prototype → build-codex-plugin.js → validate-co
 ## 变更日志
 
 - 2026-06-09：prototype skill 加来源 0（随附文字需求）。场景 2 落地。status: completed。
+- 2026-06-09 v2：来源 0 展开三应用（字段→数据结构 / 需求→验收清单 / 冲突→裁决表）。pm-skills sibling-eval 方向锁定后的消费侧加强。parity 链全绿。
