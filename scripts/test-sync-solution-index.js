@@ -10,7 +10,9 @@ const path = require('path');
 const {
   parseFrontmatter,
   collectSolutions,
+  readRegisteredProject,
   renderIndexJsonl,
+  resolveProjectionProject,
   upsertSolutionSection,
   syncObsidianSolutionProjection,
   syncSolutionIndex,
@@ -148,6 +150,55 @@ test('syncObsidianSolutionProjection mirrors solutions into vault project dir an
   assert.strictEqual(second.changed, false);
   assert.strictEqual(second.written, 0);
   assert.strictEqual(second.removed, 0);
+
+  fs.rmSync(repo, { recursive: true, force: true });
+  fs.rmSync(vault, { recursive: true, force: true });
+});
+
+test('readRegisteredProject and resolveProjectionProject prefer vault registry match over cwd fallback', () => {
+  const repo = makeRepo();
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-obsidian-registry-'));
+  fs.writeFileSync(
+    path.join(vault, 'projects.json'),
+    JSON.stringify({
+      proj123: {
+        name: 'tech-persistence',
+        source: 'git-remote',
+        path: repo,
+      },
+    }, null, 2)
+  );
+
+  const registered = readRegisteredProject(vault, repo);
+  assert.deepStrictEqual(registered, {
+    id: 'proj123',
+    name: 'tech-persistence',
+    source: 'git-remote',
+  });
+
+  const resolved = resolveProjectionProject(repo, vault);
+  assert.strictEqual(resolved.id, 'proj123');
+  assert.strictEqual(resolved.name, 'tech-persistence');
+
+  fs.rmSync(repo, { recursive: true, force: true });
+  fs.rmSync(vault, { recursive: true, force: true });
+});
+
+test('syncObsidianSolutionProjection supports custom project root for desktop mirror targets', () => {
+  const repo = makeRepo();
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-obsidian-custom-root-'));
+  writeSolution(repo, '2026-05-18-a.md', 'title: "A"\ndate: 2026-05-18\ntags: [solution, alpha]', '# A\n\n## Problem\n\nAlpha problem.');
+
+  const result = syncObsidianSolutionProjection(repo, {
+    obsidianVault: vault,
+    projectId: 'proj123',
+    projectName: 'tech-persistence',
+    obsidianProjectRoot: '_shared_homunculus/projects',
+  });
+
+  const target = path.join(vault, '_shared_homunculus', 'projects', 'proj123', 'solutions', '2026-05-18-a.md');
+  assert.strictEqual(result.targetDir, path.dirname(target));
+  assert.ok(fs.existsSync(target));
 
   fs.rmSync(repo, { recursive: true, force: true });
   fs.rmSync(vault, { recursive: true, force: true });

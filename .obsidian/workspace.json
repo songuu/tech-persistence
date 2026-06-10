@@ -4,17 +4,21 @@
     "type": "split",
     "children": [
       {
-        "id": "f210f5c90ed40ebf",
+        "id": "0e05ba2864001e17",
         "type": "tabs",
         "children": [
           {
-            "id": "59ac60ecc166369e",
+            "id": "9f3388107384f7e0",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "_shared_homunculus/projects/8331ab9c2853/memory/MEMORY.md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "新标签页"
+              "title": "MEMORY"
             }
           }
         ]
@@ -176,10 +180,43 @@
       "bases:新建数据库": false
     }
   },
-  "active": "59ac60ecc166369e",
+  "active": "9f3388107384f7e0",
   "lastOpenFiles": [
-    "plugins/tech-persistence/hooks/guard-handoff-path.js",
-    "scripts/guard-handoff-path.js",
-    "未命名.base"
+    "_shared_homunculus/projects/8331ab9c2853/memory/general.md",
+    "docs/plans/2026-06-09-prototype-text-evidence-source.md",
+    "未命名.base",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq0lbnhc.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/two-extreme-diagnosis-find-middle-gap.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq0i7qr1.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610vn2.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610vmb.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610vlb.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610vds.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610vd8.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610vc1.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610v3i.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610v35.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610v2b.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610utp.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610utg.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610us8.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610ukh.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq60uf6w.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610uk2.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq610uiy.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq60uf6q.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq60uf4s.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq60jizq.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq60jizo.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts/tool-preference-mq60jiz0.md",
+    "_shared_homunculus/projects/8331ab9c2853/instincts",
+    "_shared_homunculus/projects/8331ab9c2853/sessions",
+    "_shared_homunculus/projects/8331ab9c2853/memory",
+    "_shared_homunculus/projects/8331ab9c2853",
+    "_shared_homunculus/projects",
+    "_shared_homunculus",
+    "scripts/test-sync-obsidian-desktop-vault.js",
+    "scripts/sync-obsidian-desktop-vault.js",
+    "plugins/tech-persistence/hooks/guard-handoff-path.js"
   ]
 }

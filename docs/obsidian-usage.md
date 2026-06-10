@@ -44,6 +44,14 @@ Stop Hook 生成会话摘要 (带 #session tag)
 
 你不需要做任何事情来同步 session / memory / instinct。每次 Claude Code 或 Codex 会话结束，这三类知识会自动流入 Obsidian。共享模式下，两边会写入同一个 homunculus vault。repo 里的 `docs/solutions/*.md` 仍是 canonical source，需要通过 `node scripts/sync-solution-index.js --all --obsidian-vault shared` 或重跑 `node scripts/init-obsidian-vault.js --shared` 刷新 vault 投影。
 
+如果你的 **Obsidian 桌面客户端当前打开的不是 shared homunculus vault**，而是另一个 vault（例如 repo 根目录），那么 shared vault 里的 session / memory / instinct 不会自动出现在当前桌面端视图里。此时可运行：
+
+```bash
+node scripts/sync-obsidian-desktop-vault.js
+```
+
+它会把 shared vault 中当前项目的 `memory/`、`sessions/`、`instincts/` 与 solution 投影镜像到当前桌面端打开的 vault 下 `_shared_homunculus/`，供桌面端和它绑定的同步服务消费；shared vault 仍是 canonical source。
+
 ### 2. /compound 后查看新知识
 
 ```bash
@@ -60,6 +68,8 @@ $compound
 - 规则更新（`.claude/rules/*.md` 或 `.codex/rules/*.md`）→ repo 注入层（不进 vault graph）
 
 切换到 Obsidian 前，若这次新增了 solution，先跑一次 `node scripts/sync-solution-index.js --all --obsidian-vault shared`（或重跑 `node scripts/init-obsidian-vault.js --shared`）；其余自动产物直接刷新即可看到。
+
+若你故意把 Obsidian 长期开在 repo vault 而不是 shared vault，则改跑 `node scripts/sync-obsidian-desktop-vault.js`，让桌面端镜像一次即可。
 
 ### 3. 用 Graph View 发现关联
 

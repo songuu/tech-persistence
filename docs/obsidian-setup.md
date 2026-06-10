@@ -103,6 +103,16 @@ bash install-codex.sh --obsidian
 
 默认路径为 `~/.codex/homunculus`。也可直接调用底层脚本：`node scripts/init-obsidian-vault.js --codex`。
 
+### 如果桌面端长期打开的是另一个 Vault
+
+有些人会让 Obsidian 桌面端长期打开 repo 根目录或另一个工作 vault，而不是 shared homunculus。此时 shared vault 里的 session / memory / instinct 不会直接出现在当前桌面端，更不会被当前桌面端绑定的 Sync 服务上传。可额外运行：
+
+```bash
+node scripts/sync-obsidian-desktop-vault.js
+```
+
+它会把 shared vault 中当前项目的 Markdown 知识镜像到当前桌面端打开的 vault 下 `_shared_homunculus/`；shared vault 仍是 canonical source，桌面端 vault 只是消费副本。
+
 ### 临时覆盖路径
 
 如果不想写全局共享配置，可以只在当前 shell 临时覆盖：
@@ -223,6 +233,7 @@ node scripts/init-obsidian-vault.js --vault-path ~/Documents/TechPersistence
 | 脚本报 "安全限制" | vault 路径不在 home 目录下 | 使用 home 目录下的路径，或配置工具加 `--allow-outside-home` |
 | Claude/Codex 没有写到同一个目录 | 共享配置未写入或环境变量覆盖 | 检查 `~/.tech-persistence/config.json` 和 `TECH_PERSISTENCE_HOME` |
 | Obsidian 看不到 .jsonl 文件 | `.obsidianignore` 正常排除 | 这是预期行为 |
+| shared vault 已更新，但桌面端仍看不到新 summary | 当前桌面端打开的是另一个 vault | 运行 `node scripts/sync-obsidian-desktop-vault.js`，或直接把桌面端切到 shared vault |
 | Dashboard 表格显示代码块 | 未安装 Dataview 插件 | 安装 Dataview |
 | Graph View 无颜色 | `.obsidian/graph.json` 未加载 | 关闭重新打开 vault |
 | MCP Server 连接失败 | npx 未安装或路径错误 | 检查 Node.js 和 vault 路径 |

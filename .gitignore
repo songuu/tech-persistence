@@ -1,4 +1,5 @@
 .worktrees/
 .agent-runs/
+_shared_homunculus/
 *.bak.*
 docs/plans/.handoff/
