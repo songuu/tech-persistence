@@ -527,7 +527,7 @@ Sprint 边界默认切断 3 类信息流：
 |------|------|------|
 | `@FeatureGate("<name>")` 装饰器 | dead code API 必须挂 feature gate, 未启用时即使后端可用也 404 | Layout API 未接 UI 时 `@FeatureGate("layouts-ui")` |
 | `Persistence: "memory" \| "session" \| "server"` 类型标签 | `useState` 涉及业务数据必须显式声明持久化层级 | `customEdges: PersistedState<"memory", Edge[]>` |
-| `// @sizebudget <N>` 注释 | 大文件加行数上限注释, pre-commit hook 拒绝超额提交 | `// @sizebudget 800` |
+| `// @sizebudget <N>` 注释 | 大文件加行数上限注释, 可配套 pre-commit hook 拒绝超额提交（模式，需在项目自行实装） | `// @sizebudget 800` |
 | `@sprint-X-invariant` 测试标签 | sprint 立的不变量打标签, 所有后续 sprint 必跑 | `describe.concurrent("@sprint-a-invariant: ReactFlow perf", ...)` |
 | `// @deadcode-until: <sprint>` 注释 | 标注"建好暂不用"代码, 必有 sprint deadline | Layout controller 顶部加 `// @deadcode-until: Sprint C` |
 

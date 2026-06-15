@@ -136,12 +136,13 @@ moai 几乎所有"便利"都为 **code-production-at-scale** 设计：TRUST5/85%
 
 结论：**对抗核验 = 6 个 sibling-eval 来防 draft 偏宽的有效兜底**。draft 0/0/1/10 → 对抗 0/0/1/11（C5 降级 + B1 新增）。
 
-### 7.2 eval 反向发现的 TP 真 bug（actionable，独立 follow-up）
+### 7.2 eval 反向发现的 TP 措辞歧义（已解决，[[documented-claim-vs-code-reality-drift]] 双向案例）
 
-对抗核验 C3 时发现：**`sprint.md:517` 声称 `@sizebudget` 由 "pre-commit hook 拒绝超额提交" 强制，但 grep `pre-commit-check.js` = 0 匹配**——TP 自家 sprint.md 的 [[documented-claim-vs-code-reality-drift]]（虚假 enforcement 声明）。两条处置路径（待用户定，**不并入本 eval commit**，守"每个提交只做一件事"）：
-- (a) 改 doc：把 @sizebudget 行标为"doc-only 约定"（与同表其他 3 个标签一致），最小、诚实；
-- (b) 实装：给 pre-commit 加 @sizebudget checker（但需先证高频违反价值，[[ADR-013]] + measure-before-enforce）。
-推荐 (a)（轻量 + 立即消除 drift）。
+对抗核验 C3 时，agent 报：`sprint.md:517` 称 `@sizebudget` 由 "pre-commit hook 拒绝超额提交" 强制，但 grep `pre-commit-check.js` = 0 匹配。
+
+**复核纠正（对抗 agent 略过头）**：`sprint.md:509-519` 整张「架构纪律标签」表是给**用户项目**代码的纪律模式（@FeatureGate/@deadcode-until 等 TP 自身也不 ships）。agent 把它误当 TP 的 `pre-commit-check.js`——这是把"项目侧 pre-commit hook"和"TP 仓库 pre-commit-check.js"混为一谈。**所以不是"TP ships 坏 checker"，而是措辞歧义**：@sizebudget 是 5 行里唯一把 enforcement 写成像"已激活"的（其余写 effect 不写机制）。这恰好是 [[documented-claim-vs-code-reality-drift]] 的**双向**教训——既要防 draft 自造 drift（§7.1 C1），也要防对抗 agent 反向过判（先验证再当 bug 修，[[feedback_single_pass_eval_lenient_vs_adversarial]] 新增条目）。
+
+**处置（已应用 a，本 commit 外的独立 fix commit）**：改措辞为"可配套 pre-commit hook 拒绝超额提交（模式，需在项目自行实装）"，与同表其余行统一为"模式"语义，消除"读起来像 TP 已激活"的歧义。未选 (b)（实装 @sizebudget checker）——需先证高频违反价值（[[ADR-013]] + measure-before-enforce）。
 
 ## 8. 残留风险（[[documented-claim-vs-code-reality-drift]]）
 
