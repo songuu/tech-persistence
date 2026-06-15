@@ -1,23 +1,40 @@
-# Claude Code / Codex 自进化工程系统
+# Tech Persistence
 
-> 融合 gstack 角色分工 + Compound Engineering 复利循环 + ECC/Claude-Mem 自学习本能 + Skill 自迭代 + 风险自适应测试 + 上下文交接 + Obsidian 知识图谱。
-> 22 个用户命令 · 3 个项目命令 · 10 个按需技能 · 4 个 Hook · Memory v5 · Caveman 压缩层 · 5 层知识存储。
-> 支持 Claude Code 原生目录和 Codex 原生插件两种运行时；每一次工作都让下一次更容易。
+> Persistent engineering memory for Claude Code and Codex.
+> Claude Code 和 Codex 的长期工程记忆层。
 
----
+**Stop teaching your AI agent the same repo twice.**
+**别再一遍遍教 AI 认识同一个项目。**
 
-## 设计哲学
+AI coding agent 很强，但它会忘。每次新 session 都可能需要重新解释项目架构、踩过的坑、review 规则、测试习惯和交接上下文。
 
-| 问题 | 来源 | 解法 |
-|------|------|------|
-| 如何分工 | gstack | 同一模型不同阶段切换角色（CEO→架构师→工程师→审查团队） |
-| 如何复利 | Compound Engineering | 每次工作的经验沉淀为文档，供下次规划自动读取 |
-| 如何记忆 | ECC + Claude-Mem + Memory v5 | 4 Hook 自动观察，生成 `MEMORY.md` 启动索引、topic 记忆和带置信度的本能 |
-| 如何适应 | Skill 自迭代 | 使用信号 → 诊断 → 改进提案 → eval 验证 → 发布新版 |
-| 如何测试 | 风险自适应 | 评估变更风险等级(L0-L4)，自动匹配测试深度 |
-| 如何持续 | 上下文交接 | 长任务 checkpoint + 交接文件 + 自动恢复 |
-| 如何跨 Agent 协作 | Agent Loop v7 | v6 external orchestrator 继续负责冻结 spec / 实现 / 复审；v7 增加 caveman 输出与 memory 压缩能力 |
-| 如何可视化 | Obsidian | 所有产出 Obsidian 兼容，Graph View 展示知识关联 |
+Tech Persistence turns every sprint into durable engineering memory. The next Claude Code or Codex session starts with what the last one learned.
+
+Tech Persistence 把每一次 sprint 沉淀成持久化工程记忆，让下一次 Claude Code / Codex session 带着上一次学到的东西开始。
+
+Start with `/sprint`. Go deeper with `/think`, `/plan`, `/work`, `/review`, `/compound` when needed.
+
+## 最小示例
+
+```bash
+/sprint "fix the flaky auth test and prevent this failure pattern from recurring"
+/review
+/compound
+```
+
+- `/sprint` 完成规划、实现、测试、审查和复盘
+- hooks 捕获 session 中的有价值信号
+- `/compound` 把经验沉淀为可复用记忆
+- 下一次 session 自动注入相关项目知识
+
+## 核心价值
+
+| 价值 | 说明 |
+|------|------|
+| 长期项目记忆 | 架构约定、踩坑记录、review 规则和测试偏好不再每次重讲 |
+| Sprint 复利 | 每次实现、修 bug、review 都能沉淀为下一次可用的工程知识 |
+| 跨 Agent 连续性 | Claude Code 和 Codex 可以从同一套项目记忆开始工作 |
+| 可追溯知识层 | 记忆来自 session 信号、复盘文档和规则文件，能读、能审、能同步 |
 
 ---
 
@@ -668,6 +685,21 @@ your-project/                           ← Codex 项目级 (提交 Git)
 10. **Obsidian 原生**：所有产出 frontmatter + wikilinks，Graph View 可视化
 11. **80/20 分配**：80% 规划审查 · 20% 执行
 12. **先学后压**：永远先 /compound 再 /compact
+
+---
+
+## 灵感来源与差异
+
+Inspired by gstack, Compound Engineering, Claude-Mem / ECC, and Obsidian-style knowledge graphs.
+
+Tech Persistence focuses on durable memory across sessions and across agents. 它不是把更多命令堆到 AI coding workflow 里，而是把每次 sprint 的有效经验变成下一次 Claude Code / Codex session 可直接使用的工程记忆。
+
+| 来源 | 借鉴 | Tech Persistence 的取舍 |
+|------|------|--------------------------|
+| gstack | 阶段化角色分工 | 用 `/think`、`/plan`、`/work`、`/review` 支撑 sprint 节奏 |
+| Compound Engineering | 工作结果复利化 | 用 `/compound` 把经验沉淀为规则、方案和可复用记忆 |
+| Claude-Mem / ECC | 自动观察与持续学习 | 保留可审计、可回滚、跨 session 注入的项目知识 |
+| Obsidian-style knowledge graphs | Markdown 知识图谱 | 让记忆保持可读、可链接、可同步 |
 
 ---
 

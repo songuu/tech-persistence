@@ -1,8 +1,8 @@
 {
   "name": "tech-persistence",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Self-evolving engineering toolchain (Claude Code + Codex multi-runtime parity). Zero npm dependencies by design (see ADR-011 lightweight principle).",
+  "description": "Persistent engineering memory for Claude Code and Codex. Make every AI coding sprint compound.",
   "engines": {
     "node": ">=18"
   },
