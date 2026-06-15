@@ -1,7 +1,6 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const MEMORY_VERSION = '5.0';
 
@@ -114,10 +113,59 @@ function uniqueDirs(values) {
     });
 }
 
-function detectProjectIdentity(cwd = process.cwd()) {
-  const execOpts = { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] };
+function findGitRoot(startDir) {
+  let current = path.resolve(startDir);
+  while (true) {
+    if (fs.existsSync(path.join(current, '.git'))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+function resolveGitDir(repoRoot) {
+  const gitMarker = path.join(repoRoot, '.git');
+  if (!fs.existsSync(gitMarker)) return null;
+  const stat = fs.lstatSync(gitMarker);
+  if (stat.isDirectory()) return gitMarker;
+  if (!stat.isFile()) return null;
+
   try {
-    const remote = execSync('git remote get-url origin', execOpts).trim();
+    const content = fs.readFileSync(gitMarker, 'utf-8');
+    const match = content.match(/gitdir:\s*(.+)\s*$/im);
+    if (!match) return null;
+    return path.resolve(repoRoot, match[1].trim());
+  } catch {
+    return null;
+  }
+}
+
+function readGitRemoteOrigin(repoRoot) {
+  const gitDir = resolveGitDir(repoRoot);
+  if (!gitDir) return '';
+  const configPath = path.join(gitDir, 'config');
+  if (!fs.existsSync(configPath)) return '';
+  try {
+    const lines = fs.readFileSync(configPath, 'utf-8').split(/\r?\n/);
+    let inOrigin = false;
+    for (const line of lines) {
+      const sectionMatch = line.match(/^\s*\[(.+)]\s*$/);
+      if (sectionMatch) {
+        inOrigin = /^remote\s+"origin"$/.test(sectionMatch[1].trim());
+        continue;
+      }
+      if (!inOrigin) continue;
+      const urlMatch = line.match(/^\s*url\s*=\s*(.+)\s*$/);
+      if (urlMatch) return urlMatch[1].trim();
+    }
+  } catch {}
+  return '';
+}
+
+function detectProjectIdentity(cwd = process.cwd()) {
+  try {
+    const repoRoot = findGitRoot(cwd);
+    const remote = repoRoot ? readGitRemoteOrigin(repoRoot) : '';
     if (remote) {
       return {
         id: hashText(remote),
@@ -128,7 +176,7 @@ function detectProjectIdentity(cwd = process.cwd()) {
   } catch {}
 
   try {
-    const root = execSync('git rev-parse --show-toplevel', execOpts).trim();
+    const root = findGitRoot(cwd);
     if (root) {
       return {
         id: hashText(root),

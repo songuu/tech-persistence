@@ -245,17 +245,54 @@ function resolveObsidianVault(repoRoot, options = {}) {
   return path.resolve(repoRoot, requested);
 }
 
+function normalizePathKey(filePath) {
+  return path.resolve(filePath).replace(/[\\/]+$/, '').toLowerCase();
+}
+
+function resolveObsidianProjectRoot(options = {}) {
+  const raw = String(options.obsidianProjectRoot || 'projects');
+  return raw.split(/[\\/]+/).filter(Boolean);
+}
+
+function readRegisteredProject(vaultPath, repoRoot) {
+  const registryPath = path.join(vaultPath, 'projects.json');
+  if (!fs.existsSync(registryPath)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object') return null;
+    const repoKey = normalizePathKey(repoRoot);
+    for (const [id, value] of Object.entries(parsed)) {
+      if (!value || typeof value.path !== 'string') continue;
+      if (normalizePathKey(value.path) !== repoKey) continue;
+      return {
+        id,
+        name: value.name || path.basename(repoRoot),
+        source: value.source || 'registry',
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveProjectionProject(repoRoot, vaultPath, options = {}) {
+  const registered = readRegisteredProject(vaultPath, repoRoot);
+  const detected = detectProjectIdentity(repoRoot);
+  return {
+    id: String(options.projectId || (registered && registered.id) || detected.id),
+    name: String(options.projectName || (registered && registered.name) || detected.name),
+    source: options.projectId ? 'override' : ((registered && registered.source) || detected.source),
+  };
+}
+
 function buildObsidianProjectionState(repoRoot, options = {}) {
   const vaultPath = resolveObsidianVault(repoRoot, options);
   if (!vaultPath) return null;
 
-  const detectedProject = detectProjectIdentity(repoRoot);
-  const project = {
-    id: String(options.projectId || detectedProject.id),
-    name: String(options.projectName || detectedProject.name),
-  };
+  const project = resolveProjectionProject(repoRoot, vaultPath, options);
   const solutionsDir = path.resolve(repoRoot, options.solutionsDir || 'docs/solutions');
-  const targetDir = path.join(vaultPath, 'projects', project.id, 'solutions');
+  const targetDir = path.join(vaultPath, ...resolveObsidianProjectRoot(options), project.id, 'solutions');
   const files = fs.existsSync(solutionsDir)
     ? fs.readdirSync(solutionsDir)
       .filter((name) => name.endsWith('.md'))
@@ -478,8 +515,12 @@ module.exports = {
   renderIndexJsonl,
   upsertSolutionSection,
   resolveObsidianVault,
+  readRegisteredProject,
+  resolveProjectionProject,
+  resolveObsidianProjectRoot,
   buildObsidianProjectionState,
   syncObsidianSolutionProjection,
   buildExpectedState,
+  writeIfChanged,
   syncSolutionIndex,
 };

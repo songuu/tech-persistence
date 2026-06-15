@@ -30,6 +30,57 @@ function resolveConfigPath() {
     : defaultConfigPath();
 }
 
+function defaultObsidianDesktopConfigPath() {
+  const home = homeDir();
+  if (!home) return null;
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    return path.join(appData, 'obsidian', 'obsidian.json');
+  }
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'obsidian', 'obsidian.json');
+  }
+  const xdg = process.env.XDG_CONFIG_HOME || path.join(home, '.config');
+  return path.join(xdg, 'obsidian', 'obsidian.json');
+}
+
+function resolveObsidianDesktopConfigPath() {
+  return process.env.TECH_PERSISTENCE_OBSIDIAN_CONFIG
+    ? resolveUserPath(process.env.TECH_PERSISTENCE_OBSIDIAN_CONFIG)
+    : defaultObsidianDesktopConfigPath();
+}
+
+function readObsidianDesktopConfig(configPath = resolveObsidianDesktopConfigPath()) {
+  if (!configPath || !fs.existsSync(configPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function resolveActiveObsidianVaultPath(options = {}) {
+  if (options.desktopVault) return resolveUserPath(options.desktopVault);
+  const configPath = options.desktopConfigPath
+    ? resolveUserPath(options.desktopConfigPath)
+    : resolveObsidianDesktopConfigPath();
+  const config = readObsidianDesktopConfig(configPath);
+  if (!config || !config.vaults || typeof config.vaults !== 'object') return null;
+
+  const vaults = Object.values(config.vaults)
+    .filter((vault) => vault && typeof vault.path === 'string' && vault.path.trim())
+    .map((vault) => ({
+      path: resolveUserPath(vault.path),
+      open: vault.open === true,
+      ts: Number(vault.ts) || 0,
+    }));
+  if (vaults.length === 0) return null;
+
+  const preferred = vaults.find((vault) => vault.open)
+    || vaults.sort((a, b) => b.ts - a.ts)[0];
+  return preferred ? preferred.path : null;
+}
+
 function readSharedConfig() {
   const configPath = resolveConfigPath();
   if (!configPath || !fs.existsSync(configPath)) return null;
@@ -190,6 +241,9 @@ module.exports = {
   resolveBaseDir,
   resolveCompatReadDirs,
   resolveConfigPath,
+  resolveObsidianDesktopConfigPath,
+  readObsidianDesktopConfig,
+  resolveActiveObsidianVaultPath,
   resolveDocsPlansDir,
   resolvePlanDirectories,
   resolvePlanPath,
