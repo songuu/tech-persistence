@@ -4,7 +4,7 @@ slug: moai-adk-eval
 created: "2026-06-15"
 status: reviewed
 tags: [sibling-eval, external-reference, moai-adk, identity-question-first, convergent-evolution, refute-by-default, target-user-mismatch, adversarial-verified]
-verdict_tally: { borrow: 0, adapt: 0, backlog: 1, reject: 11 }
+verdict_tally: { borrow: 0, adapt: 1, backlog: 0, reject: 11 }
 sources:
   - https://github.com/modu-ai/moai-adk
   - https://deepwiki.com/modu-ai/moai-adk/1-moai-adk-overview
@@ -13,10 +13,12 @@ related:
   - "[[2026-06-09-pm-skills-eval]]"
   - "[[2026-06-05-ecc-eval]]"
   - "[[ADR-011]]"
+  - "[[ADR-017]]"
   - "[[ADR-021]]"
   - "[[ADR-022]]"
   - "[[ADR-023]]"
   - "[[ADR-025]]"
+  - "[[ADR-026]]"
 ---
 
 # Sibling-eval：MoAI-ADK (modu-ai) vs tech-persistence
@@ -29,7 +31,9 @@ related:
 
 MoAI-ADK = **SPEC-First 重量级生产级 agentic 编码 harness**（Go 单二进制 CLI，38,700+ 行 / 38 包，24-28 agents + 52 skills，Plan→Run→Sync→PR 全生命周期 + DB 管理 + design pipeline + GLM tmux 多 LLM）。规模与定位远超 solo 自用、纯 markdown+jsonl 的 TP。
 
-11 候选机制经 **29-轮等价的 13-agent 对抗核验**（refute-by-default，每条 verdict 强制 grep TP 代码锚定 already-had）后：**0 borrow / 0 adapt / 1 backlog / 11 reject。**
+11 候选机制经 **13-agent 对抗核验**（refute-by-default，每条 verdict 强制 grep TP 代码锚定 already-had）+ completeness critic 查漏后：**0 borrow / 1 adapt / 0 backlog / 11 reject。**
+
+> **B1 已实施**（用户指令"直接实施"）：completeness critic 挖出的 B1（语义 doc↔code↔plan 审计）落地为 `/review` 「Doc↔Code 一致性 Walkthrough」条件触发段（LLM measure lens，**不下沉 pre-commit**，[[ADR-017]] 边界 + measure-before-enforce），故 backlog → **adapt**。详见 [[ADR-026]] + §5 B1 行 + §10。
 
 > **对抗核验改判（vs 主循环 draft 0/0/1/10）**：
 > - **C5（Ralph 确定性分类）backlog → reject**：draft 犯 category error——把 Ralph 的 LSP+AST-grep 错误分类错配到 [[ADR-021]] 只装"max-iter 迭代天花板"的 deferred slot（`docs/plans/2026-05-29-sprint-goal-mode.md:31-34`）。错误分类是独立面，target-user 错配 + LSP/AST 重量违反轻量 → reject。
@@ -110,9 +114,9 @@ moai 几乎所有"便利"都为 **code-production-at-scale** 设计：TRUST5/85%
 | C9 | DDD ANALYZE-PRESERVE-IMPROVE（legacy <10% 覆盖） | ✗ | ✗ | **reject** | 0.90 | already-had：行为锁定 = 回归测试强制（`test.md:164-191`）+ [[ADR-013]]§B break-impl 3 档负样本。<10% legacy 前提对 TP 不成立 + target-user 错配。**勘误**：draft"无代码可重构"不准（TP 有 14 lib js 层） |
 | C10 | Hook 协议 27 事件 | ✗ | ✗ | **reject** | 0.93 | already-had：逻辑 hook registry（`hook-registry.js:11-137`，7 逻辑 hook 投影，[[ADR-014]]）。27 事件（TeammateIdle 等）**无宿主 runtime 触发器**（[[ADR-021]] inert）+ 违反 parity #1 + 轻量 #3。**draft "partial" 勘误为 fully already-had** |
 | C11 | Execution Mode Selection Gate | ✗ | ✗ | **reject** | 0.90 | already-had fully：`agent-orchestrator.js:1701` buildPreflightReport + `:1916` runDoctor + `:1923` --probe live ping + gate `:1838/:1845` + auto-mode 确认门。GLM/tmux 选择器 target-user 错配 |
-| **B1** | **plan-auditor / sync-auditor 语义 doc↔code↔plan 审计** | ✓ | ✓ | **backlog** | — | **critic 新增**。NN：`knowledge-drift.js`（[[ADR-023]]）只查行号引用**文件存在性**，不做语义（测不出"doc 称已修但代码没改"）。P0 真实：坐 TP #1 痛点 doc-drift（CLAUDE.md "文档滞后=失败" + [[feedback_drift_fix_requires_full_claim_grep]]），现靠纪律非机制（正是 [[ADR-013]] 反模式）。**但**语义审计是 LLM 判断（[[ADR-017]] 边界）不可做 pre-commit 确定性门 → 落 `/review` lens / `/compound` check，measure-before-enforce gated（同 C5 旧 gate 纪律）。moai 的 Go 实现拒（重量），借的是**机制形状**非实现 |
+| **B1** | **plan-auditor / sync-auditor 语义 doc↔code↔plan 审计** | ✓ | ✓ | **adapt（已实施）** | — | **critic 新增**。NN：`knowledge-drift.js`（[[ADR-023]]）只查行号引用**文件存在性**，不做语义（测不出"doc 称已修但代码没改"）。P0 真实：坐 TP #1 痛点 doc-drift（CLAUDE.md "文档滞后=失败" + [[feedback_drift_fix_requires_full_claim_grep]]），现靠纪律非机制（正是 [[ADR-013]] 反模式）。语义审计是 LLM 判断（[[ADR-017]] 边界）不可做 pre-commit 确定性门 → **已落地为 `/review` 「Doc↔Code 一致性 Walkthrough」condition-triggered measure lens**（[[ADR-026]]），measure-not-enforce。moai 的 Go 实现拒（重量），只借**机制形状** |
 
-**tally: 0 borrow / 0 adapt / 1 backlog（B1）/ 11 reject。**
+**tally: 0 borrow / 1 adapt（B1，已实施）/ 0 backlog / 11 reject。**（11 候选全 reject + critic 新增 B1，用户指令下实施为 adapt）
 
 ## 6. 优缺点（双向，[[feedback_evaluation_data_conclusion_consistency]]）
 
@@ -161,3 +165,13 @@ moai 几乎所有"便利"都为 **code-production-at-scale** 设计：TRUST5/85%
 3. **§7.1 draft 自身 C1 drift**——证明"写 TP 没有 X 前必 grep"，以及对抗核验对单遍裁决的必要性。
 
 收敛验证（§4 十机制）+ 三个副产物 > 零借鉴本身。
+
+## 10. B1 实施记录（2026-06-15，用户指令"直接实施"）
+
+B1（语义 doc↔code↔plan 审计）落地，**adapt 形态**（借机制形状、改实现）：
+
+- **落点**：`user-level/commands/review.md` 新增「Doc↔Code 一致性 Walkthrough（条件触发）」段（与既有 Gap Detection Walkthrough 同构），propagate 至 4 副本（Codex parity，[[ADR-024]]）。
+- **形态**：主 LLM 语义 verify lens——触发于 diff 含 `*.md` 代码状态断言 / 同改 docs+code / plan-solution status→completed-implemented-reviewed；对每条断言 grep/read 被断言代码核实一致性，不一致 ≥P1；**双向**（doc 高估 code + 断言缺失前未 grep）。
+- **关键设计**：**measure-not-enforce**，明确**不下沉 pre-commit**——语义一致性是 LLM 判断、不可确定性 hook 化（[[ADR-017]] 边界）；价值经本 lens 量化后再议子集下沉（[[ADR-013]] + [[ADR-022]] measure-before-enforce）。拒了 moai 的 Go evaluator agent 重实现（轻量优先 [[ADR-011]] #3）。
+- **意义**：把 `feedback_drift_fix_requires_full_claim_grep`（此前仅 memory 纪律）升为 /review 协议步骤；[[ADR-017]] 边界又一落点（确定性的→pre-commit [[ADR-023]]；语义的→LLM review lens）。决策见 [[ADR-026]]。
+- **dogfood**：本 walkthrough 若早存在，会在本 eval 自身的 draft C1（"TP 没 EARS"）和 §7.2（sprint.md @sizebudget）两处 drift 上触发——即用本次产物防本次同类错误。
