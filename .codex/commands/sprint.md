@@ -173,7 +173,15 @@ goal_status: in-progress   # in-progress | met | max-iter-reached | terminated
 
 1. **`--until` 命令 exit 0** → 立即终止（`goal_status: met`）。该命令每轮收尾经 Bash 真实执行、读取真实 exit code，不得用 LLM 推测代替。
 2. **`goal_iteration >= goal_max_iter`** → 立即终止（`goal_status: max-iter-reached`），**无论 LLM 是否认为目标已达成**。这是硬天花板。
-3. **LLM 目标达成自评** → 仅 advisory：可让循环**提前**停（`goal_status: met`），但**永远不能突破 max-iter 让循环继续**。
+3. **LLM 目标达成自评** → 仅 advisory：可让循环**提前**停（`goal_status: met`），但**永远不能突破 max-iter 让循环继续**。该自评必须先通过下方「反-proxy 完成核证」，否则一律 goal-met=no。
+
+> 🔍 **反-proxy 完成核证（第 3 档 advisory 自评的证据标准，借 Codex `continuation.md` Completion audit 形状）**：goal-met 自评不是"感觉差不多了"，必须逐条对照 `goal` 原文的每项要求，全部满足才可判 met：
+> 1. **证据覆盖目标全部要求**：引用 transcript 中真实改动 / 测试 / 输出作为证据，逐项映射到 `goal` 的每条 requirement；任一要求无对应证据 → goal-met=no。
+> 2. **确定性信号 ≠ 完成**：`--until` exit0 / green checks / 通过测试，仅在确认其**覆盖相关 requirement** 后才算证据——exit0 可能只验证了目标的子集，不等于目标整体达成。
+> 3. **反代理替换**：不得用更窄、更易测、更易过的方案替代原目标以求"达成"（proxy gaming）；若实现偏离原目标，goal-met=no，并在重入携带的「未达成原因」中记录偏离点。
+> 4. **不确定即未达成**：间接证据 / 推测 / "应该可以" 一律视为未达成，让循环继续而非提前 stop:met。
+>
+> 此核证只调节 advisory 自评（第 3 档）的松紧，**不改变**第 1/2 档确定性终止——`--until` exit0 和 max-iter 天花板仍压倒一切（守确定性优先与 [[ADR-021]]）。
 
 > ⚠️ **确定性上限说明**：`/sprint` 是模型驱动的 markdown 协议，无宿主进程强制计数。max-iter 天花板靠"frontmatter 持久 + 每轮重读 + 强制打印 check 行 + 低默认值 + auto-mode 迭代级强制 gate"多层保证，而非进程级硬计数。这是本协议层可达的确定性上限。若 `--goal --auto` 被证明高频且有价值，再下沉为确定性 helper（见 `docs/plans/2026-05-29-sprint-goal-mode.md` 附录 A）。
 

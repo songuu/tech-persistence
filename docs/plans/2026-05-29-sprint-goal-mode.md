@@ -254,6 +254,7 @@ deferred:
 | 2026-05-29 | T3 | `README.md` 加「目标驱动循环（--goal）」段（mirror --auto）+ /sprint 速查行加 `--goal` 标注；命令计数仍 24 |
 | 2026-05-29 | T4 | 跑 propagate(sprint+--rules auto-mode)→build→validate→run-tests(19/19)→pre-commit(staged EXIT=0)。负样本：派生副本 drift→pre-commit EXIT=1+修复命令→恢复 EXIT=0。grep .codex 确认无 regex 撞车（`~/.codex/rules`、`agent-loop 编排器`、`runtime instruction docs` 均正确，无裸 Claude 泄漏）|
 | 2026-05-29 | T5 | 本 plan 收尾：勾选 5 task、填变更日志、status→in-progress |
+| 2026-06-17 | 优化3 | 终止优先级第 3 档（LLM advisory 自评）加「反-proxy 完成核证」清单（4 点：证据覆盖全部 requirement / 确定性信号≠完成 / 反代理替换 / 不确定即未达成），借 Codex `continuation.md` Completion audit 形状。纯 prompt 加法、零 backing code，只调节 advisory 松紧、不碰第 1/2 档确定性终止（守 [[ADR-021]]）。源 `sprint.md` 改后跑 propagate→build→validate→pre-commit(EXIT=0)，4 副本同步、codex 无 regex 撞车。来源：native-/goal sibling-eval（`docs/solutions/2026-06-17-native-goal-sibling-eval.md`）的 sprint 优化点 #3。优化 1（循环携带物落盘）/2（--goal 使用遥测）/4（成本估算）/5（judge≠worker 外置）按用户指示本轮不实施 |
 
 ---
 
