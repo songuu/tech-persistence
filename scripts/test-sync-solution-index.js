@@ -9,6 +9,7 @@ const path = require('path');
 
 const {
   parseFrontmatter,
+  parseArgs,
   collectSolutions,
   readRegisteredProject,
   renderIndexJsonl,
@@ -113,6 +114,65 @@ test('syncSolutionIndex writes one canonical jsonl and two projections', () => {
   const jsonl = renderIndexJsonl(result.entries).trim();
   assert.deepStrictEqual(JSON.parse(jsonl), result.entries[0]);
   fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('syncSolutionIndex can sync only obsidian projection without touching repo projections', () => {
+  const repo = makeRepo();
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-obsidian-only-vault-'));
+  writeSolution(repo, '2026-05-18-a.md', 'title: "A"\ndate: 2026-05-18\ntags: [solution, alpha]', '# A\n\n## Problem\n\nAlpha problem.');
+
+  const claudeBefore = fs.readFileSync(path.join(repo, 'CLAUDE.md'), 'utf-8');
+  const agentsBefore = fs.readFileSync(path.join(repo, 'AGENTS.md'), 'utf-8');
+
+  const result = syncSolutionIndex(repo, {
+    obsidianTarget: true,
+    obsidianVault: vault,
+    projectId: 'proj123',
+    projectName: 'tech-persistence',
+    skipIndex: true,
+    skipRuntimeDocs: true,
+  });
+
+  assert.ok(fs.existsSync(path.join(vault, 'projects', 'proj123', 'solutions', '2026-05-18-a.md')));
+  assert.strictEqual(fs.existsSync(path.join(repo, 'docs', 'solutions', 'index.jsonl')), false);
+  assert.strictEqual(fs.readFileSync(path.join(repo, 'CLAUDE.md'), 'utf-8'), claudeBefore);
+  assert.strictEqual(fs.readFileSync(path.join(repo, 'AGENTS.md'), 'utf-8'), agentsBefore);
+  assert.deepStrictEqual(result.changes.map((change) => change.target), ['obsidian']);
+
+  fs.rmSync(repo, { recursive: true, force: true });
+  fs.rmSync(vault, { recursive: true, force: true });
+});
+
+test('parseArgs supports obsidian-only targets for dirty worktrees', () => {
+  const options = parseArgs([
+    'node',
+    'scripts/sync-solution-index.js',
+    '--target',
+    'obsidian',
+    '--obsidian-vault',
+    'shared',
+  ]);
+  assert.deepStrictEqual(options.targets, []);
+  assert.strictEqual(options.obsidianTarget, true);
+  assert.strictEqual(options.obsidianVault, 'shared');
+  assert.strictEqual(options.skipIndex, true);
+  assert.strictEqual(options.skipRuntimeDocs, true);
+});
+
+test('parseArgs keeps --all plus obsidian as combined sync targets', () => {
+  const options = parseArgs([
+    'node',
+    'scripts/sync-solution-index.js',
+    '--all',
+    '--target',
+    'obsidian',
+    '--obsidian-vault',
+    'shared',
+  ]);
+  assert.deepStrictEqual(options.targets, ['claude', 'codex']);
+  assert.strictEqual(options.obsidianTarget, true);
+  assert.strictEqual(options.skipIndex, undefined);
+  assert.strictEqual(options.skipRuntimeDocs, undefined);
 });
 
 test('syncObsidianSolutionProjection mirrors solutions into vault project dir and stays idempotent', () => {

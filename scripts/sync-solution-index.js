@@ -403,21 +403,37 @@ function syncSolutionIndex(repoRoot, options = {}) {
   const state = buildExpectedState(repoRoot, options);
   const dryRun = Boolean(options.dryRun);
   const changes = [];
-  changes.push({
-    path: state.indexPath,
-    changed: writeIfChanged(state.indexPath, state.indexContent, dryRun),
-  });
-  state.docs.forEach((doc) => {
+
+  if (!options.skipIndex) {
     changes.push({
-      target: doc.target,
-      path: doc.path,
-      changed: writeIfChanged(doc.path, doc.expectedContent, dryRun),
+      target: 'index',
+      path: state.indexPath,
+      changed: writeIfChanged(state.indexPath, state.indexContent, dryRun),
     });
-  });
-  const obsidianProjection = syncObsidianSolutionProjection(repoRoot, options);
+  }
+
+  if (!options.skipRuntimeDocs) {
+    state.docs.forEach((doc) => {
+      changes.push({
+        target: doc.target,
+        path: doc.path,
+        changed: writeIfChanged(doc.path, doc.expectedContent, dryRun),
+      });
+    });
+  }
+
+  const shouldSyncObsidian = Boolean(options.obsidianVault || options.obsidianTarget);
+  if (options.obsidianTarget && !options.obsidianVault) {
+    throw new Error('--target obsidian requires --obsidian-vault shared|auto|PATH');
+  }
+
+  const obsidianProjection = shouldSyncObsidian
+    ? syncObsidianSolutionProjection(repoRoot, options)
+    : null;
   if (obsidianProjection) {
     changes.push({
       type: 'obsidian',
+      target: 'obsidian',
       path: obsidianProjection.targetDir,
       vaultPath: obsidianProjection.vaultPath,
       changed: obsidianProjection.changed,
@@ -435,7 +451,20 @@ function parseArgs(argv) {
     if (arg === '--all') {
       options.targets = ['claude', 'codex'];
     } else if (arg === '--target') {
-      options.targets.push(argv[++i]);
+      const target = argv[++i];
+      if (target === 'obsidian') {
+        options.obsidianTarget = true;
+      } else {
+        options.targets.push(target);
+      }
+    } else if (arg === '--obsidian-only') {
+      options.obsidianTarget = true;
+      options.skipIndex = true;
+      options.skipRuntimeDocs = true;
+    } else if (arg === '--skip-runtime-docs') {
+      options.skipRuntimeDocs = true;
+    } else if (arg === '--skip-index') {
+      options.skipIndex = true;
     } else if (arg === '--keep') {
       options.keep = parseInt(argv[++i], 10) || DEFAULT_KEEP;
     } else if (arg === '--dry-run') {
@@ -456,19 +485,26 @@ function parseArgs(argv) {
       throw new Error(`Unknown argument: ${arg}`);
     }
   }
-  if (options.targets.length === 0) options.targets = ['claude', 'codex'];
+  if (options.targets.length === 0 && options.obsidianTarget) {
+    options.skipIndex = true;
+    options.skipRuntimeDocs = true;
+  } else if (options.targets.length === 0) {
+    options.targets = ['claude', 'codex'];
+  }
   options.targets = Array.from(new Set(options.targets));
   return options;
 }
 
 function usage() {
   return [
-    'Usage: node scripts/sync-solution-index.js [--all] [--target claude|codex] [--keep N] [--dry-run] [--obsidian-vault shared|auto|PATH]',
+    'Usage: node scripts/sync-solution-index.js [--all] [--target claude|codex|obsidian] [--keep N] [--dry-run] [--obsidian-vault shared|auto|PATH]',
     '',
     'Examples:',
     '  node scripts/sync-solution-index.js --all',
     '  node scripts/sync-solution-index.js --target codex --keep 3',
     '  node scripts/sync-solution-index.js --all --obsidian-vault shared',
+    '  node scripts/sync-solution-index.js --target obsidian --obsidian-vault shared',
+    '  node scripts/sync-solution-index.js --obsidian-only --obsidian-vault shared',
   ].join('\n');
 }
 
@@ -490,7 +526,8 @@ function main() {
     const rel = toPosixPath(path.relative(repoRoot, change.path));
     console.log(`${change.changed ? '[updated]' : '[ok]'} ${rel}`);
   });
-  console.log(`[ok] indexed ${result.entries.length} solution docs`);
+  const wroteIndex = result.changes.some((change) => change.target === 'index');
+  console.log(`[ok] ${wroteIndex ? 'indexed' : 'collected'} ${result.entries.length} solution docs`);
 }
 
 if (require.main === module) {
@@ -513,6 +550,7 @@ module.exports = {
   renderEntry,
   renderSolutionSection,
   renderIndexJsonl,
+  parseArgs,
   upsertSolutionSection,
   resolveObsidianVault,
   readRegisteredProject,
