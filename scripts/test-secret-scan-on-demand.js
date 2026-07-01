@@ -83,6 +83,53 @@ test('positive: detects OpenAI-style key and redacts value', () => {
   assert.ok(!result.stdout.includes(secretValue), 'full OpenAI-style key leaked in output');
 });
 
+test('positive: detects provider token pattern pack and redacts values', () => {
+  const root = makeDir();
+  const secrets = {
+    gitlab: `glpat-${'A'.repeat(24)}`,
+    huggingface: `hf_${'B'.repeat(30)}`,
+    npm: `npm_${'C'.repeat(36)}`,
+    digitalocean: `dop_v1_${'d'.repeat(64)}`,
+    bearer: `Bearer ${'E'.repeat(32)}`,
+  };
+  writeFile(root, 'tokens.env', [
+    `GITLAB_TOKEN=${secrets.gitlab}`,
+    `HF_TOKEN=${secrets.huggingface}`,
+    `NPM_TOKEN=${secrets.npm}`,
+    `DIGITALOCEAN_TOKEN=${secrets.digitalocean}`,
+    `Authorization: ${secrets.bearer}`,
+  ].join('\n'));
+
+  const result = run(['--paths', root]);
+  assert.strictEqual(result.code, 1, `expected findings, stdout=${result.stdout}`);
+  for (const pattern of ['gitlab_pat', 'huggingface_token', 'npm_token', 'digitalocean_token', 'bearer_token']) {
+    assert.ok(result.stdout.includes(`[${pattern}]`), `missing ${pattern}`);
+  }
+  for (const value of Object.values(secrets)) {
+    assert.ok(!result.stdout.includes(value), `full secret leaked: ${value}`);
+  }
+});
+
+test('positive: detects gcp service account json and redacts fields', () => {
+  const root = makeDir();
+  const clientEmail = 'tp-service@prod-project.iam.gserviceaccount.com';
+  const privateKeyId = '1234567890abcdef1234567890abcdef12345678';
+  const fakePrivateKey = ['-----BEGIN', 'PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\\n-----END', 'PRIVATE KEY-----\\n'].join(' ');
+  writeFile(root, 'service-account.json', JSON.stringify({
+    type: 'service_account',
+    private_key_id: privateKeyId,
+    private_key: fakePrivateKey,
+    client_email: clientEmail,
+  }));
+
+  const result = run(['--paths', root]);
+  assert.strictEqual(result.code, 1, `expected findings, stdout=${result.stdout}`);
+  assert.ok(result.stdout.includes('[gcp_service_account_json]'));
+  assert.ok(!result.stdout.includes(clientEmail), 'client email leaked');
+  assert.ok(!result.stdout.includes(privateKeyId), 'private key id leaked');
+  assert.ok(!result.stdout.includes(fakePrivateKey), 'private key leaked');
+});
+
 test('negative: placeholder values do not report findings', () => {
   const root = makeDir();
   writeFile(root, 'example.md', 'api_key = "YOUR_API_KEY_PLACEHOLDER"\n');

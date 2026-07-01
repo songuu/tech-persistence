@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { SECRET_MARKER } = require('./lib/redaction');
 
 const SKIP_DIRS = new Set([
   '.git',
@@ -38,6 +39,26 @@ const SECRET_PATTERNS = [
   {
     id: 'openai_key',
     regex: /\bsk-(?:proj-|live-|test-)?[A-Za-z0-9][A-Za-z0-9_-]{19,}\b/g,
+  },
+  {
+    id: 'gitlab_pat',
+    regex: /\bglpat-[A-Za-z0-9_-]{20,}\b/g,
+  },
+  {
+    id: 'huggingface_token',
+    regex: /\bhf_[A-Za-z0-9]{20,}\b/g,
+  },
+  {
+    id: 'npm_token',
+    regex: /\bnpm_[A-Za-z0-9]{20,}\b/g,
+  },
+  {
+    id: 'digitalocean_token',
+    regex: /\bdop_v1_[A-Za-z0-9]{64,}\b/g,
+  },
+  {
+    id: 'bearer_token',
+    regex: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi,
   },
   {
     id: 'generic_api_key_assignment',
@@ -189,10 +210,24 @@ function isLikelyExample(line) {
     || line.includes('...');
 }
 
-function redactLine(line) {
+function redactGcpFieldsInLine(line) {
+  if (!/"type"\s*:\s*"service_account"/i.test(line) || !/"private_key"\s*:/i.test(line)) {
+    return line;
+  }
   return line
+    .replace(/("private_key(?:_id)?"\s*:\s*")[^"]+(")/gi, `$1${SECRET_MARKER}$2`)
+    .replace(/("client_email"\s*:\s*")[^"]+(")/gi, `$1${SECRET_MARKER}$2`);
+}
+
+function redactLine(line) {
+  return redactGcpFieldsInLine(line)
     .replace(/\bsk-(?:proj-|live-|test-)?[A-Za-z0-9][A-Za-z0-9_-]{19,}\b/g, (match) => `${match.slice(0, 7)}[REDACTED]`)
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, 'AKIA[REDACTED]')
+    .replace(/\bglpat-[A-Za-z0-9_-]{20,}\b/g, 'glpat-[REDACTED]')
+    .replace(/\bhf_[A-Za-z0-9]{20,}\b/g, 'hf_[REDACTED]')
+    .replace(/\bnpm_[A-Za-z0-9]{20,}\b/g, 'npm_[REDACTED]')
+    .replace(/\bdop_v1_[A-Za-z0-9]{64,}\b/g, 'dop_v1_[REDACTED]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, 'Bearer [REDACTED]')
     .replace(
       /(["']?\b(?:api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|secret|password|passwd|pwd)\b["']?\s*[:=]\s*["']?)([A-Za-z0-9][A-Za-z0-9_./+=-]{7,})(["']?)/gi,
       '$1[REDACTED]$3'
@@ -200,10 +235,41 @@ function redactLine(line) {
     .replace(/-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g, '-----BEGIN [REDACTED] PRIVATE KEY-----');
 }
 
+function lineLocation(content, offset) {
+  const before = content.slice(0, offset);
+  const lines = before.split(/\r?\n/);
+  return { line: lines.length, column: lines[lines.length - 1].length + 1 };
+}
+
+function findGcpServiceAccount(content, file, cwd = process.cwd()) {
+  if (!/"type"\s*:\s*"service_account"/i.test(content)
+    || !/"private_key"\s*:/i.test(content)
+    || !/"client_email"\s*:/i.test(content)) {
+    return null;
+  }
+  const match = /"private_key"\s*:\s*"[^"]+"/i.exec(content)
+    || /"client_email"\s*:\s*"[^"]+"/i.exec(content);
+  if (!match) return null;
+
+  const location = lineLocation(content, match.index);
+  const sourceLine = content.split(/\r?\n/)[location.line - 1] || match[0];
+  if (isLikelyExample(sourceLine)) return null;
+
+  return {
+    file: normalizeRel(file, cwd),
+    line: location.line,
+    column: location.column,
+    pattern: 'gcp_service_account_json',
+    redacted: redactLine(sourceLine).trim().slice(0, 260),
+  };
+}
+
 function scanContent(content, file, cwd = process.cwd()) {
   const findings = [];
   const lines = content.split(/\r?\n/);
   const rel = normalizeRel(file, cwd);
+  const gcpFinding = findGcpServiceAccount(content, file, cwd);
+  if (gcpFinding) findings.push(gcpFinding);
 
   lines.forEach((line, index) => {
     if (!line || isLikelyExample(line)) return;
@@ -295,9 +361,11 @@ if (require.main === module) {
 module.exports = {
   SECRET_PATTERNS,
   collectCandidateFiles,
+  findGcpServiceAccount,
   formatTextResult,
   isLikelyExample,
   parseArgs,
+  redactGcpFieldsInLine,
   redactLine,
   run,
   scanContent,

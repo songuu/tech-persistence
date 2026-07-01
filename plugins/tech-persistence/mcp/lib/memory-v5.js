@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { redactSensitiveText } = require('./redaction');
 
 const MEMORY_VERSION = '5.0';
 
@@ -25,26 +26,13 @@ const TOPIC_LABELS = {
   general: 'General',
 };
 
-const SECRET_PATTERNS = [
-  /\b(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|passwd|pwd)\b\s*[:=]\s*["']?[^"',\s}]+/gi,
-  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/gi,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
-  /\b[A-Za-z0-9+/]{80,}={0,2}\b/g,
-];
-
 function hashText(value, length = 12) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex').slice(0, length);
 }
 
 function redactSensitive(value) {
   if (typeof value !== 'string') return value;
-  return SECRET_PATTERNS.reduce(
-    (current, pattern) => current.replace(pattern, (match) => {
-      const keyMatch = match.match(/^[^:=\s]+/);
-      return keyMatch ? `${keyMatch[0]}: [REDACTED]` : '[REDACTED]';
-    }),
-    value
-  );
+  return redactSensitiveText(value);
 }
 
 function safeStringify(value) {

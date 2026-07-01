@@ -265,18 +265,23 @@ scripts/test-agent-orchestrator-hermetic.js
 
 ## Implementation Status
 
-2026-07-01 已先落实 Rank 1 + Rank 2：
+2026-07-01 已先落实 Rank 1 + Rank 2 + Rank 3：
 
 | Item | Status | Evidence |
 |---|---|---|
 | Codex SessionStart resume 去重/降噪 | done | `scripts/lib/hook-registry.js` 将 plugin runtime matcher 收敛为 `startup|clear|compact`；`plugins/tech-persistence/hooks/hooks.json` 由 build 生成同步 |
 | skill-size-budget / carve measurement | done | 新增只读脚本 `scripts/skill-size-budget.js`；先报告 heavy skills，不拆文档结构 |
+| Secret/redaction pattern 扩展 | done | `scripts/secret-scan-on-demand.js` 增 GitLab/HF/npm/DigitalOcean/Bearer/GCP service-account；`scripts/lib/redaction.js` 成为 durable redaction 共享入口，`memory-v5` 复用 |
 
 验证：
 
 ```bash
 node scripts/test-hook-entries.js
 node scripts/test-skill-size-budget.js
+node scripts/test-secret-scan-on-demand.js
+node scripts/test-redaction.js
+node scripts/test-memory-search.js
+node scripts/secret-scan-on-demand.js --paths scripts docs user-level plugins .codex
 node scripts/validate-codex-plugin.js
 node scripts/pre-commit-check.js
 ```
@@ -284,9 +289,8 @@ node scripts/pre-commit-check.js
 
 1. **SessionStart 去重 spike**：测当前 `resume` 下 `inject-context` / `caveman-activate` 是否重复注入同内容，选 A/C 方案。
 2. **skill size report**：新增只读脚本，输出 top heavy skills，不改文档结构。
-3. **secret scanner pattern pack**：补 GitLab/HF/npm/DO/GCP/Bearer tests。
-4. **review unresolved decisions**：改 `user-level/commands/review.md`，propagate + build + validate。
-5. **hermetic canary**：先落测试，不改 provider launch。
+3. **review unresolved decisions**：改 `user-level/commands/review.md`，propagate + build + validate。
+4. **hermetic canary**：先落测试，不改 provider launch。
 
 ## Lessons
 
@@ -294,4 +298,3 @@ node scripts/pre-commit-check.js
 - 对 TP 最有价值的不是新命令，而是减少已有系统长期漂移的微机制：token budget、未决决策显式化、redaction 覆盖、hook 去重。
 - superpowers/gstack 都在压缩 always-loaded 内容，反向提醒 TP：command-derived skill 全文包装虽然简单，但需要预算可见性，否则会在半年后变成隐性税。
 - 本轮多个候选被核验为 TP 已有同构能力（marketplace、`.agent-runs`、usage-report、design lens）。sibling-eval 必须先查自家代码，否则会重复造轮子。
-

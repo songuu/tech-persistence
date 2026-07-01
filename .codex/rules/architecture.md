@@ -17,6 +17,13 @@
 
 ## 决策列表
 
+### ADR-027: Secret redaction 扩覆盖，不默认升 pre-commit gate (2026-07-01)
+- **状态**：已采纳
+- **上下文**：Hook observations、Memory v5、skill trace/eval case 都会持久化用户输入或工具输出摘要。仅 `<private>` 标签脱敏不足以覆盖常见 provider token；但把 secret scan 直接接入 pre-commit 会把误报变成提交阻断。
+- **决策**：`scripts/lib/redaction.js` 作为 durable redaction 共享入口，覆盖 GitLab PAT、HuggingFace、npm、DigitalOcean、Bearer、OpenAI/AWS、GCP service-account JSON 字段、generic secret assignment 和长 base64 blob；`scripts/lib/memory-v5.js` 复用该入口。`scripts/secret-scan-on-demand.js` 同步扩展 pattern pack，但继续保持 on-demand，不默认接 `pre-commit-check.js` 强门禁。
+- **原因**：持久化链路需要纵深防御；on-demand scanner 可以 dogfood 低误报率。pre-commit enforcement 只有在真实命中或充分低 FP 证据后再评估，符合 measure-before-enforce。
+- **备选**：只扩 scanner 不扩 durable redaction；或直接把 scanner 接入 pre-commit。前者保护不了 observations/memory 输出，后者容易因测试 fixture/文档示例误报阻断开发。
+- **影响**：新增持久化输出时优先复用 `redactSensitiveText`/`stripPrivateTags`；新增 secret pattern 时必须同时补 scanner 输出脱敏测试和 durable redaction 测试。plugin 投影由 build 生成，不手改。
 ### ADR-016: Codex plugin SessionStart 不在 resume 重注入 startup context (2026-07-01)
 - **状态**：已采纳
 - **上下文**：Codex plugin runtime 的 `SessionStart` matcher 同时覆盖 `startup|resume|clear|compact` 时，`inject-context.js` 与 `caveman-activate.js` 会在 resume 场景重复注入 learned-context/caveman context，增加 token 成本和认知噪音。

@@ -3,7 +3,8 @@
 /**
  * test-redaction.js
  *
- * Self-contained tests for privacy tag stripping before observations persist.
+ * Self-contained tests for privacy tag and high-confidence secret stripping
+ * before observations persist.
  */
 
 'use strict';
@@ -14,7 +15,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { redactObservation, stripPrivateTags } = require('./lib/redaction');
+const { redactObservation, redactSensitiveText, stripPrivateTags } = require('./lib/redaction');
 
 let passed = 0;
 let failed = 0;
@@ -71,30 +72,63 @@ test('stripPrivateTags redacts unclosed tags to end of string', () => {
   assert.strictEqual(output, 'visible [PRIVATE REDACTED]');
 });
 
-test('redactObservation strips summaries, commands, and private paths', () => {
+test('redactSensitiveText redacts provider tokens and gcp service account fields', () => {
+  const providerSecrets = {
+    gitlab: `glpat-${'A'.repeat(24)}`,
+    huggingface: `hf_${'B'.repeat(30)}`,
+    npm: `npm_${'C'.repeat(36)}`,
+    digitalocean: `dop_v1_${'d'.repeat(64)}`,
+    bearer: `Bearer ${'E'.repeat(32)}`,
+    openai: `sk-proj-${'F'.repeat(32)}`,
+  };
+  const gcpSecrets = {
+    clientEmail: 'service-account@prod-project.iam.gserviceaccount.com',
+    privateKeyId: '1234567890abcdef1234567890abcdef12345678',
+  };
+  const gcp = JSON.stringify({
+    type: 'service_account',
+    private_key_id: gcpSecrets.privateKeyId,
+    private_key: ['-----BEGIN', 'PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\\n-----END', 'PRIVATE KEY-----\\n'].join(' '),
+    client_email: gcpSecrets.clientEmail,
+  });
+  const input = Object.values(providerSecrets).join('\n') + `\n${gcp}`;
+  const output = redactSensitiveText(input);
+  for (const value of [...Object.values(providerSecrets), ...Object.values(gcpSecrets)]) {
+    assert.ok(!output.includes(value), `leaked ${value}`);
+  }
+  assert.ok(output.includes('[REDACTED]'));
+});
+test('redactObservation strips summaries, commands, provider tokens, and private paths', () => {
+  const token = `glpat-${'G'.repeat(24)}`;
+  const bearer = `Bearer ${'H'.repeat(28)}`;
   const redacted = redactObservation({
-    input_summary: 'run <private>secret arg</private>',
-    output_summary: 'ok <system-private>policy</system-private>',
-    command: 'echo <private>secret command</private>',
+    input_summary: `run <private>secret arg</private> ${token}`,
+    output_summary: `ok <system-private>policy</system-private> ${bearer}`,
+    command: `echo <private>secret command</private> --token ${token}`,
     input_paths: ['docs/readme.md', '<private>C:\\secret\\key.txt</private>'],
   });
-  assert.ok(!JSON.stringify(redacted).includes('secret arg'));
-  assert.ok(!JSON.stringify(redacted).includes('secret command'));
-  assert.ok(!JSON.stringify(redacted).includes('C:\\secret'));
+  const serialized = JSON.stringify(redacted);
+  assert.ok(!serialized.includes('secret arg'));
+  assert.ok(!serialized.includes('secret command'));
+  assert.ok(!serialized.includes(token));
+  assert.ok(!serialized.includes(bearer));
+  assert.ok(!serialized.includes('C:\\secret'));
   assert.deepStrictEqual(redacted.input_paths, ['docs/readme.md']);
 });
 
-test('observe hook never persists private tag contents', () => {
+test('observe hook never persists private tag contents or provider tokens', () => {
   const home = makeTempHome();
   const privateText = 'launch-window-seven';
   const contextText = 'session archaeology context';
+  const gitlabToken = `glpat-${'I'.repeat(24)}`;
+  const bearerToken = `Bearer ${'J'.repeat(32)}`;
   const payload = {
     tool_name: 'functions.shell_command',
     input: {
-      command: `echo before <private>${privateText}</private> after`,
+      command: `echo before <private>${privateText}</private> after ${gitlabToken}`,
       file: `<private>C:\\secret\\key.txt</private>`,
     },
-    output: `done <claude-mem-context>${contextText}</claude-mem-context>`,
+    output: `done <claude-mem-context>${contextText}</claude-mem-context> ${bearerToken}`,
     statusCode: 0,
   };
 
@@ -117,9 +151,12 @@ test('observe hook never persists private tag contents', () => {
   const serialized = JSON.stringify(observation);
   assert.ok(!serialized.includes(privateText), serialized);
   assert.ok(!serialized.includes(contextText), serialized);
+  assert.ok(!serialized.includes(gitlabToken), serialized);
+  assert.ok(!serialized.includes(bearerToken), serialized);
   assert.ok(!serialized.includes('C:\\secret'), serialized);
   assert.ok(serialized.includes('[PRIVATE REDACTED]'));
   assert.ok(serialized.includes('[CLAUDE MEM CONTEXT REDACTED]'));
+  assert.ok(serialized.includes('[REDACTED]'));
 });
 
 console.log('');
