@@ -41,11 +41,11 @@ pnpm lint         # 检查
 > Generated from `docs/solutions/*.md`; do not edit this block manually.
 > Refresh with `node scripts/sync-solution-index.js --all`.
 
+- [2026-07-01] [sibling-eval/external-reference/superpowers] obra/superpowers + garrytan/gstack 2026-06 更新评估 — 可借鉴项收敛到 token、安全、决策可见性、eval 隔离 — 用户请求：研究 obra/superpowers 和 garrytan/gstack 最近一个月更新了哪些内容，以及哪些值得直接借鉴到当前 tech-persistence 架构里。 → `docs/solutions/2026-07-01-superpowers-gstack-june-2026-eval.md`
 - [2026-06-17] [sibling-eval/goal-mode/claude-code] Sibling-eval：Claude /goal × Codex /goal 原生命令 vs TP /sprint --goal（收窄到原生 goal 原语） — 用户问"结合 Claude Code 自带的 /goal 和 Codex 自带的 /goal，TP 当前架构的 /sprint --goal 需要改进哪里"。作用域严格收窄到 两个 runtime 各自的原生 /goal 命令本身 ，排除 Claude Dynamic Workflows / /loop / cron / Routines / fan-out（那些不是 /goal）。对比对象是 TP /sprint --goal（纯… → `docs/solutions/2026-06-17-native-goal-sibling-eval.md`
 - [2026-06-15] [sibling-eval/external-reference/moai-adk] Sibling-eval：MoAI-ADK (modu-ai) vs tech-persistence — Sibling-eval：MoAI-ADK (modu-ai) vs tech-persistence → `docs/solutions/2026-06-15-moai-adk-eval.md`
 - [2026-06-15] [sibling-eval/external-reference/bmad] Sibling-eval：BMAD-METHOD + SuperClaude_Framework vs tech-persistence — Sibling-eval：BMAD-METHOD + SuperClaude Framework vs tech-persistence → `docs/solutions/2026-06-15-bmad-superclaude-eval.md`
 - [2026-06-09] [sibling-eval/external-reference/identity-question-first] phuryn/pm-skills PRD 技能/命令评估 — 0 直接借鉴（目标用户错配）+ 2 收敛进化 + 1 不实施 follow-up — 用户请求："--auto 对比下 https://github.dev/phuryn/pm-skills，主要是里面的 PRD 相关的技能和命令"。 → `docs/solutions/2026-06-09-pm-skills-eval.md`
-- [2026-06-08] [architecture/plan-mode/claude-code] 对比：tech-persistence /plan vs Claude Code 原生 plan mode vs Codex CLI 原生 plan mode（方法论层 vs 双 runtime enforcement 层） — 用户先问"对比当前 plan 模式和 Claude Code 自带的 plan 模式"，再要求接入 Codex CLI 原生 plan 模式凑成三方对比。风险在于三者都叫 plan，容易当成竞品三选一。实际它们分两层——tech-persistence /plan 是 model-driven markdown 方法论协议（双 runtime），Claude Code / Codex 的原生 plan mode 各是其 harness… → `docs/solutions/2026-06-08-plan-mode-comparison.md`
 
 <!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->
 ## 当前迭代重点

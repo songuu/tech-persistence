@@ -17,6 +17,13 @@
 
 ## 决策列表
 
+### ADR-016: Codex plugin SessionStart 不在 resume 重注入 startup context (2026-07-01)
+- **状态**：已采纳
+- **上下文**：Codex plugin runtime 的 `SessionStart` matcher 同时覆盖 `startup|resume|clear|compact` 时，`inject-context.js` 与 `caveman-activate.js` 会在 resume 场景重复注入 learned-context/caveman context，增加 token 成本和认知噪音。
+- **决策**：plugin runtime 的 session-start bootstrap matcher 收敛为 `startup|clear|compact`；`resume` 不再触发 startup context 注入。配置继续从 `scripts/lib/hook-registry.js` 生成，plugin 投影不得手工改回。
+- **原因**：startup/clear/compact 仍保留新会话和上下文重建能力；resume 依赖既有上下文即可，重复注入收益低、成本高。
+- **备选**：保留 `resume` 并在 hook 内做 session-level dedupe marker；完全移除 Codex SessionStart hooks。前者需要稳定 session id 语义，后者会损失 clear/compact 后的必要注入。
+- **影响**：后续新增 SessionStart hook 时必须明确是否允许 resume；默认不把 bootstrap 类 hook 绑到 resume。skill carving 先用 `scripts/skill-size-budget.js` 计量 heavy command-derived skills，再决定是否拆 `references/`。
 ### ADR-015: 先补 pipeline 硬门禁，再接 native workflow backend (2026-06-01)
 - **状态**：已采纳
 - **上下文**：Claude Code Dynamic workflows 适合大规模 subagent 编排，但 tech-persistence 的 `/sprint` 是方法论协议，`agent-loop --pipeline` 才是可替换/扩展的执行后端。若在 pipeline 仍缺少真实文件边界和状态门禁时直接接 native workflow，并行能力会放大现有漂移。

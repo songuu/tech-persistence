@@ -7,6 +7,7 @@ const HOOK_TARGETS = Object.freeze({
 
 const DEFAULT_CLAUDE_CLASSIC_HOOK_ROOT = '~/.claude/skills/continuous-learning/hooks';
 const DEFAULT_PLUGIN_ROOT_EXPR = '${CLAUDE_PLUGIN_ROOT}';
+const PLUGIN_SESSION_START_MATCHER = 'startup|clear|compact';
 
 const LOGICAL_HOOKS = Object.freeze([
   {
@@ -23,7 +24,7 @@ const LOGICAL_HOOKS = Object.freeze([
       },
       [HOOK_TARGETS.PLUGIN_RUNTIME]: {
         event: 'SessionStart',
-        matcher: 'startup|resume|clear|compact',
+        matcher: PLUGIN_SESSION_START_MATCHER,
         timeout: 5000,
         async: false,
       },
@@ -37,7 +38,7 @@ const LOGICAL_HOOKS = Object.freeze([
     targets: {
       [HOOK_TARGETS.PLUGIN_RUNTIME]: {
         event: 'SessionStart',
-        matcher: 'startup|resume|clear|compact',
+        matcher: PLUGIN_SESSION_START_MATCHER,
         timeout: 2000,
         async: false,
         statusMessage: 'Loading caveman mode',
@@ -261,6 +262,7 @@ module.exports = {
   LOGICAL_HOOKS,
   DEFAULT_CLAUDE_CLASSIC_HOOK_ROOT,
   DEFAULT_PLUGIN_ROOT_EXPR,
+  PLUGIN_SESSION_START_MATCHER,
   buildClaudeClassicHookSpecs,
   buildPluginHookConfig,
   getHookEventNames,

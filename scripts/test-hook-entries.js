@@ -309,6 +309,16 @@ test('E6 plugin hook config runs handoff guard before async observe hook', () =>
   assert.ok(preToolUse.hooks[1].command.includes('observe.js pre'));
 });
 
+test('E7 plugin SessionStart hooks skip resume to avoid duplicate startup injection', () => {
+  const { buildPluginHookConfig, PLUGIN_SESSION_START_MATCHER } = require('./lib/hook-registry');
+  const config = buildPluginHookConfig();
+  assert.strictEqual(PLUGIN_SESSION_START_MATCHER, 'startup|clear|compact');
+  assert.ok(config.hooks.SessionStart.every((entry) => !entry.matcher.split('|').includes('resume')));
+  const startupEntry = config.hooks.SessionStart.find((entry) => entry.matcher === PLUGIN_SESSION_START_MATCHER);
+  assert.ok(startupEntry, 'missing startup/clear/compact SessionStart entry');
+  assert.ok(startupEntry.hooks.some((hook) => hook.command.includes('inject-context.js')));
+  assert.ok(startupEntry.hooks.some((hook) => hook.command.includes('caveman-activate.js')));
+});
 // ============================================================
 // .codex/hooks.json runtime boundary
 // ============================================================
