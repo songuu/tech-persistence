@@ -4,6 +4,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const crypto = require('crypto');
+const { redactSensitiveText, redactArtifactValue } = require('./lib/redaction');
+const policyGates = require('./agent-orchestrator/policy-gates');
+const validationCommandPolicy = require('./agent-orchestrator/validation-command-policy');
 
 const pipeline = require('./agent-orchestrator/pipeline');
 const pipelineState = require('./agent-orchestrator/pipeline-state');
@@ -109,7 +113,7 @@ function safeRead(file) {
 
 function writeText(file, content) {
   ensureDir(path.dirname(file));
-  fs.writeFileSync(file, content);
+  fs.writeFileSync(file, redactSensitiveText(String(content)));
 }
 
 function writeJson(file, data) {
@@ -542,6 +546,11 @@ function runProcess(label, launchOrCommand, args, settings) {
     stdoutFile: settings.stdoutFile || null,
     stderrFile: settings.stderrFile || null,
     stdinBytes: settings.stdin ? Buffer.byteLength(settings.stdin, 'utf8') : 0,
+    phase: settings.phase || null,
+    providerKey: settings.providerKey || null,
+    promptHash: settings.stdin ? ('sha256:' + crypto.createHash('sha256').update(settings.stdin).digest('hex')) : null,
+    schemaPath: settings.schemaPath || null,
+    usage: { inputTokens: null, cachedInputTokens: null, outputTokens: null, cost: null },
     timeoutMs,
     envOverrides: settings.env || null,
   };
@@ -591,6 +600,15 @@ function extractProviderEnvelopeError(stdoutText) {
     }
   } catch (_) { /* not JSON, fall through */ }
   return null;
+}
+
+function runValidatedCommand(label, decision, settings) {
+  const startedAt = nowIso();
+  const result = spawnSync(decision.argv[0], decision.argv.slice(1), { cwd: settings.cwd, encoding: 'utf8', maxBuffer: MAX_BUFFER, shell: false, timeout: settings.timeoutMs || 30 * 60 * 1000 });
+  const finishedAt = nowIso();
+  if (settings.stdoutFile) writeText(settings.stdoutFile, result.stdout || '');
+  if (settings.stderrFile) writeText(settings.stderrFile, result.stderr || '');
+  return { command: decision.command, argv: decision.argv, policy: decision, status: result.status, startedAt, finishedAt };
 }
 
 function runShell(label, command, settings) {
@@ -964,8 +982,8 @@ function validateSpec(spec) {
   return errors;
 }
 
-function statusFromReview(review) {
-  if (review.decision === 'approved' && review.compliant === true) return 'completed';
+function statusFromReview(review, completionGate = { ok: true }) {
+  if (review.decision === 'approved' && review.compliant === true) return completionGate.ok ? 'completed' : 'needs-followup';
   if (review.decision === 'blocked' || review.findings.some((finding) => finding.severity === 'P0')) {
     return 'blocked';
   }
@@ -1205,7 +1223,7 @@ function runSpecProvider(state, statePath, runDir, options) {
       stderrFile,
       stdin: prompt,
       env: claudeProviderEnv(),
-      timeoutMs: providerTimeoutMs(options),
+      timeoutMs: providerTimeoutMs(options), phase: 'spec', providerKey: 'spec', schemaPath: schemaPath('requirement-spec.schema.json'),
     }
   );
   state.providerRuns.push(record);
@@ -1575,7 +1593,7 @@ function runReviewProvider(state, statePath, runDir, options) {
       stderrFile,
       stdin: prompt,
       env: claudeProviderEnv(),
-      timeoutMs: providerTimeoutMs(options),
+      timeoutMs: providerTimeoutMs(options), phase: 'review', providerKey: 'review', schemaPath: schemaPath('review-result.schema.json'),
     }
   );
   state.providerRuns.push(record);
@@ -1600,7 +1618,10 @@ function runReviewProvider(state, statePath, runDir, options) {
   writeJson(path.join(runDir, 'review.json'), review);
   state.files.review = 'review.json';
   recordReviewRulings(state, runDir, review);
-  state.status = statusFromReview(review);
+  const completionGate = policyGates.canCompleteRun({ validation: readJson(path.join(runDir, 'validation.json')), spec: readJson(path.join(runDir, 'spec.json')) });
+  writeJson(path.join(runDir, 'completion-gate.json'), completionGate);
+  state.files.completionGate = 'completion-gate.json';
+  state.status = statusFromReview(review, completionGate);
   if (state.status === 'needs-followup' || state.status === 'blocked') writeFollowUpTask(runDir, review);
   saveState(statePath, state);
 }
@@ -1663,6 +1684,7 @@ function buildPipelineCtx() {
     printPreflight,
     runProcess,
     runShell,
+    runValidatedCommand,
     providerLaunch,
     providerCommandSpec,
     providerTimeoutMs,
@@ -1859,6 +1881,10 @@ function runStart(options, positionals) {
     return;
   }
 
+  const autoGate = policyGates.canAutoFreezeSpec(readJson(path.join(runDir, 'spec.json')));
+  writeJson(path.join(runDir, 'auto-gate.json'), autoGate);
+  state.files.autoGate = 'auto-gate.json';
+  if (!autoGate.ok) { saveState(statePath, state); console.log('[INFO] auto freeze blocked: ' + autoGate.reasons.join('; ')); return; }
   state.specFrozenAt = nowIso();
   state.specFrozenBy = 'auto';
   state.status = 'frozen';
@@ -2668,6 +2694,7 @@ function buildMockCtx(workdir) {
     printPreflight: () => {},
     runProcess: () => { throw new Error('mock runProcess not set'); },
     runShell: () => ({ status: 0, startedAt: 'mock', finishedAt: 'mock' }),
+    runValidatedCommand: () => ({ status: 0, startedAt: 'mock', finishedAt: 'mock' }),
     providerLaunch: () => ({ command: 'mock', argsPrefix: [], shell: false }),
     providerCommandSpec: () => 'mock',
     providerTimeoutMs: () => 60000,

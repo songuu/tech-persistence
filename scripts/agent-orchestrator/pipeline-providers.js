@@ -13,9 +13,11 @@ const queueModule = require('./queue');
 const locksModule = require('./locks');
 const driftDetector = require('./drift-detector');
 const reconciliation = require('./reconciliation');
+const validationPolicy = require('./validation-command-policy');
+const { redactSensitiveText, redactArtifactValue } = require('../lib/redaction');
 
 function ensureDir(dir) { fs.mkdirSync(dir, { recursive: true }); }
-function writeText(file, content) { ensureDir(path.dirname(file)); fs.writeFileSync(file, content); }
+function writeText(file, content) { ensureDir(path.dirname(file)); fs.writeFileSync(file, redactSensitiveText(String(content))); }
 function writeJson(file, data) { writeText(file, `${JSON.stringify(data, null, 2)}\n`); }
 function readJson(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
 function safeRead(file) { return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''; }
@@ -38,7 +40,7 @@ function transitionSlice(stateObj, sliceId, target, metadata = {}) {
   return pipelineState.transitionSlice(stateObj, sliceId, target, { source: 'pipeline-providers', ...metadata });
 }
 
-function callClaudeStructured(ctx, label, options, runDir, schemaName, prompt, logPrefix) {
+function callClaudeStructured(ctx, providerKey, stage, label, options, runDir, schemaName, prompt, logPrefix) {
   const stamp = ctx.logStamp();
   const stdoutFile = ctx.stampedLogPath(runDir, logPrefix, 'stdout.log', stamp);
   const stderrFile = ctx.stampedLogPath(runDir, logPrefix, 'stderr.log', stamp);
@@ -48,7 +50,7 @@ function callClaudeStructured(ctx, label, options, runDir, schemaName, prompt, l
   }
   const { record, result } = ctx.runProcess(
     label,
-    ctx.providerLaunch(options, 'spec'),
+    ctx.providerLaunch(options, providerKey),
     args,
     {
       cwd: ctx.resolveWorkdir(options),
@@ -56,7 +58,7 @@ function callClaudeStructured(ctx, label, options, runDir, schemaName, prompt, l
       stderrFile,
       stdin: prompt,
       timeoutMs: ctx.providerTimeoutMs(options),
-      env: ctx.claudeProviderEnv(),
+      env: ctx.claudeProviderEnv(), phase: stage, providerKey, schemaPath: ctx.schemaPath(schemaName),
     }
   );
   return { record, result, stdoutFile, stderrFile };
@@ -66,7 +68,7 @@ function runGlobalContractProvider(ctx, state, statePath, runDir, options) {
   const prompt = safeRead(path.join(runDir, 'prompts', 'global-contract.md'));
   if (!prompt.trim()) throw new Error('global-contract prompt is empty');
   const { record, result } = callClaudeStructured(
-    ctx, 'global contract provider', options, runDir,
+    ctx, 'spec', 'global-contract', 'global contract provider', options, runDir,
     'global-contract.schema.json', prompt, 'global-contract'
   );
   let parsed;
@@ -103,7 +105,7 @@ function runSlicePlannerProvider(ctx, state, statePath, runDir, options) {
   const prompt = slicePlanner.buildSlicePlannerPrompt(contract, alreadyPlanned, { workdir: ctx.resolveWorkdir(options) });
   writeText(path.join(runDir, 'prompts', `slice-planner-${alreadyPlanned.length}.md`), prompt);
   const { record, result } = callClaudeStructured(
-    ctx, 'slice planner provider', options, runDir,
+    ctx, 'spec', 'slice-planner', 'slice planner provider', options, runDir,
     'pipeline-slice.schema.json', prompt, `slice-planner-${alreadyPlanned.length}`
   );
   let parsed;
@@ -235,6 +237,13 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
     validation.status = 'passed';
     for (let index = 0; index < validationCommands.length; index += 1) {
       const command = validationCommands[index];
+      const decision = validationPolicy.validateGeneratedValidationCommand(command, { workdir: ctx.resolveWorkdir(options) });
+      if (!decision.ok) {
+        validation.status = 'blocked';
+        validation.commands.push({ command, policy: decision });
+        sliceRunner.writeSliceValidation(runDir, slice.id, validation);
+        throw withProviderRecord(new Error(`slice ${slice.id} validation rejected: ${decision.reason}`), record);
+      }
       const vStamp = ctx.logStamp();
       const vOut = ctx.stampedLogPath(runDir, `slice-${slice.id}-validation-${index}`, 'stdout.log', vStamp);
       const vErr = ctx.stampedLogPath(runDir, `slice-${slice.id}-validation-${index}`, 'stderr.log', vStamp);
@@ -276,7 +285,7 @@ function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
   slicePlanner.writeSlicePrompts(runDir, slice.id, { review: prompt });
 
   const { record, result } = callClaudeStructured(
-    ctx, `slice review provider [${slice.id}]`, options, runDir,
+    ctx, 'review', 'slice-review', `slice review provider [${slice.id}]`, options, runDir,
     'review-result.schema.json', prompt, `slice-${slice.id}-review`
   );
   let reviewParsed;
@@ -416,7 +425,7 @@ function runIntegrationReviewProvider(ctx, state, statePath, runDir, options) {
   writeText(path.join(runDir, 'prompts', 'integration-review.md'), prompt);
 
   const { record, result } = callClaudeStructured(
-    ctx, 'integration review provider', options, runDir,
+    ctx, 'review', 'integration-review', 'integration review provider', options, runDir,
     'review-result.schema.json', prompt, 'integration-review'
   );
   let reviewParsed;

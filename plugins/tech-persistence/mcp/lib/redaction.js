@@ -107,6 +107,15 @@ function redactSensitiveText(value) {
   return stripPrivateTags(value);
 }
 
+function redactArtifactValue(value) {
+  if (typeof value === 'string') return redactSensitiveText(value);
+  if (Array.isArray(value)) return value.map(redactArtifactValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactArtifactValue(item)]));
+  }
+  return value;
+}
+
 function redactObservationValue(value) {
   if (typeof value === 'string') return redactSensitiveText(value);
   if (Array.isArray(value)) return value.map(redactObservationValue);
@@ -135,6 +144,7 @@ module.exports = {
   SECRET_MARKER,
   SECRET_PATTERNS,
   redactObservation,
+  redactArtifactValue,
   redactSecretPatterns,
   redactSensitiveText,
   stripPrivateTags,
