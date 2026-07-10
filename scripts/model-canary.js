@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+'use strict';
+const fs=require('fs');const path=require('path');
+const CASES=['L1-single-file','L2-multi-file','L3-security-review','failure-recovery'];
+function read(f){return fs.existsSync(f)?fs.readFileSync(f,'utf8').trim().split(/\r?\n/).filter(Boolean).map(JSON.parse):[]}
+function main(){const [cmd,...args]=process.argv.slice(2);const file=path.resolve(args[args.indexOf('--file')+1]||'.agent-runs/model-canary.jsonl');if(cmd==='record'){const raw=args[args.indexOf('--json')+1];const row=JSON.parse(raw);if(!CASES.includes(row.caseId))throw new Error('unknown caseId');if(typeof row.accepted!=='boolean')throw new Error('accepted required');fs.mkdirSync(path.dirname(file),{recursive:true});fs.appendFileSync(file,JSON.stringify({...row,at:new Date().toISOString()})+'\n');return}if(cmd==='check'){const rows=read(file);if(rows.length===0)throw new Error('no canary records');const failed=rows.filter(r=>!r.accepted||r.p0Escape||r.falseCompletion);if(failed.length)throw new Error(`canary blocked: ${failed.length} unsafe records`);console.log(JSON.stringify({ok:true,cases:[...new Set(rows.map(r=>r.caseId))],records:rows.length}));return}throw new Error('usage: record --file <jsonl> --json <row> | check --file <jsonl>')}
+try{main()}catch(e){console.error('[FAIL] '+e.message);process.exit(1)}

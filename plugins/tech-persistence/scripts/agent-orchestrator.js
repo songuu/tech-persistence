@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { redactSensitiveText, redactArtifactValue } = require('./lib/redaction');
 const policyGates = require('./agent-orchestrator/policy-gates');
 const validationCommandPolicy = require('./agent-orchestrator/validation-command-policy');
+const providerProfiles = require('./agent-orchestrator/provider-profiles');
 
 const pipeline = require('./agent-orchestrator/pipeline');
 const pipelineState = require('./agent-orchestrator/pipeline-state');
@@ -548,7 +549,10 @@ function runProcess(label, launchOrCommand, args, settings) {
     stdinBytes: settings.stdin ? Buffer.byteLength(settings.stdin, 'utf8') : 0,
     phase: settings.phase || null,
     providerKey: settings.providerKey || null,
+    profileId: settings.providerKey ? providerProfiles.profileId(settings.options || {}, settings.providerKey) : null,
+    capabilitySnapshot: settings.providerKey ? providerProfiles.capabilitySnapshot(settings.options || {}, settings.providerKey) : null,
     promptHash: settings.stdin ? ('sha256:' + crypto.createHash('sha256').update(settings.stdin).digest('hex')) : null,
+    executionFingerprint: providerProfiles.hash({ phase: settings.phase || null, providerKey: settings.providerKey || null, command: launch.requested || launch.command, args: finalArgs, prompt: settings.stdin || '', schemaPath: settings.schemaPath || null }),
     schemaPath: settings.schemaPath || null,
     usage: { inputTokens: null, cachedInputTokens: null, outputTokens: null, cost: null },
     timeoutMs,
@@ -1850,6 +1854,13 @@ function runStart(options, positionals) {
   writeText(path.join(runDir, 'requirement.md'), `${requirement}\n`);
   writeText(path.join(runDir, 'prompts', 'spec.md'), buildSpecPrompt(requirement, { workdir }));
   writeJson(path.join(runDir, 'commands.json'), commandPlan(options));
+  writeJson(path.join(runDir, 'execution-plan.json'), {
+    version: 'execution-plan-v1',
+    stages: Object.fromEntries(['spec', 'implementation', 'review'].map((key) => [key, {
+      profile: providerProfiles.profile(options, key),
+      capabilities: providerProfiles.capabilitySnapshot(options, key),
+    }])),
+  });
   saveState(statePath, state);
 
   const preflight = buildPreflightReport(workdir, options, runDir);
