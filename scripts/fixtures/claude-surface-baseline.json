@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "claude-surface-baseline-v1",
+  "fingerprintSchemaVersion": "claude-surface-fingerprint-v1",
+  "patterns": [
+    "user-level/commands/**",
+    "user-level/skills/**",
+    "plugins/tech-persistence/commands/**",
+    "plugins/tech-persistence/skills/**",
+    "plugins/tech-persistence/hooks/**",
+    "scripts/lib/hook-registry.js",
+    "scripts/sync-solution-index.js",
+    "plugins/tech-persistence/.claude-plugin/plugin.json"
+  ],
+  "fileCount": 126,
+  "totalBytes": 818242,
+  "surfaceHash": "79bfaa502b34ffad189db98b33799efa78add57cf50b777976c7ecf1d8a7a01e",
+  "warnings": []
+}

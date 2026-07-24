@@ -52,7 +52,7 @@ flowchart TD
         COMPOUND["/compound<br/>Money step"]
     end
 
-    subgraph KNOW["Knowledge layer: hooks, Memory v5, instincts, skills"]
+    subgraph KNOW["Claude legacy knowledge layer: hooks, Memory v5, instincts, skills"]
         direction LR
         SESSION_START["SessionStart<br/>inject + handoff"]
         TOOL_HOOKS["PreToolUse + PostToolUse<br/>observe"]
@@ -72,7 +72,7 @@ flowchart TD
 
     EXEC --> KNOW
     KNOW --> STORE
-    STORE -->|"SessionStart injects Memory v5, Tier 1-4, handoff"| EXEC
+    STORE -->|"Claude legacy SessionStart injects Memory v5, Tier 1-4, handoff"| EXEC
 
     style EXEC fill:#EEEDFE,stroke:#534AB7,color:#26215C
     style KNOW fill:#E1F5EE,stroke:#0F6E56,color:#04342C
@@ -119,6 +119,8 @@ flowchart TD
 ---
 
 ## 知识生命周期
+
+下图描述 Claude legacy hooks 的自动捕获/注入链。Codex 共享相同存储格式，但默认通过 skill/MCP 按需读取，并在显式 Compound phase 中写入验证后的知识。
 
 ```mermaid
 flowchart TD
@@ -225,7 +227,7 @@ node scripts/validate-claude-install.js --project
 
 Codex 使用原生插件包 `plugins/tech-persistence/`，用户级安装会复制到 `~/plugins/tech-persistence` 并更新 `~/.agents/plugins/marketplace.json`。Codex 知识库默认写入 `~/.codex/homunculus`，可用 `TECH_PERSISTENCE_HOME` 临时覆盖，也可用 `~/.tech-persistence/config.json` 配置持续共享目录。
 
-当前 Codex CLI 的 TUI slash commands 只注册内置命令；插件工作流通过 skills 调用。Claude Code 中仍使用 `/sprint`、`/prototype`，Codex 中使用 `$sprint <需求>`、`$prototype <需求>`、`$plan <需求>`、`$caveman`，也可以用 `@` picker 选择同名 skill。
+Codex 插件的原生入口是 `$skill` 或 `@` picker。用户级安装器还为 `/think`、`/plan`、`/work`、`/review`、`/compound`、`/sprint` 安装薄兼容入口，它们路由到同一套 Codex-native skill；其余工作流使用 `$prototype`、`$agent-loop`、`$caveman` 等 skill。Claude Code 继续使用原有 `/command`。
 
 Windows:
 ```powershell
@@ -262,9 +264,9 @@ bash install.sh --obsidian --shared-homunculus ~/Documents/TechPersistence
 bash install-codex.sh --all --shared-homunculus ~/Documents/TechPersistence
 ```
 
-这会写入 `~/.tech-persistence/config.json`，两边 Hook 会自动解析同一个 `homunculusHome`。`--import-claude` 是一次性复制历史数据；`--shared-homunculus` 才是持续同步模式。
+这会写入 `~/.tech-persistence/config.json`：Claude hooks 会解析同一个 `homunculusHome`，Codex 则由按需 skills/MCP 读取。`--import-claude` 是一次性复制历史数据；`--shared-homunculus` 才是持续同步模式。
 
-未配置共享目录时，Claude Code 默认写 `~/.claude/homunculus`，Codex 默认写 `~/.codex/homunculus`。SessionStart 会合并两个默认目录中的 Memory v5 topic notes 后再注入，避免某一边的 `MEMORY.md` 遮蔽另一边；但文件级写入仍各自保留在默认目录里。
+未配置共享目录时，Claude Code 默认写 `~/.claude/homunculus`，Codex 默认写 `~/.codex/homunculus`。只有 Claude legacy SessionStart 会合并两个默认目录中的 Memory v5 topic notes 后再注入；Codex SessionStart 不扫描或注入 Memory，只注入有界的 active-sprint 指针元数据，知识由 skill/MCP 按需读取。文件级写入仍各自保留在默认目录里。
 
 插件构建与验证：
 ```powershell
@@ -344,7 +346,7 @@ $caveman-review             # 生成一行式 review comment
 $caveman-compress <file>    # 压缩自然语言 memory 文件
 ```
 
-SessionStart hook 会注入 caveman 规则；如需关闭自动激活，设置 `CAVEMAN_DEFAULT_MODE=off`。
+Claude legacy SessionStart hook 会注入 caveman 规则；如需关闭 Claude 自动激活，设置 `CAVEMAN_DEFAULT_MODE=off`。Codex 不自动激活 caveman，必须显式调用 `$caveman`。
 
 ### 自动审查模式（--auto）
 
@@ -388,7 +390,7 @@ bash install-codex.sh --obsidian # Codex vault
 
 ## 命令速查（24 个）
 
-表中保留 Claude Code 的 `/command` 写法。Codex 中把前缀换成 `$`，例如 `/sprint` → `$sprint`、`/prototype` → `$prototype`。
+表中保留 Claude Code 的 `/command` 写法。Codex 对六个核心阶段同时支持薄 `/think|plan|work|review|compound|sprint` 入口和同名 `$skill`；其他条目使用 `$skill`，例如 `$prototype`。
 
 ### 工作流（8 个）
 | 命令 | 角色 | 作用 |
@@ -449,7 +451,7 @@ bash install-codex.sh --obsidian # Codex vault
 
 ## 使用节奏
 
-Codex 中使用同名 `$skill` 入口；例如下面的 `/sprint` 在 Codex 中输入 `$sprint`。
+Codex 中优先使用同名 `$skill`；六个核心阶段也可使用安装器提供的薄 `/command` 兼容入口，因此下面的 `/sprint` 与 `$sprint` 都进入同一原生工作流。
 
 ```
 大功能 (>2h):     /sprint '需求' → auto checkpoint if needed
@@ -468,6 +470,8 @@ Skill 优化:       /skill diagnose → /skill-improve → /skill-eval → /skil
 
 ## 自动化 Hook
 
+### Claude legacy hooks
+
 | Hook | 脚本 | 作用 |
 |------|------|------|
 | SessionStart | inject-context.js | 注入 Memory v5 索引、本能、会话摘要 + 检测 handoff/prototype 状态 + 写 demand-side injected manifest（本次注入的 instinct domain） |
@@ -477,6 +481,15 @@ Skill 优化:       /skill diagnose → /skill-improve → /skill-eval → /skil
 | Stop | evaluate-session.js | 模式检测 + Memory v5 写入 + 本能提取 + 衰减 + demand-side 召回使用率（注入 domain 本会话碰到了几个 → recall-usage.jsonl） |
 
 环境变量 `TECH_PERSISTENCE_DISABLE_PROMPT_RECALL=1` 可关闭 UserPromptSubmit recall（兜底）。
+
+### Codex lightweight hooks
+
+| Hook | 脚本 | 作用 |
+|------|------|------|
+| SessionStart | inject-context-codex.js | 只注入有界 active-sprint 指针元数据，不打开计划、不扫描 Memory |
+| PreToolUse | guard-handoff-path-codex.js | 仅对精确写工具集合检查误写到顶层的 handoff 路径 |
+
+Codex 不注册 UserPromptSubmit、PostToolUse 或 Stop hook；知识读取按需进行，验证后的学习沉淀由显式 Compound phase 完成。
 
 ---
 

@@ -1,0 +1,421 @@
+#!/usr/bin/env node
+
+'use strict';
+
+const assert = require('assert');
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const root = path.resolve(__dirname, '..');
+const pluginRoot = path.join(root, 'plugins', 'tech-persistence');
+const nativeRoot = path.join(root, 'codex-native', 'skills');
+const nativeCommandRoot = path.join(root, 'codex-native', 'commands');
+const projectCommandRoot = path.join(root, '.codex', 'commands');
+const legacyRoot = path.join(pluginRoot, 'skills');
+const projectionRoot = path.join(pluginRoot, 'codex-skills');
+const builderPath = path.join(pluginRoot, 'scripts', 'build-codex-plugin.js');
+const propagate = require(path.join(root, 'scripts', 'propagate-command-changes.js'));
+const { checkPropagateSync } = require(path.join(root, 'scripts', 'pre-commit-check.js'));
+const phaseNativeOverrides = ['compound', 'plan', 'review', 'sprint', 'think', 'work'];
+const providerSpecificOverrides = [
+  'caveman',
+  'caveman-help',
+  'continuous-learning',
+  'memory',
+  'prototype-workflow',
+  'test-strategy',
+];
+const nativeOverrides = [...phaseNativeOverrides, ...providerSpecificOverrides].sort();
+
+function listFiles(dir, prefix = '') {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .flatMap((entry) => {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const absolute = path.join(dir, entry.name);
+      if (entry.isDirectory()) return listFiles(absolute, relative);
+      return entry.isFile() ? [relative] : [];
+    });
+}
+
+function listSkillNames(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(dir, entry.name, 'SKILL.md')))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function directoryDigest(dir) {
+  const hash = crypto.createHash('sha256');
+  for (const relative of listFiles(dir)) {
+    hash.update(relative.replace(/\\/g, '/'));
+    hash.update('\0');
+    hash.update(fs.readFileSync(path.join(dir, relative)));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
+function assertDirectoriesEqual(actualDir, expectedDir, label) {
+  assert.deepStrictEqual(listFiles(actualDir), listFiles(expectedDir), `${label}: file inventory differs`);
+  assert.strictEqual(directoryDigest(actualDir), directoryDigest(expectedDir), `${label}: bytes differ`);
+}
+
+function assertDirectoriesEqualWithCanonicalMarkdownEof(actualDir, expectedDir, label) {
+  const files = listFiles(expectedDir);
+  assert.deepStrictEqual(listFiles(actualDir), files, `${label}: file inventory differs`);
+  for (const relative of files) {
+    const expected = fs.readFileSync(path.join(expectedDir, relative));
+    const projected = relative.endsWith('.md')
+      ? Buffer.from(`${expected.toString('utf8').replace(/\r\n/g, '\n').replace(/\n+$/, '')}\n`)
+      : expected;
+    assert.deepStrictEqual(
+      fs.readFileSync(path.join(actualDir, relative)),
+      projected,
+      `${label}: ${relative} bytes differ`
+    );
+  }
+}
+
+function assertSourceTreeEmbedded(actualDir, expectedDir, label) {
+  for (const relative of listFiles(expectedDir)) {
+    const actual = path.join(actualDir, relative);
+    assert(fs.existsSync(actual), `${label}: missing ${relative}`);
+    assert.deepStrictEqual(
+      fs.readFileSync(actual), fs.readFileSync(path.join(expectedDir, relative)), `${label}: ${relative}`
+    );
+  }
+}
+
+function assertMarkdownEofCanonical(dir, label) {
+  for (const relative of listFiles(dir).filter((name) => name.endsWith('.md'))) {
+    const content = fs.readFileSync(path.join(dir, relative), 'utf8');
+    const trailingNewlines = content.match(/\n+$/);
+    assert.strictEqual(
+      trailingNewlines && trailingNewlines[0],
+      '\n',
+      `${label}: ${relative} must end with exactly one newline`
+    );
+  }
+}
+
+function readSkill(name) {
+  return fs.readFileSync(path.join(nativeRoot, name, 'SKILL.md'), 'utf8');
+}
+
+function runBuilder() {
+  const builder = require(builderPath);
+  const messages = [];
+  const originalLog = console.log;
+  console.log = (...args) => messages.push(args.join(' '));
+  try {
+    builder.main();
+  } finally {
+    console.log = originalLog;
+  }
+  assert(messages.some((message) => /generated \d+ codex skills/.test(message)));
+}
+
+function runPluginValidator() {
+  return spawnSync(process.execPath, [path.join(root, 'scripts', 'validate-codex-plugin.js')], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+}
+
+function assertSprintRuntimeValidatorContracts() {
+  const runtimeDir = path.join(projectionRoot, 'sprint', 'runtime');
+  const unexpected = path.join(runtimeDir, 'unexpected.js');
+  fs.writeFileSync(unexpected, 'unexpected\n');
+  try {
+    const extra = runPluginValidator();
+    assert.notStrictEqual(extra.status, 0, 'validator accepted an unexpected sprint runtime file');
+    assert.match(`${extra.stdout}\n${extra.stderr}`, /generated allowlist/);
+  } finally {
+    fs.unlinkSync(unexpected);
+  }
+
+  const cli = path.join(runtimeDir, 'codex-active-sprint-state.js');
+  const original = fs.readFileSync(cli);
+  fs.writeFileSync(cli, Buffer.concat([original, Buffer.from('\n// drift\n')]));
+  try {
+    const drift = runPluginValidator();
+    assert.notStrictEqual(drift.status, 0, 'validator accepted sprint runtime byte drift');
+    assert.match(`${drift.stdout}\n${drift.stderr}`, /generated byte mismatch/);
+  } finally {
+    fs.writeFileSync(cli, original);
+  }
+
+  const clean = runPluginValidator();
+  assert.strictEqual(clean.status, 0, clean.stderr || clean.stdout);
+}
+function assertNativeContracts() {
+  assert.deepStrictEqual(listSkillNames(nativeRoot), nativeOverrides, 'native override inventory');
+  assert.deepStrictEqual(
+    fs.readdirSync(nativeCommandRoot).filter((name) => name.endsWith('.md')).sort(),
+    phaseNativeOverrides.map((name) => `${name}.md`).sort(),
+    'native command inventory'
+  );
+  for (const name of phaseNativeOverrides) {
+    assert.strictEqual(propagate.nativeCommandNames.has(name), true, `${name} must use native propagation`);
+  }
+  assert.deepStrictEqual(
+    checkPropagateSync([
+      'codex-native/commands/compound.md',
+      'codex-native/skills/compound/SKILL.md',
+    ], root),
+    [],
+    'compound pre-commit projection parity'
+  );
+  for (const name of phaseNativeOverrides) {
+    assert.strictEqual(
+      fs.readFileSync(path.join(projectCommandRoot, `${name}.md`), 'utf8').replace(/\r\n/g, '\n'),
+      fs.readFileSync(path.join(nativeCommandRoot, `${name}.md`), 'utf8').replace(/\r\n/g, '\n'),
+      `${name} thin command projection`
+    );
+  }
+
+  const sprint = readSkill('sprint');
+  for (const reference of ['resume.md', 'goal-loop.md', 'figma.md']) {
+  assert(Buffer.byteLength(sprint, 'utf8') < 4096, 'native sprint SKILL.md must stay below 4 KiB');
+  assert.match(sprint, /只加载当前 Phase/);
+  assert.match(sprint, /不得[^\n]*(?:预热|预读)[^\n]*未来 Phase/);
+  assert.match(sprint, /references\/resume\.md/);
+  assert.match(sprint, /references\/goal-loop\.md/);
+  assert.match(sprint, /references\/figma\.md/);
+  assert.match(sprint, /仅当[^\n]*恢复|恢复[^\n]*才/);
+  assert.match(sprint, /仅当[^\n]*goal|goal[^\n]*才/i);
+  assert.match(sprint, /仅当[^\n]*Figma|Figma[^\n]*才/i);
+  assert.match(sprint, /codex-active-sprint-state\.js/);
+  assert.match(sprint, /<skill-dir>\/runtime\/codex-active-sprint-state\.js/);
+  assert.match(sprint, /completed-plan/);
+  assert.match(sprint, /sprint-recovery-required/);
+  assert.match(sprint, /completed-sprint/);
+  assert.match(sprint, /move-verify claim/);
+  assert.match(sprint, /裸写（含预开 FD）属外部破坏/);
+  assert.match(sprint, /SPRINT_STATE_LOCKED/);
+  assert.match(sprint, /禁止裸写/);
+  assert.match(sprint, /active === true[^\n]*恢复 pointer 当前 Phase/);
+    assert(fs.existsSync(path.join(nativeRoot, 'sprint', 'references', reference)), `missing ${reference}`);
+  }
+
+  for (const name of ['work', 'review']) {
+    const content = readSkill(name);
+    assert.match(content, /collaboration\.spawn_agent/);
+    assert.match(content, /至少 2 个[^\n]*独立/);
+    assert.match(content, /collaboration 工具可用/);
+    assert.match(content, /可用 slot/);
+    assert.match(content, /最多 3 个 child/);
+    assert.match(content, /共享工作树/);
+    assert.match(content, /单(?:任务|一审查面)[^\n]*工具不可用[^\n]*没有空闲 slot[^\n]*串行/);
+    assert.match(content, /不得调用 `list_agents` \/ `spawn_agent`/);
+    assert.doesNotMatch(content, /Agent\s*\(/);
+    assert.doesNotMatch(content, /\b(?:haiku|sonnet|opus)\b/i);
+    assert.doesNotMatch(content, /isolation\s*:\s*["']?worktree/i);
+  }
+  const compound = readSkill('compound');
+  assert(Buffer.byteLength(compound, 'utf8') < 4096, 'native compound SKILL.md must stay below 4 KiB');
+  assert.match(compound, /docs\/solutions\/index\.jsonl/);
+  assert.match(compound, /CLAUDE\.md/);
+  assert.match(compound, /AGENTS\.md[^\n]*(?:不|禁止|不得)/);
+  assert.match(compound, /已验证事实/);
+  assert.match(compound, /权限边界/);
+  assert.doesNotMatch(compound, /两个 runtime projection/);
+  assert.doesNotMatch(compound, /CLAUDE\.md\s*[+\/]\s*AGENTS\.md/);
+
+  for (const name of ['think', 'plan']) {
+    const content = readSkill(name);
+    assert(Buffer.byteLength(content, 'utf8') < 4096, `native ${name} SKILL.md must stay below 4 KiB`);
+    assert.doesNotMatch(content, /CRITICAL|不可跳过|Phase 间预热|读取 `\.codex\/rules|检查高置信(?:度)?本能/i);
+    assert.match(content, /不(?:扫描|预加载|强制)/);
+  }
+
+  for (const name of providerSpecificOverrides) {
+    assert(Buffer.byteLength(readSkill(name), 'utf8') < 4096, `${name} Codex override must stay below 4 KiB`);
+  }
+
+  const testStrategy = readSkill('test-strategy');
+  assert.match(testStrategy, /仅当用户显式(?:调用|请求)[^\n]*(?:test|测试)/i);
+  assert.doesNotMatch(testStrategy, /涉及代码变更时加载/);
+  assert.doesNotMatch(testStrategy, /执行 `?\/(?:work|review)/);
+  const prototypeWorkflow = readSkill('prototype-workflow');
+  assert.match(prototypeWorkflow, /仅当用户显式(?:调用|请求)[^\n]*(?:prototype|原型需求收敛)/i);
+  assert.doesNotMatch(prototypeWorkflow, /用户上传原型截图/);
+  assert.doesNotMatch(prototypeWorkflow, /Figma[^\n]*时加载/);
+
+  const figma = fs.readFileSync(
+    path.join(nativeRoot, 'sprint', 'references', 'figma.md'),
+    'utf8'
+  );
+  assert.match(figma, /text-only|纯文本/i);
+  assert.match(figma, /结构化读取/);
+  assert.match(figma, /阻塞|路由/);
+  const providerSpecificText = providerSpecificOverrides.map(readSkill).join('\n');
+  for (const staleClaim of [
+    'Set `"off"` to disable auto-activation on session start',
+    'SessionStart 只注入 `MEMORY.md`',
+    'SessionStart 默认只注入 `MEMORY.md`',
+    'SessionStart hooks inject caveman mode',
+  ]) {
+    assert(!providerSpecificText.includes(staleClaim), `stale Codex startup claim: ${staleClaim}`);
+  }
+  assert.match(readSkill('caveman'), /This mode is opt-in/);
+  assert.match(readSkill('caveman'), /SessionStart never activates it/);
+  assert.match(readSkill('caveman-help'), /does not auto-activate caveman/);
+  assert.match(readSkill('continuous-learning'), /No automatic repository-wide recall hook/);
+  assert.match(readSkill('continuous-learning'), /No automatic evaluator or Memory write/);
+  assert.match(readSkill('memory'), /SessionStart does not inject/);
+  const expectedTails = Object.freeze({
+    caveman: 'selected style.',
+    'caveman-help': 'learning rules.',
+    'continuous-learning': 'active in Codex.',
+    memory: 'projected as Codex behavior.',
+  });
+  for (const [name, tail] of Object.entries(expectedTails)) {
+    assert(readSkill(name).trimEnd().endsWith(tail), `${name} Codex override has a truncated tail`);
+  }
+}
+
+function assertSolutionIndexPluginRuntimeClosure() {
+  const syncPath = path.join(pluginRoot, 'scripts', 'sync-solution-index.js');
+  const casPath = path.join(pluginRoot, 'scripts', 'update-codex-marketplace.js');
+  assert(fs.existsSync(casPath), 'plugin solution-index runtime is missing the shared CAS utility');
+  delete require.cache[require.resolve(syncPath)];
+  delete require.cache[require.resolve(casPath)];
+  const pluginSync = require(syncPath);
+  assert.strictEqual(require.cache[require.resolve(casPath)], undefined, 'plugin sync eagerly loaded CAS');
+
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-plugin-solution-index-'));
+  try {
+    fs.mkdirSync(path.join(repo, 'docs', 'solutions'), { recursive: true });
+    const agentsPath = path.join(repo, 'AGENTS.md');
+    fs.writeFileSync(agentsPath, [
+      '# Agents',
+      '<!-- BEGIN TECH_PERSISTENCE_SOLUTIONS_INDEX -->',
+      '- stale',
+      '<!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->',
+      '',
+    ].join('\n'));
+    const result = pluginSync.syncSolutionIndex(repo, {
+      targets: ['codex'],
+      skipIndex: true,
+    });
+    const change = result.changes.find((entry) => entry.target === 'codex');
+    assert.strictEqual(change.changed, true);
+    assert.strictEqual(change.commitState, 'committed');
+    assert.strictEqual(
+      fs.readFileSync(agentsPath, 'utf8').includes('TECH_PERSISTENCE_SOLUTIONS_INDEX'),
+      false
+    );
+    assert(require.cache[require.resolve(casPath)], 'stale plugin migration did not load CAS');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    delete require.cache[require.resolve(syncPath)];
+    delete require.cache[require.resolve(casPath)];
+  }
+}
+
+function assertProjectionContracts() {
+  const legacySkills = listSkillNames(legacyRoot);
+  assert.deepStrictEqual(listSkillNames(projectionRoot), legacySkills, 'codex projection inventory');
+  assertMarkdownEofCanonical(path.join(pluginRoot, 'commands'), 'generated commands');
+  assertMarkdownEofCanonical(projectionRoot, 'generated Codex skills');
+  assertSolutionIndexPluginRuntimeClosure();
+
+  assert.deepStrictEqual(
+    fs.readFileSync(path.join(pluginRoot, 'commands', 'compound.md')),
+    fs.readFileSync(path.join(root, 'user-level', 'commands', 'compound.md')),
+    'Claude compound command projection must stay byte-identical'
+  );
+  const legacyCompound = fs.readFileSync(path.join(legacyRoot, 'compound', 'SKILL.md'), 'utf8');
+  assert.match(legacyCompound, /Codex 按需读取；AGENTS\.md 无静态索引/);
+  assert.match(legacyCompound, /AGENTS\.md 不承载静态 solution index/);
+  assert.match(legacyCompound, /legacy managed block，仅删除该 block/);
+  assert.match(legacyCompound, /畸形 marker fail closed/);
+  assert.match(legacyCompound, /Codex solution index 的 always-on 注入为 0/);
+  assert.match(legacyCompound, /AGENTS projection: disabled/);
+  assert.doesNotMatch(legacyCompound, /AGENTS\.md 有界投影/);
+  assert.doesNotMatch(legacyCompound, /AGENTS\.md 仅保留 Codex 的有界 runtime 投影/);
+  assert.doesNotMatch(
+    legacyCompound,
+    /AGENTS\.md 的 `### 解决方案索引` managed block[^\n]*AGENTS\.md 不再承载/
+  );
+  assert.doesNotMatch(legacyCompound, /只有 Codex 保留有界静态投影/);
+  assert.doesNotMatch(legacyCompound, /Claude|CLAUDE/);
+
+  for (const name of nativeOverrides) {
+    const actual = path.join(projectionRoot, name);
+    const expected = path.join(nativeRoot, name);
+    if (name === 'sprint') {
+      assertSourceTreeEmbedded(actual, expected, `${name} native override projection`);
+    } else {
+      assertDirectoriesEqual(actual, expected, `${name} native override projection`);
+    }
+  }
+
+  const sourceCli = path.join(root, 'scripts', 'codex-active-sprint-state.js');
+  const sourceLib = path.join(root, 'scripts', 'lib', 'codex-active-sprint.js');
+  const pluginSprint = path.join(projectionRoot, 'sprint');
+  const pluginCli = path.join(pluginSprint, 'runtime', 'codex-active-sprint-state.js');
+  const pluginLib = path.join(pluginSprint, 'runtime', 'lib', 'codex-active-sprint.js');
+  assert.strictEqual(
+    fs.readFileSync(pluginCli, 'utf8').replace(/\r\n/g, '\n'),
+    fs.readFileSync(sourceCli, 'utf8').replace(/\r\n/g, '\n'),
+    'skill-local active sprint CLI projection'
+  );
+  assert.deepStrictEqual(fs.readFileSync(pluginLib), fs.readFileSync(sourceLib));
+  assert(fs.existsSync(path.join(pluginRoot, 'scripts', 'codex-active-sprint-state.js')));
+
+  const temporaryWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-managed-sprint-cli-'));
+  try {
+    const managedSkill = path.join(temporaryWorkspace, '.codex', 'skills', 'sprint');
+    fs.mkdirSync(path.dirname(managedSkill), { recursive: true });
+    fs.cpSync(pluginSprint, managedSkill, { recursive: true });
+    const managedCli = path.join(managedSkill, 'runtime', 'codex-active-sprint-state.js');
+    const status = spawnSync(process.execPath, [managedCli, 'status'], {
+      cwd: temporaryWorkspace,
+      encoding: 'utf8',
+    });
+    assert.strictEqual(status.status, 0, status.stderr);
+    assert.strictEqual(JSON.parse(status.stdout).reason, 'missing-pointer');
+  } finally {
+    fs.rmSync(temporaryWorkspace, { recursive: true, force: true });
+  }
+  const fallbackName = 'test';
+  assert(!nativeOverrides.includes(fallbackName), 'fallback fixture must not be native');
+  assertDirectoriesEqualWithCanonicalMarkdownEof(
+    path.join(projectionRoot, fallbackName),
+    path.join(legacyRoot, fallbackName),
+    `${fallbackName} legacy fallback projection`
+  );
+}
+
+function main() {
+  assertNativeContracts();
+
+  const legacyBefore = directoryDigest(legacyRoot);
+  runBuilder();
+  const legacyAfterFirstBuild = directoryDigest(legacyRoot);
+  const projectionAfterFirstBuild = directoryDigest(projectionRoot);
+  assert.strictEqual(legacyAfterFirstBuild, legacyBefore, 'first build changed legacy skills bytes');
+  assertProjectionContracts();
+  assertSprintRuntimeValidatorContracts();
+
+  runBuilder();
+  assert.strictEqual(directoryDigest(legacyRoot), legacyAfterFirstBuild, 'second build changed legacy skills bytes');
+  assert.strictEqual(
+    directoryDigest(projectionRoot),
+    projectionAfterFirstBuild,
+    'second build changed codex-skills bytes'
+  );
+  assertProjectionContracts();
+
+  process.stdout.write('[OK] Codex-native skill projection tests passed\n');
+}
+
+main();

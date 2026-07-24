@@ -1,6 +1,6 @@
 {
   "name": "tech-persistence",
-  "version": "1.0.0",
+  "version": "1.0.7",
   "description": "Self-evolving engineering persistence system for Codex: workflows, learning, instincts, review, testing, handoff, and Obsidian-compatible knowledge storage.",
   "author": {
     "name": "Tech Persistence",
@@ -18,8 +18,8 @@
     "knowledge-management",
     "obsidian"
   ],
-  "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
+  "skills": "./codex-skills/",
+  "hooks": "./codex-hooks/hooks.json",
   "mcpServers": "./.codex-plugin/.mcp.json",
   "interface": {
     "displayName": "Tech Persistence",

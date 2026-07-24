@@ -44,16 +44,21 @@ function makeRepo(label) {
 
   for (const rel of [
     'scripts/propagate-command-changes.js',
-    'scripts/lib/hook-registry.js',
+    'scripts/codex-active-sprint-state.js',
     'plugins/tech-persistence/scripts/build-codex-plugin.js',
     'scripts/pre-commit-check.js',
     'scripts/sync-solution-index.js',
-    'scripts/lib/knowledge-drift.js',
   ]) {
     const src = path.join(REAL_REPO, rel);
     const dst = path.join(dir, rel);
     fs.mkdirSync(path.dirname(dst), { recursive: true });
     fs.copyFileSync(src, dst);
+  }
+  const libSource = path.join(REAL_REPO, 'scripts', 'lib');
+  for (const name of fs.readdirSync(libSource).filter((entry) => entry.endsWith('.js'))) {
+    const dst = path.join(dir, 'scripts', 'lib', name);
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.copyFileSync(path.join(libSource, name), dst);
   }
   return dir;
 }
@@ -119,15 +124,44 @@ This is Claude Code talking about ~/.claude/commands.
 A new paragraph was added here.
 `;
 
+const NATIVE_SPRINT_COMMAND = `---
+description: native sprint entry
+---
+
+# /sprint
+
+Load exactly one native sprint skill.
+`;
+
+const NATIVE_SPRINT_SKILL = `---
+name: sprint
+description: native sprint skill
+---
+
+# Sprint
+
+Only load the current phase.
+`;
+
 function syncedDerivedSet(dir, name, sourceContent) {
+  if (name === 'sprint') {
+    writeFile(dir, 'codex-native/commands/sprint.md', NATIVE_SPRINT_COMMAND);
+    writeFile(dir, 'codex-native/skills/sprint/SKILL.md', NATIVE_SPRINT_SKILL);
+  }
   const propagate = require(path.join(dir, 'scripts/propagate-command-changes.js'));
   const build = require(path.join(dir, 'plugins/tech-persistence/scripts/build-codex-plugin.js'));
 
-  writeFile(dir, `.codex/commands/${name}.md`, propagate.applyCodexRegex(sourceContent));
+  writeFile(dir, `.codex/commands/${name}.md`, propagate.codexCommandContent(name, sourceContent));
   // plugin command 是 plain copy (与 pre-commit-check.js 期望对齐, 服务 Claude Code 2.x plugin)
   writeFile(dir, `plugins/tech-persistence/commands/${name}.md`, build.normalizeLf(sourceContent));
   if (build.expectedCommands.includes(`${name}.md`)) {
     writeFile(dir, `plugins/tech-persistence/skills/${name}/SKILL.md`, build.commandToSkill(`${name}.md`, sourceContent));
+    const nativeSkill = path.join(dir, 'codex-native', 'skills', name, 'SKILL.md');
+    writeFile(
+      dir,
+      `plugins/tech-persistence/codex-skills/${name}/SKILL.md`,
+      fs.existsSync(nativeSkill) ? fs.readFileSync(nativeSkill, 'utf8') : build.commandToSkill(`${name}.md`, sourceContent)
+    );
   }
 }
 
@@ -201,20 +235,26 @@ function scenarioPropagateRefreshesCommandSkillDescription() {
   const build = require(path.join(dir, 'plugins/tech-persistence/scripts/build-codex-plugin.js'));
   const propagate = require(path.join(dir, 'scripts/propagate-command-changes.js'));
 
+  writeFile(dir, 'codex-native/commands/sprint.md', NATIVE_SPRINT_COMMAND);
+  writeFile(dir, 'codex-native/skills/sprint/SKILL.md', NATIVE_SPRINT_SKILL);
   writeFile(dir, 'user-level/commands/sprint.md', SPRINT_V2);
-  writeFile(dir, '.codex/commands/sprint.md', propagate.applyCodexRegex(SPRINT_V1));
+  writeFile(dir, '.codex/commands/sprint.md', NATIVE_SPRINT_COMMAND);
   writeFile(dir, 'plugins/tech-persistence/commands/sprint.md', build.normalizeLf(SPRINT_V1));
   writeFile(dir, 'plugins/tech-persistence/skills/sprint/SKILL.md', build.commandToSkill('sprint.md', SPRINT_V1));
-  writeFile(dir, '.codex/skills/sprint/SKILL.md', build.commandToSkill('sprint.md', SPRINT_V1));
+  writeFile(dir, 'plugins/tech-persistence/codex-skills/sprint/SKILL.md', NATIVE_SPRINT_SKILL);
 
   propagate.propagateCommand('sprint');
 
   const pluginSkill = fs.readFileSync(path.join(dir, 'plugins/tech-persistence/skills/sprint/SKILL.md'), 'utf8');
-  const codexSkill = fs.readFileSync(path.join(dir, '.codex/skills/sprint/SKILL.md'), 'utf8');
+  const codexSkill = fs.readFileSync(path.join(dir, 'plugins/tech-persistence/codex-skills/sprint/SKILL.md'), 'utf8');
   assert(pluginSkill.includes('test command v2 (modified)'), 'plugin skill description was not refreshed');
-  assert(codexSkill.includes('test command v2 (modified)'), 'codex skill description was not refreshed');
+  assert(codexSkill.includes('native sprint skill'), 'codex skill did not retain native override');
   assert(!pluginSkill.includes('test command v1'), 'plugin skill kept stale v1 description');
-  assert(!codexSkill.includes('test command v1'), 'codex skill kept stale v1 description');
+  assert(!codexSkill.includes('test command v2'), 'native codex skill was overwritten by legacy command');
+  assert(
+    fs.readFileSync(path.join(dir, '.codex/commands/sprint.md'), 'utf8') === NATIVE_SPRINT_COMMAND,
+    'thin sprint command was overwritten by legacy projection'
+  );
 }
 
 function scenarioRulesPathOutOfSync() {
@@ -639,7 +679,7 @@ ${body}
 
 // ─────────────────────────────────────────────────────────────
 // Solution index sync scenarios (S14a-b) — docs/solutions is the
-// source of truth; index.jsonl + runtime docs must be regenerated by
+// source of truth; index.jsonl + the Claude runtime projection must be regenerated by
 // scripts/sync-solution-index.js before commit.
 // ─────────────────────────────────────────────────────────────
 
@@ -669,8 +709,7 @@ function stageSolutionSet(dir) {
     dir,
     'docs/solutions/2026-05-18-sync-smoke.md',
     'docs/solutions/index.jsonl',
-    'CLAUDE.md',
-    'AGENTS.md'
+    'CLAUDE.md'
   );
 }
 
@@ -691,7 +730,7 @@ function scenarioSolutionIndexChangedNotSynced() {
   assert(/Solution index sync/.test(res.stderr), `stderr missing solution index marker: ${res.stderr}`);
   assert(/docs\/solutions\/index\.jsonl/.test(res.stderr), `stderr missing index path: ${res.stderr}`);
   assert(/CLAUDE\.md/.test(res.stderr), `stderr missing CLAUDE.md projection path: ${res.stderr}`);
-  assert(/AGENTS\.md/.test(res.stderr), `stderr missing AGENTS.md projection path: ${res.stderr}`);
+  assert(!/AGENTS\.md/.test(res.stderr), `stderr must not require an AGENTS.md projection: ${res.stderr}`);
   assert(/sync-solution-index\.js --all/.test(res.stderr), `stderr missing repair command: ${res.stderr}`);
 }
 
@@ -713,6 +752,21 @@ function scenarioSolutionIndexChangedAndSynced() {
   assert(
     !/hook 内部异常已忽略|fail-open 放行|Solution index sync/.test(res.stderr),
     `expected real pass without solution drift: stderr=${res.stderr}`
+  );
+}
+
+function scenarioAgentsChangedDoesNotRequireSolutionProjection() {
+  const dir = makeRepo('s15c');
+  clearRequireCache(dir);
+
+  writeFile(dir, 'AGENTS.md', '# Agents\n\nCodex reads solution history on demand.\n');
+  gitAdd(dir, 'AGENTS.md');
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `expected exit 0, got ${res.code}. stderr=${res.stderr}`);
+  assert(
+    !/Solution index sync|AGENTS\.md.*projection/.test(res.stderr),
+    `AGENTS.md must not be treated as a generated solution projection: ${res.stderr}`
   );
 }
 
@@ -828,6 +882,7 @@ function main() {
   runScenario('S14f: grandfathered date + completed + path missing → exit 0', scenarioPlanCompletionGrandfathered);
   runScenario('S15a: docs/solutions changed but index/projections stale → exit 1', scenarioSolutionIndexChangedNotSynced);
   runScenario('S15b: docs/solutions changed and index/projections synced → exit 0', scenarioSolutionIndexChangedAndSynced);
+  runScenario('S15c: AGENTS.md changed without solution projection → exit 0', scenarioAgentsChangedDoesNotRequireSolutionProjection);
   runScenario('S16a: knowledge drift — 源码前缀引用存在文件 → exit 0 (not fail-open)', scenarioDriftKnowledgePass);
   runScenario('S16b: knowledge drift — 源码前缀引用缺失文件 → exit 1 block', scenarioDriftKnowledgeBlock);
   runScenario('S16c: knowledge drift — 裸名无匹配 → exit 0 warn (不阻塞)', scenarioDriftKnowledgeWarn);

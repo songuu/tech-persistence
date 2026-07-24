@@ -85,6 +85,7 @@ function loadTransformers(repoRoot) {
   const build = require(buildPath);
   return {
     applyCodexRegex: propagate.applyCodexRegex,
+    codexCommandContent: propagate.codexCommandContent,
     pluginTransform: build.transform,
     normalizeLf: build.normalizeLf,
     commandToSkill: build.commandToSkill,
@@ -96,7 +97,8 @@ function checkPropagateSync(stagedFiles, repoRoot) {
   const userLevelChanged = stagedFiles.filter((f) =>
     f.startsWith('user-level/commands/') || f.startsWith('user-level/rules/')
   );
-  if (userLevelChanged.length === 0) return [];
+  const nativeChanged = stagedFiles.filter((f) => f.startsWith('codex-native/'));
+  if (userLevelChanged.length === 0 && nativeChanged.length === 0) return [];
 
   const t = loadTransformers(repoRoot);
   const mismatches = [];
@@ -110,7 +112,7 @@ function checkPropagateSync(stagedFiles, repoRoot) {
 
       const codexCmdRel = `.codex/commands/${name}.md`;
       const codexCmdActual = readIfExists(path.join(repoRoot, codexCmdRel));
-      const codexCmdExpected = t.applyCodexRegex(sourceContent);
+      const codexCmdExpected = t.codexCommandContent(name, sourceContent);
       if (codexCmdActual !== codexCmdExpected) {
         mismatches.push({ source: sourceRel, derived: codexCmdRel, kind: 'command', reason: 'propagate output mismatch' });
       }
@@ -133,6 +135,13 @@ function checkPropagateSync(stagedFiles, repoRoot) {
         if (skillActual !== skillExpected) {
           mismatches.push({ source: sourceRel, derived: skillRel, kind: 'command', reason: 'skill wrapper mismatch' });
         }
+        const codexSkillRel = `plugins/tech-persistence/codex-skills/${name}/SKILL.md`;
+        const codexSkillActual = readIfExists(path.join(repoRoot, codexSkillRel));
+        const nativeSkill = readIfExists(path.join(repoRoot, 'codex-native', 'skills', name, 'SKILL.md'));
+        const codexSkillExpected = nativeSkill == null ? skillExpected : nativeSkill;
+        if (codexSkillActual !== codexSkillExpected) {
+          mismatches.push({ source: sourceRel, derived: codexSkillRel, kind: 'command', reason: 'codex skill projection mismatch' });
+        }
       }
     }
 
@@ -143,6 +152,25 @@ function checkPropagateSync(stagedFiles, repoRoot) {
       const codexRuleExpected = t.applyCodexRegex(sourceContent);
       if (codexRuleActual !== codexRuleExpected) {
         mismatches.push({ source: sourceRel, derived: codexRuleRel, kind: 'rule', reason: 'propagate rule output mismatch' });
+      }
+    }
+  }
+
+  for (const sourceRel of nativeChanged) {
+    const sourceContent = readIfExists(path.join(repoRoot, sourceRel));
+    if (sourceRel.startsWith('codex-native/commands/') && sourceRel.endsWith('.md')) {
+      const derived = `.codex/commands/${path.basename(sourceRel)}`;
+      const actual = readIfExists(path.join(repoRoot, derived));
+      if (sourceContent !== actual) {
+        mismatches.push({ source: sourceRel, derived, kind: 'native-command', reason: 'thin command projection mismatch' });
+      }
+    }
+    if (sourceRel.startsWith('codex-native/skills/')) {
+      const relative = sourceRel.slice('codex-native/skills/'.length);
+      const derived = `plugins/tech-persistence/codex-skills/${relative}`;
+      const actual = readIfExists(path.join(repoRoot, derived));
+      if (sourceContent !== actual) {
+        mismatches.push({ source: sourceRel, derived, kind: 'native-skill', reason: 'native skill projection mismatch' });
       }
     }
   }
@@ -413,7 +441,6 @@ function checkPlanCompletion(stagedFiles, repoRoot) {
 function checkSolutionIndexSync(stagedFiles, repoRoot) {
   const relevant = stagedFiles.some((f) =>
     f === 'CLAUDE.md'
-    || f === 'AGENTS.md'
     || f === 'docs/solutions/index.jsonl'
     || f === 'scripts/sync-solution-index.js'
     || f === 'user-level/commands/compound.md'
@@ -430,7 +457,7 @@ function checkSolutionIndexSync(stagedFiles, repoRoot) {
   }
 
   const sync = require(syncPath);
-  const state = sync.buildExpectedState(repoRoot, { targets: ['claude', 'codex'] });
+  const state = sync.buildExpectedState(repoRoot, { targets: ['claude'] });
   const failures = [];
 
   const currentIndex = readIfExists(state.indexPath) || '';
@@ -516,7 +543,7 @@ function formatSolutionIndexError(failures) {
   lines.push('');
   lines.push('  修复（按顺序执行）:');
   lines.push('    node scripts/sync-solution-index.js --all');
-  lines.push('    git add docs/solutions/index.jsonl CLAUDE.md AGENTS.md');
+  lines.push('    git add docs/solutions/index.jsonl CLAUDE.md');
   lines.push('  绕过: git commit --no-verify (不推荐, 会让 Claude/Codex 总结漂移)');
   lines.push('');
   return lines.join('\n');

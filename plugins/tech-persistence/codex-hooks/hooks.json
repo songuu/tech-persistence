@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/inject-context-codex.js\"",
+            "async": false,
+            "timeout": 3000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|str_replace_editor|apply_patch|functions.apply_patch|write_file|edit_file|delete_file|move_file|create_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/guard-handoff-path-codex.js\"",
+            "async": false,
+            "timeout": 1000,
+            "statusMessage": "Checking handoff path"
+          }
+        ]
+      }
+    ]
+  }
+}

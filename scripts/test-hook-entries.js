@@ -323,11 +323,10 @@ test('E7 plugin SessionStart hooks skip resume to avoid duplicate startup inject
 // .codex/hooks.json runtime boundary
 // ============================================================
 
-test('F1 project .codex/hooks.json must not hard-code ~/.claude runtime paths', () => {
+test('F1 project .codex/hooks.json is an inert compatibility tombstone', () => {
   const hooksPath = path.join(__dirname, '..', '.codex', 'hooks.json');
-  const content = fs.readFileSync(hooksPath, 'utf8');
-  assert.ok(!content.includes('~/.claude'), '.codex/hooks.json must not reference ~/.claude');
-  assert.ok(!content.includes('.claude/skills'), '.codex/hooks.json must not reference Claude skill paths');
+  const config = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+  assert.deepStrictEqual(config, { hooks: {} });
 });
 
 // ============================================================

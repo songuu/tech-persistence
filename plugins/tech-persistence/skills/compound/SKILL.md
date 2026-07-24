@@ -25,7 +25,7 @@ When the command instructions below mention `/compound`, interpret that as this 
 ### 步骤 1: 扫描会话，提取 7 类知识
 | 类型 | 写入位置 |
 |------|---------|
-| 解决方案 | `docs/solutions/` + `docs/solutions/index.jsonl` + runtime instruction docs 投影 |
+| 解决方案 | `docs/solutions/` + `docs/solutions/index.jsonl`（Codex 按需读取；AGENTS.md 无静态索引） |
 | 踩坑记录 | `.codex/rules/debugging-gotchas.md` |
 | 架构决策 | `.codex/rules/architecture.md` |
 | 行为本能 | `~/.codex/homunculus/instincts/` |
@@ -69,24 +69,24 @@ aliases: ["问题的别名"]
 - [[session-YYYY-MM-DD]] — 发现此问题的会话
 ```
 
-`docs/solutions/*.md` 是唯一详情源；`docs/solutions/index.jsonl` 是唯一摘要索引缓存。runtime instruction docs 只是 runtime 注入投影，不允许分别手工维护总结。
+`docs/solutions/*.md` 是唯一详情源；`docs/solutions/index.jsonl` 是唯一摘要索引缓存。Codex 按需读取 canonical index 或详情文档；AGENTS.md 不承载静态 solution index。
 
 ### 步骤 2.5: 统一同步 solution index
 
 写完 solution 文档后运行统一 renderer：
 
 ```bash
-node scripts/sync-solution-index.js --all  # idempotent；同步 canonical index + 两个 runtime projection
+node scripts/sync-solution-index.js --all  # idempotent；重建 canonical index；Codex 按需读取；AGENTS.md 仅做 legacy block remove-only 迁移
 ```
 
 效果：
 - `docs/solutions/index.jsonl` 从 `docs/solutions/*.md` 重建（canonical summary cache）
-- runtime instruction docs 的 `### 解决方案索引` managed block 始终保留**最近 5 条**
-- always-on 注入恒定，不再线性增长（设计参考 `docs/plans/2026-05-14-claude-md-index-via-prompt-recall.md`）
-- 老条目仍可被 **prompt recall hook**（UserPromptSubmit）按用户当轮 prompt 召回（数据源是 `docs/solutions/*.md`，不依赖 runtime instruction docs 索引）
-- 两个 runtime 共享同一套总结内容，只做路径和入口外壳投影
+- AGENTS.md 不承载解决方案索引；若检测到唯一且有序的 legacy managed block，仅删除该 block；缺失文件不创建，畸形 marker fail closed
+- Codex solution index 的 always-on 注入为 0；仅在当前任务相关时读取 `docs/solutions/index.jsonl`
+- Codex 仅在相关任务中按需检索 `docs/solutions/index.jsonl` 或具体 solution 文档
+- canonical summary 保持单一来源；Codex 不维护静态 runtime-doc projection
 
-报告中加一行 `Solution index: synced <N> entries → docs/solutions/index.jsonl + runtime instruction docs`。
+报告中加一行 `Solution index: <updated|unchanged|failed> <N> entries -> docs/solutions/index.jsonl; Codex recall: on-demand; AGENTS projection: disabled`。
 
 ### 步骤 3: 提取经验到 rules
 项目特有 → `.codex/rules/`，跨项目 → `~/.codex/AGENTS.md`

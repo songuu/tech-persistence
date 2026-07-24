@@ -15,7 +15,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
+const { classifyExistingAgents } = require('./install-codex-agents');
 
 const OK = '\x1b[32m✅\x1b[0m';
 const WARN = '\x1b[33m⚠️\x1b[0m';
@@ -94,6 +95,20 @@ function describeSharedHomunculus(home) {
   }
 }
 
+function describeCodexAgents(file, kind) {
+  const template = path.join(__dirname, '..', 'codex-native', 'agents', `${kind}.md`);
+  if (!fs.existsSync(file)) return { state: 'absent' };
+  if (!fs.existsSync(template)) return { state: 'invalid', message: `missing native template: ${template}` };
+  const raw = fs.readFileSync(file);
+  const templateRaw = fs.readFileSync(template);
+  const classification = classifyExistingAgents({ raw, templateRaw, legacyRaw: null, kind });
+  if (classification === 'managed-current') return { state: 'optimized' };
+  if (classification === 'managed-marker' || classification === 'legacy-generated') {
+    return { state: 'migratable', classification };
+  }
+  return { state: 'custom' };
+}
+
 function finish(recommendedCommand) {
   console.log('\n' + '─'.repeat(50));
   if (hasError) {
@@ -110,6 +125,8 @@ function finish(recommendedCommand) {
 
 function runCodexPreflight() {
   console.log('\n🔍 Tech Persistence for Codex — 环境检查\n');
+
+  let codexAvailable = false;
 
   console.log('运行环境:');
   check('Node.js >= 18', () => {
@@ -131,9 +148,10 @@ function runCodexPreflight() {
   check('Codex CLI 可用', () => {
     try {
       commandAvailable('codex');
+      codexAvailable = true;
       return true;
     } catch {
-      console.log('     未检测到 codex 命令；插件仍可安装，但请确认 Codex CLI/应用可加载插件');
+      console.log('     未检测到 codex 命令；--project 将安装带哈希清单的 direct fallback');
       return 'warn';
     }
   });
@@ -144,7 +162,6 @@ function runCodexPreflight() {
   const agentsPluginsDir = path.join(homeDir, '.agents', 'plugins');
   const userPluginDir = path.join(homeDir, 'plugins', 'tech-persistence');
   const marketplacePath = path.join(agentsPluginsDir, 'marketplace.json');
-  const repoMarketplacePath = path.join(process.cwd(), '.agents', 'plugins', 'marketplace.json');
 
   check('~/.codex 目录可写', () => {
     try {
@@ -209,46 +226,50 @@ function runCodexPreflight() {
     return commandCount >= 21 ? 'warn' : true;
   });
 
-  check('~/.codex/skills', () => {
+  check('~/.codex/AGENTS.md lean context', () => {
+    const status = describeCodexAgents(path.join(codexHome, 'AGENTS.md'), 'user');
+    if (status.state === 'absent') {
+      console.log('     不存在 — 将安装 lean Codex-native user template');
+      return true;
+    }
+    if (status.state === 'optimized') return true;
+    if (status.state === 'migratable') {
+      console.log(`     ${status.classification} — 将保留唯一备份后迁移为 lean native template`);
+      return 'warn';
+    }
+    if (status.state === 'custom') {
+      console.log('     自定义内容将原样保留；lean context optimization 不会启用');
+      return 'warn';
+    }
+    console.log(`     ${status.message}`);
+    return false;
+  });
+
+  check('Codex-native think/plan/work/review/compound/sprint commands', () => {
+    const commandsDir = path.join(codexHome, 'commands');
+    const nativeDir = path.join(__dirname, '..', 'codex-native', 'commands');
+    const mismatched = ['compound.md', 'plan.md', 'review.md', 'sprint.md', 'think.md', 'work.md'].filter((name) => {
+      const installed = path.join(commandsDir, name);
+      const expected = path.join(nativeDir, name);
+      return !fs.existsSync(installed)
+        || !fs.existsSync(expected)
+        || !fs.readFileSync(installed).equals(fs.readFileSync(expected));
+    });
+    if (mismatched.length === 0) return true;
+    console.log(`     将替换为 thin native command: ${mismatched.join(', ')}`);
+    return 'warn';
+  });
+
+  check('Codex direct skill copies', () => {
     const skillsDir = path.join(codexHome, 'skills');
-    const requiredSkills = [
-      'agent-loop',
-      'memory',
-      'continuous-learning',
-      'prototype-workflow',
-      'test-strategy',
-      'context-handoff',
-      'checkpoint',
-      'compound',
-      'evolve',
-      'instinct-export',
-      'instinct-import',
-      'instinct-status',
-      'learn',
-      'plan',
-      'prototype',
-      'review',
-      'review-learnings',
-      'session-summary',
-      'skill-diagnose',
-      'skill-eval',
-      'skill-improve',
-      'skill-publish',
-      'sprint',
-      'test',
-      'think',
-      'work',
-    ];
     if (!fs.existsSync(skillsDir)) {
-      console.log(`     不存在 — 将安装 ${requiredSkills.length} 个 Codex skills`);
+      console.log('     不存在 — 正常；user skills 由 canonical plugin 提供');
       return true;
     }
-    const missing = requiredSkills.filter((name) => !fs.existsSync(path.join(skillsDir, name, 'SKILL.md')));
-    if (missing.length > 0) {
-      console.log(`     缺少: ${missing.join(', ')} — 安装时会补齐`);
-      return true;
-    }
-    console.log(`     ${requiredSkills.length} 个 Codex skills 已存在 — 安装时会刷新本系统技能`);
+    const count = fs.readdirSync(skillsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(skillsDir, entry.name, 'SKILL.md')))
+      .length;
+    console.log(`     检测到 ${count} 个 direct skills；installer doctor 会原地保留文件，并通过完整 SKILL.md 路径 exclusion 禁用冲突副本（config 变更先备份）`);
     return 'warn';
   });
 
@@ -260,39 +281,46 @@ function runCodexPreflight() {
     try {
       const marketplace = JSON.parse(fs.readFileSync(marketplacePath, 'utf-8'));
       const plugins = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
-      if (plugins.some((plugin) => plugin.name === 'tech-persistence')) {
-        console.log('     已存在 — 安装时会刷新该 entry');
+      const entries = plugins.filter((plugin) => plugin.name === 'tech-persistence');
+      if (marketplace.name === 'local-plugins' && entries.length === 1) {
+        console.log('     已存在一个 canonical entry — 安装时会幂等刷新');
         return 'warn';
       }
-      console.log('     未注册 — 将追加 entry');
-      return true;
+      console.log('     将规范化为 local-plugins 中唯一的 tech-persistence entry');
+      return 'warn';
     } catch {
       console.log('     marketplace.json 解析失败 — 安装时会备份并重建');
       return 'warn';
     }
   });
 
-  check('repo marketplace root', () => {
-    if (!fs.existsSync(repoMarketplacePath)) {
-      console.log('     缺少 .agents/plugins/marketplace.json — Codex 无法用当前仓库作为 marketplace root');
-      return false;
+  check('Codex runtime owner', () => {
+    if (!codexAvailable) {
+      console.log('     CLI 不可用，无法读取 plugin owner；project installer 将使用 direct fallback');
+      return 'warn';
     }
+    const doctor = path.join(__dirname, 'codex-runtime-doctor.js');
+    const result = spawnSync(process.execPath, [doctor, '--json'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
     try {
-      const marketplace = JSON.parse(fs.readFileSync(repoMarketplacePath, 'utf-8'));
-      const plugins = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
-      const entry = plugins.find((plugin) => plugin.name === 'tech-persistence');
-      if (!entry) {
-        console.log('     缺少 tech-persistence entry');
+      const report = JSON.parse(result.stdout || '{}');
+      if (report.blocked) {
+        console.log(`     doctor 阻断安全修复: ${report.blocked}`);
         return false;
       }
-      if (entry.policy?.installation !== 'INSTALLED_BY_DEFAULT') {
-        console.log('     tech-persistence 需要 INSTALLED_BY_DEFAULT 才能直接加载 Codex skills');
-        return false;
+      const ownerCount = report.report?.ownerCount;
+      if (ownerCount === 1 && report.report?.healthy) {
+        console.log(`     ownerCount=1 (${report.report.pluginOwners?.[0]?.pluginId || 'direct fallback'})`);
+        return true;
       }
-      console.log('     可通过 codex plugin marketplace add . 注册');
-      return true;
-    } catch {
-      console.log('     repo marketplace JSON 解析失败');
+      console.log(`     ownerCount=${ownerCount ?? 'unknown'}；--user 将先 dry-run 再执行显式安全修复`);
+      return 'warn';
+    } catch (error) {
+      console.log(`     runtime doctor 输出不可解析: ${error.message}`);
       return false;
     }
   });
@@ -317,12 +345,15 @@ function runCodexPreflight() {
   });
 
   check('AGENTS.md', () => {
-    if (fs.existsSync('AGENTS.md')) {
-      const lines = fs.readFileSync('AGENTS.md', 'utf-8').split('\n').length;
-      console.log(`     已存在 (${lines} 行) — 不会覆盖`);
+    const status = describeCodexAgents(path.resolve('AGENTS.md'), 'project');
+    if (status.state === 'absent') return true;
+    if (status.state === 'optimized') return true;
+    if (status.state === 'migratable') {
+      console.log(`     ${status.classification} — explicit project install 将备份后迁移`);
       return 'warn';
     }
-    return true;
+    console.log('     自定义内容将原样保留；project lean context optimization 不会启用');
+    return 'warn';
   });
 
   finish(process.platform === 'win32'

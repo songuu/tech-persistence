@@ -12,7 +12,7 @@ description: "复利步骤：提取经验→写入本能+rules+解决方案+skil
 ### 步骤 1: 扫描会话，提取 7 类知识
 | 类型 | 写入位置 |
 |------|---------|
-| 解决方案 | `docs/solutions/` + `docs/solutions/index.jsonl` + CLAUDE.md / AGENTS.md 投影 |
+| 解决方案 | `docs/solutions/` + `docs/solutions/index.jsonl` + CLAUDE.md 有界投影（Codex 按需读取 canonical index） |
 | 踩坑记录 | `.claude/rules/debugging-gotchas.md` |
 | 架构决策 | `.claude/rules/architecture.md` |
 | 行为本能 | `~/.claude/homunculus/instincts/` |
@@ -56,24 +56,24 @@ aliases: ["问题的别名"]
 - [[session-YYYY-MM-DD]] — 发现此问题的会话
 ```
 
-`docs/solutions/*.md` 是唯一详情源；`docs/solutions/index.jsonl` 是唯一摘要索引缓存。CLAUDE.md / AGENTS.md 只是 runtime 注入投影，不允许分别手工维护总结。
+`docs/solutions/*.md` 是唯一详情源；`docs/solutions/index.jsonl` 是唯一摘要索引缓存。CLAUDE.md 仅保留 Claude 的有界 runtime 投影；Codex 不再把解决方案索引静态写入 AGENTS.md，而是按需读取 canonical index。
 
 ### 步骤 2.5: 统一同步 solution index
 
 写完 solution 文档后运行统一 renderer：
 
 ```bash
-node scripts/sync-solution-index.js --all  # idempotent；同步 canonical index + 两个 runtime projection
+node scripts/sync-solution-index.js --all  # idempotent；同步 canonical index + Claude runtime projection；Codex 保持按需读取
 ```
 
 效果：
 - `docs/solutions/index.jsonl` 从 `docs/solutions/*.md` 重建（canonical summary cache）
-- CLAUDE.md / AGENTS.md 的 `### 解决方案索引` managed block 始终保留**最近 5 条**
-- always-on 注入恒定，不再线性增长（设计参考 `docs/plans/2026-05-14-claude-md-index-via-prompt-recall.md`）
-- 老条目仍可被 **prompt recall hook**（UserPromptSubmit）按用户当轮 prompt 召回（数据源是 `docs/solutions/*.md`，不依赖 CLAUDE.md / AGENTS.md 索引）
-- 两个 runtime 共享同一套总结内容，只做路径和入口外壳投影
+- CLAUDE.md 的 `### 解决方案索引` managed block 始终保留**最近 5 条**；AGENTS.md 不再承载解决方案索引
+- Claude always-on 注入保持有界，Codex solution index 的 always-on 注入为 0（设计参考 `docs/plans/2026-05-14-claude-md-index-via-prompt-recall.md`）
+- Claude 的老条目仍可被 **prompt recall hook**（UserPromptSubmit）按当轮 prompt 召回；Codex 仅在相关任务中按需检索 `docs/solutions/index.jsonl` 或详情文档
+- 两个 runtime 共享同一 canonical summary；只有 Claude 保留有界静态投影
 
-报告中加一行 `Solution index: synced <N> entries → docs/solutions/index.jsonl + CLAUDE.md + AGENTS.md`。
+报告中加一行 `Solution index: synced <N> entries → docs/solutions/index.jsonl + CLAUDE.md (Codex on-demand)`。
 
 ### 步骤 3: 提取经验到 rules
 项目特有 → `.claude/rules/`，跨项目 → `~/.claude/CLAUDE.md`

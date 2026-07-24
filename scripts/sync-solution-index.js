@@ -4,7 +4,8 @@
  * sync-solution-index.js
  *
  * Keeps solution summaries single-sourced from docs/solutions/*.md, then renders
- * bounded runtime projections into CLAUDE.md and AGENTS.md.
+ * the bounded Claude runtime projection into CLAUDE.md. Codex reads the canonical
+ * docs/solutions/index.jsonl on demand instead of preloading it through AGENTS.md.
  */
 
 'use strict';
@@ -224,6 +225,85 @@ function upsertSolutionSection(content, entries, options = {}) {
   return updated.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function countOccurrences(content, value) {
+  let count = 0;
+  let offset = 0;
+  while (offset < content.length) {
+    const index = content.indexOf(value, offset);
+    if (index === -1) break;
+    count += 1;
+    offset = index + value.length;
+  }
+  return count;
+}
+
+function findExactMarkerLines(content, marker) {
+  const matches = [];
+  const pattern = new RegExp(`^${escapeRegExp(marker)}(?:\\r\\n|\\n|$)`, 'gm');
+  for (const match of content.matchAll(pattern)) {
+    matches.push({
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+  }
+  return matches;
+}
+
+function invalidCodexMigrationError(agentsPath, reason) {
+  const error = new Error(
+    `refusing to migrate ${agentsPath}: invalid solution-index managed markers (${reason})`
+  );
+  error.code = 'TECH_PERSISTENCE_INVALID_AGENTS_SOLUTION_INDEX';
+  error.path = agentsPath;
+  return error;
+}
+
+function removeLegacyCodexSolutionSection(content, options = {}) {
+  const agentsPath = options.agentsPath || 'AGENTS.md';
+  const beginOccurrences = countOccurrences(content, BEGIN_MARKER);
+  const endOccurrences = countOccurrences(content, END_MARKER);
+  const beginLines = findExactMarkerLines(content, BEGIN_MARKER);
+  const endLines = findExactMarkerLines(content, END_MARKER);
+
+  if (beginOccurrences === 0 && endOccurrences === 0) {
+    return { content, changed: false, migration: 'already-absent' };
+  }
+  if (beginOccurrences !== beginLines.length || endOccurrences !== endLines.length) {
+    throw invalidCodexMigrationError(agentsPath, 'markers must each occupy an exact line');
+  }
+  if (beginLines.length !== 1 || endLines.length !== 1) {
+    throw invalidCodexMigrationError(
+      agentsPath,
+      `expected one ordered pair, found ${beginLines.length} begin and ${endLines.length} end`
+    );
+  }
+  if (beginLines[0].start >= endLines[0].start) {
+    throw invalidCodexMigrationError(agentsPath, 'END marker appears before BEGIN marker');
+  }
+
+  let removalStart = beginLines[0].start;
+  const prefix = content.slice(0, removalStart);
+  const attachedHeading = new RegExp(
+    `(^|\\r?\\n)${escapeRegExp(SECTION_ANCHOR)}(?:\\r\\n|\\n)(?:[\\t ]*(?:\\r\\n|\\n))*$`
+  ).exec(prefix);
+  if (attachedHeading) {
+    // The heading was emitted outside the old managed markers. Remove it only
+    // when it is the exact, directly attached renderer heading; never consume
+    // arbitrary neighboring project text.
+    removalStart = attachedHeading.index + attachedHeading[1].length;
+  }
+
+  return {
+    content: content.slice(0, removalStart) + content.slice(endLines[0].end),
+    changed: true,
+    migration: 'removed-legacy-managed-block',
+  };
+}
+
 function renderIndexJsonl(entries) {
   return entries
     .map((entry) => JSON.stringify(entry))
@@ -366,19 +446,94 @@ function targetDocs(repoRoot, options = {}) {
   const requested = options.targets || ['claude', 'codex'];
   const docs = [];
   if (requested.includes('claude')) {
-    docs.push({ target: 'claude', path: path.resolve(repoRoot, options.claudeMd || 'CLAUDE.md') });
+    docs.push({
+      target: 'claude',
+      operation: 'upsert',
+      path: path.resolve(repoRoot, options.claudeMd || 'CLAUDE.md'),
+    });
   }
   if (requested.includes('codex')) {
-    docs.push({ target: 'codex', path: path.resolve(repoRoot, options.agentsMd || 'AGENTS.md') });
+    docs.push({
+      target: 'codex',
+      operation: 'remove-only-migration',
+      path: path.resolve(repoRoot, options.agentsMd || 'AGENTS.md'),
+    });
   }
   return docs;
+}
+
+function codexMigrationRecoveryJournalPath(target) {
+  return path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.tech-persistence-cas-recovery.json`
+  );
+}
+
+function reconcileCodexMigrationRecovery(target, options = {}) {
+  const journalPath = codexMigrationRecoveryJournalPath(target);
+  if (!fs.existsSync(journalPath)) return null;
+  if (options.dryRun) {
+    const error = new Error(
+      `pending AGENTS compare-and-swap recovery requires a non-dry run: ${journalPath}`
+    );
+    error.code = 'TECH_PERSISTENCE_AGENTS_RECOVERY_REQUIRED';
+    error.path = journalPath;
+    throw error;
+  }
+  // Keep Claude-only and already-migrated paths cheap: the heavy CAS module is
+  // loaded only for an actual recovery journal or a stale block publication.
+  const { reconcilePublishJournal } = require('./update-codex-marketplace');
+  return reconcilePublishJournal(target, {
+    testHooks: options.codexMigrationRecoveryTestHooks,
+  });
 }
 
 function buildExpectedState(repoRoot, options = {}) {
   const entries = collectSolutions(repoRoot, options);
   const indexPath = path.resolve(repoRoot, options.indexPath || 'docs/solutions/index.jsonl');
   const indexContent = renderIndexJsonl(entries);
-  const docs = targetDocs(repoRoot, options).map((doc) => {
+  const docs = (options.skipRuntimeDocs ? [] : targetDocs(repoRoot, options)).map((doc) => {
+    if (doc.operation === 'remove-only-migration') {
+      const recovery = reconcileCodexMigrationRecovery(doc.path, options);
+      if (!fs.existsSync(doc.path)) {
+        return {
+          ...doc,
+          currentRaw: null,
+          currentContent: null,
+          expectedRaw: null,
+          expectedContent: null,
+          migration: 'absent-file',
+        };
+      }
+      const stat = fs.lstatSync(doc.path);
+      if (stat.isSymbolicLink() || !stat.isFile()) {
+        throw invalidCodexMigrationError(doc.path, 'AGENTS target is not a regular file');
+      }
+      const currentRaw = fs.readFileSync(doc.path);
+      const currentContent = currentRaw.toString('utf8');
+      if (!Buffer.from(currentContent, 'utf8').equals(currentRaw)) {
+        throw invalidCodexMigrationError(doc.path, 'AGENTS is not round-trip UTF-8');
+      }
+      const migration = removeLegacyCodexSolutionSection(currentContent, {
+        agentsPath: doc.path,
+      });
+      const recoveredPublication = Boolean(
+        recovery && recovery.outcome === 'published' && recovery.commitState === 'committed'
+      );
+      return {
+        ...doc,
+        currentRaw,
+        currentContent,
+        expectedRaw: Buffer.from(migration.content, 'utf8'),
+        expectedContent: migration.content,
+        posixMode: process.platform === 'win32' ? null : stat.mode & 0o777,
+        migration: recoveredPublication
+          ? 'recovered-published-managed-block'
+          : migration.migration,
+        recoveredPublication,
+        recovery,
+      };
+    }
     const currentContent = fs.existsSync(doc.path) ? fs.readFileSync(doc.path, 'utf-8') : '';
     return {
       ...doc,
@@ -399,6 +554,54 @@ function writeIfChanged(filePath, content, dryRun = false) {
   return true;
 }
 
+function writeMigrationCompareAndSwap(doc, options = {}) {
+  if (doc.recoveredPublication) {
+    return {
+      changed: true,
+      commitState: 'committed',
+      recovered: true,
+      ...(doc.recovery && doc.recovery.durabilityWarning
+        ? { durabilityWarning: doc.recovery.durabilityWarning }
+        : {}),
+    };
+  }
+
+  if (doc.currentRaw === null && doc.expectedRaw === null) return { changed: false };
+  const changed = !doc.currentRaw.equals(doc.expectedRaw);
+  if (!changed || options.dryRun) return { changed };
+
+  // Lazy by design: Claude projection and already-migrated Codex paths never
+  // load the CAS runtime.
+  const {
+    marketplaceExpectationFromRaw,
+    publishTextCompareAndSwap,
+  } = require('./update-codex-marketplace');
+  const publication = publishTextCompareAndSwap(
+    doc.path,
+    doc.expectedRaw,
+    marketplaceExpectationFromRaw(doc.currentRaw, doc.posixMode),
+    {
+      previousLabel: 'solution-index-migration',
+      testHooks: options.codexMigrationTestHooks,
+    }
+  );
+  if (!publication || publication.commitState !== 'committed') {
+    const error = new Error(`AGENTS migration commit state is not committed: ${doc.path}`);
+    error.code = 'TECH_PERSISTENCE_AGENTS_COMMIT_STATE_UNKNOWN';
+    error.commitState = publication && publication.commitState
+      ? publication.commitState
+      : 'unknown';
+    throw error;
+  }
+  return {
+    changed: true,
+    commitState: 'committed',
+    recovered: Boolean(publication.recovered),
+    ...(publication.durabilityWarning
+      ? { durabilityWarning: publication.durabilityWarning }
+      : {}),
+  };
+}
 function syncSolutionIndex(repoRoot, options = {}) {
   const state = buildExpectedState(repoRoot, options);
   const dryRun = Boolean(options.dryRun);
@@ -414,6 +617,19 @@ function syncSolutionIndex(repoRoot, options = {}) {
 
   if (!options.skipRuntimeDocs) {
     state.docs.forEach((doc) => {
+      if (doc.operation === 'remove-only-migration') {
+        const publication = writeMigrationCompareAndSwap(doc, {
+          dryRun,
+          codexMigrationTestHooks: options.codexMigrationTestHooks,
+        });
+        changes.push({
+          target: doc.target,
+          path: doc.path,
+          ...publication,
+          ...(doc.migration ? { migration: doc.migration } : {}),
+        });
+        return;
+      }
       changes.push({
         target: doc.target,
         path: doc.path,
@@ -552,6 +768,7 @@ module.exports = {
   renderIndexJsonl,
   parseArgs,
   upsertSolutionSection,
+  removeLegacyCodexSolutionSection,
   resolveObsidianVault,
   readRegisteredProject,
   resolveProjectionProject,

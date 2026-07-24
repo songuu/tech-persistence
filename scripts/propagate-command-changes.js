@@ -4,8 +4,8 @@
  * Propagate user-level/commands/*.md changes to:
  *  - plugins/tech-persistence/commands/*.md (verbatim)
  *  - plugins/tech-persistence/skills/<cmd>/SKILL.md (preserves SKILL frontmatter + wrapper, replaces "## Command Instructions" section body)
- *  - .codex/commands/*.md (with Claude Code → Codex regex)
- *  - .codex/skills/<cmd>/SKILL.md (with regex)
+ *  - .codex/commands/*.md (native thin entry for think/plan/work/review/compound/sprint; regex otherwise)
+ *  - plugins/tech-persistence/codex-skills/* (rebuilt projection)
  *  - user-level/skills/<cmd>/SKILL.md (when present)
  *
  * Also copies user-level/rules/<rule>.md to .codex/rules/<rule>.md for any rule
@@ -21,6 +21,7 @@ const path = require('path');
 
 const repoRoot = path.resolve(__dirname, '..');
 const buildCodexPlugin = require(path.join(repoRoot, 'plugins', 'tech-persistence', 'scripts', 'build-codex-plugin.js'));
+const nativeCommandNames = new Set(['compound', 'plan', 'review', 'sprint', 'think', 'work']);
 
 const codexReplacements = [
   [/在 Claude Code runtime 下/g, '在支持 Agent spawn 的 runtime 下'],
@@ -49,6 +50,11 @@ const codexReplacements = [
 
 function applyCodexRegex(text) {
   return codexReplacements.reduce((acc, [pattern, replacement]) => acc.replace(pattern, replacement), text);
+}
+
+function codexCommandContent(name, sourceText) {
+  if (!nativeCommandNames.has(name)) return applyCodexRegex(sourceText);
+  return readText(path.join(repoRoot, 'codex-native', 'commands', `${name}.md`));
 }
 
 function readText(filePath) {
@@ -96,7 +102,7 @@ function propagateCommand(name) {
     {
       label: 'codex command',
       path: path.join(repoRoot, '.codex', 'commands', `${name}.md`),
-      transform: applyCodexRegex,
+      transform: (text) => codexCommandContent(name, text),
     },
   ];
 
@@ -113,11 +119,6 @@ function propagateCommand(name) {
     {
       label: 'plugin skill',
       path: path.join(repoRoot, 'plugins', 'tech-persistence', 'skills', name, 'SKILL.md'),
-      transform: (_skill, body) => commandSkillWrapper(name, body),
-    },
-    {
-      label: 'codex skill',
-      path: path.join(repoRoot, '.codex', 'skills', name, 'SKILL.md'),
       transform: (_skill, body) => commandSkillWrapper(name, body),
     },
     {
@@ -138,6 +139,9 @@ function propagateCommand(name) {
     writeText(target.path, updated);
     console.log(`[ok]   ${target.label}: ${path.relative(repoRoot, target.path)}`);
   }
+
+  buildCodexPlugin.syncCodexSkill(name);
+  console.log(`[ok]   codex skill projection: plugins/tech-persistence/codex-skills/${name}`);
 }
 
 function propagateRule(name) {
@@ -176,6 +180,8 @@ if (require.main === module) main();
 
 module.exports = {
   applyCodexRegex,
+  codexCommandContent,
+  nativeCommandNames,
   injectIntoSkillWrapper,
   commandSkillWrapper,
   stripFrontmatter,

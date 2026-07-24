@@ -4,16 +4,16 @@ Tech Persistence brings the full self-evolving engineering workflow system to Co
 
 It includes:
 
-- Claude-compatible command workflow files for planning, work, review, testing, learning, instincts, sprinting, and handoff.
-- Codex skills for memory, continuous learning, prototype workflow, test strategy, context handoff, and one skill wrapper per command.
-- Runtime-aware hooks for context injection, observation capture, and session evaluation.
+- Frozen Claude-compatible command, skill, and legacy hook sources; they are not the active Codex runtime projection.
+- Codex-specific skills for the six core phases plus provider-boundary overrides for memory, continuous learning, and caveman.
+- Lightweight Codex hooks: bounded active-sprint pointer metadata on SessionStart and an exact write-tool handoff guard on PreToolUse.
 - Agent Loop v7 assets: the v6 external orchestrator, JSON schemas, `$agent-loop` wrapper, and the Caveman compression skill family.
 - Caveman skills for terse output, commit messages, review comments, help, and memory-file compression.
 - Obsidian-compatible knowledge storage under `~/.codex/homunculus`, or a shared `homunculusHome` configured in `~/.tech-persistence/config.json`.
 
 ## Codex invocation
 
-Codex CLI currently exposes custom plugin workflows through skills, not through TUI slash commands. Use `$sprint <request>`, `$agent-loop <request>`, `$prototype <request>`, `$plan <request>`, or pick the skill with `@`.
+The plugin-native entry is `$skill` or the `@` picker. The repository user installer also installs thin `/think`, `/plan`, `/work`, `/review`, `/compound`, and `/sprint` compatibility entries that route to the same Codex-native skills. Use `$agent-loop`, `$prototype`, `$caveman`, and other non-core workflows as skills.
 
 ## Agent Loop v7
 
@@ -36,9 +36,9 @@ node scripts/agent-orchestrator.js status --run latest
 
 The orchestrator stores each run in `.agent-runs/<runId>/` with `spec.json`/`spec.raw.json`, `requirement-spec.md`, `technical-design.md`, `task-breakdown.json`, `changed-files.json`, `diff.patch`, `review-context.md`, `validation.json`, `handoff.{md,json}`, `review.{json,raw.json}`, `preflight.json`, `follow-up-task.md`, plus per-provider `prompts/*.md` and timestamped `logs/*.<stamp>.{stdout,stderr}.log`. JSON parse failures are captured as `*.parse-error.json` instead of being silently dropped.
 
-Use `$caveman`, `$caveman-commit`, `$caveman-review`, `$caveman-help`, and `$caveman-compress <file>` for v7 compression features. The `$caveman` skill supports intensities `lite|full|ultra|wenyan|wenyan-lite|wenyan-ultra` (bare `wenyan` is alias for `wenyan-full`). SessionStart hooks inject caveman mode unless `CAVEMAN_DEFAULT_MODE=off`; the env var or `~/.config/caveman/config.json` `defaultMode` controls cross-session behavior. Hook failures are written to stderr but never abort the session.
+Use `$caveman`, `$caveman-commit`, `$caveman-review`, `$caveman-help`, and `$caveman-compress <file>` for v7 compression features. The `$caveman` skill supports intensities `lite|full|ultra|wenyan|wenyan-lite|wenyan-ultra` (bare `wenyan` is alias for `wenyan-full`). Codex never auto-activates caveman on SessionStart; the current user must request it explicitly. `CAVEMAN_DEFAULT_MODE` and `~/.config/caveman/config.json` remain Claude legacy startup controls.
 
-The `commands/` directory remains packaged for Claude compatibility and future Codex command support, but current Codex CLI sessions will reject `/sprint` and `/tech-persistence:sprint` as unknown slash commands.
+The repository `commands/` directory is the frozen Claude compatibility source and is excluded from the installed Codex plugin. Codex thin core `/command` entries come from `codex-native/commands/`; plugin-native workflows come from `codex-skills/`.
 
 Build the generated plugin contents from the shared Claude/Codex source files:
 
@@ -66,4 +66,4 @@ node scripts/configure-shared-homunculus.js --path ~/Documents/TechPersistence
 
 Use that directory as your Obsidian vault. `--import-claude` is still available for one-time migration, but the shared config is the recommended ongoing sync mode.
 
-When no shared directory is configured, SessionStart still merges Memory v5 topic notes from both default stores (`~/.claude/homunculus` and `~/.codex/homunculus`) before injecting context. That keeps Claude Code and Codex startup memory consistent while preserving their separate default write locations.
+When no shared directory is configured, the two runtimes keep separate default write locations. Claude legacy SessionStart may merge the compatible Memory stores under its frozen hook contract. Codex SessionStart does not scan or inject Memory; Codex reads shared or local knowledge on demand through skills/MCP and persists verified learning explicitly through Compound.
