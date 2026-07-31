@@ -165,16 +165,17 @@ function assertNativeContracts() {
   }
 
   const sprint = readSkill('sprint');
-  for (const reference of ['resume.md', 'goal-loop.md', 'figma.md']) {
+  for (const reference of ['bootstrap.md', 'resume.md', 'goal-loop.md', 'figma.md']) {
   assert(Buffer.byteLength(sprint, 'utf8') < 4096, 'native sprint SKILL.md must stay below 4 KiB');
   assert.match(sprint, /只加载当前 Phase/);
   assert.match(sprint, /不得[^\n]*(?:预热|预读)[^\n]*未来 Phase/);
+  assert.match(sprint, /references\/bootstrap\.md/);
   assert.match(sprint, /references\/resume\.md/);
   assert.match(sprint, /references\/goal-loop\.md/);
   assert.match(sprint, /references\/figma\.md/);
-  assert.match(sprint, /仅当[^\n]*恢复|恢复[^\n]*才/);
-  assert.match(sprint, /仅当[^\n]*goal|goal[^\n]*才/i);
-  assert.match(sprint, /仅当[^\n]*Figma|Figma[^\n]*才/i);
+  assert.match(sprint, /(?:仅|active)[^\n]*(?:恢复|recovery)/);
+  assert.match(sprint, /仅[^\n]*goal|goal[^\n]*输入/i);
+  assert.match(sprint, /仅[^\n]*Figma|Figma[^\n]*输入/i);
   assert.match(sprint, /codex-active-sprint-state\.js/);
   assert.match(sprint, /<skill-dir>\/runtime\/codex-active-sprint-state\.js/);
   assert.match(sprint, /completed-plan/);
@@ -185,11 +186,21 @@ function assertNativeContracts() {
   assert.match(sprint, /SPRINT_STATE_LOCKED/);
   assert.match(sprint, /禁止裸写/);
   assert.match(sprint, /active === true[^\n]*恢复 pointer 当前 Phase/);
-  assert.match(sprint, /missing-pointer[^\n]*按请求建[^\n]*docs\/plans\/[^\n]*init[^\n]*active=true,phase=think/);
-  assert.match(sprint, /missing-pointer[^\n]*禁止只报告状态/);
+  assert.match(sprint, /missing-pointer[^\n]*不是诊断终点/);
+
     assert(fs.existsSync(path.join(nativeRoot, 'sprint', 'references', reference)), `missing ${reference}`);
   }
 
+  const bootstrap = fs.readFileSync(path.join(nativeRoot, 'sprint', 'references', 'bootstrap.md'), 'utf8');
+  assert.match(bootstrap, /在加载 `think` 或任何业务诊断前/);
+  assert.match(bootstrap, /`type: sprint` 和 `status: in-progress`/);
+  assert.match(bootstrap, /active === true[^\n]*phase === "think"/);
+  assert.match(bootstrap, /不以“没有 active pointer”为最终答复/);
+  const sprintCommand = fs.readFileSync(path.join(nativeCommandRoot, 'sprint.md'), 'utf8');
+  assert.match(sprintCommand, /stateful workflow, not a read-only-analysis prefix/);
+  assert.match(sprintCommand, /missing-pointer`\s+is a bootstrap trigger/);
+  const think = readSkill('think');
+  assert.match(think, /\/sprint` bootstrap 优先[^\n]*建 plan、`init` 并读回/);
   for (const name of ['work', 'review']) {
     const content = readSkill(name);
     assert.match(content, /collaboration\.spawn_agent/);

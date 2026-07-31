@@ -24,4 +24,4 @@ description: Codex-native product framing for scope, user value, and observable 
 3. **风险、假设与待确认项**
 4. **下一步**：Work 或 Plan
 
-不要强制扫描历史计划、rules、memory 或 homunculus。只有当前问题确实依赖既有决策时才读取对应的最小文件。不要仅因调用 Think 就创建或修改文档；用户要求持久化、Sprint 已有活动计划，或后续阶段确需共享工件时，才写入明确路径并报告。
+`/sprint` bootstrap 优先：非 resume 的 missing-pointer 必须先建 plan、`init` 并读回，不能用本条跳过启动。除此以外，不要强制扫描历史计划、rules、memory 或 homunculus。不要仅因独立调用 Think 就创建或修改文档；用户要求持久化、Sprint 已有活动计划，或后续阶段确需共享工件时，才写入明确路径并报告。
