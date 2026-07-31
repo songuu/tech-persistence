@@ -14,6 +14,8 @@ const review = require('./review');
 const drift = require('./drift-detector');
 const reconciliation = require('./reconciliation');
 const providers = require('./pipeline-providers');
+const runLock = require('./run-lock');
+const nativeExecutionControl = require('./native-execution-control');
 
 const { RUN_STATES, SLICE_STATES } = state;
 
@@ -26,6 +28,16 @@ const RESOLVE_ACTIONS = {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function controlStoreOptions(ctx, options, providerRoot) {
+  const controlRoot = ctx.optionValue(options, 'control-root');
+  return {
+    providerRoot: path.resolve(providerRoot || ctx.resolveWorkdir(options)),
+    ...(controlRoot === undefined || controlRoot === true
+      ? {}
+      : { controlRoot: String(controlRoot) }),
+  };
 }
 
 function writeJson(file, data) {
@@ -138,7 +150,23 @@ function blockFailedSlice(ctx, current, statePath, runDir, slice, error, reasonP
 
   let next = transitionSlice(current, slice.id, SLICE_STATES.IMPLEMENTATION_FAILED);
   if (providerRecord) {
-    next = { ...next, providerRuns: [...(Array.isArray(next.providerRuns) ? next.providerRuns : []), providerRecord] };
+    const providerRuns = Array.isArray(next.providerRuns) ? next.providerRuns : [];
+    const duplicate = providerRuns.some((entry) => (
+      entry.executionFingerprint === providerRecord.executionFingerprint
+      && entry.startedAt === providerRecord.startedAt
+    ));
+    if (!duplicate) {
+      next = {
+        ...next,
+        providerRuns: [...providerRuns, providerRecord],
+      };
+    }
+  }
+  if (error && error.providerRecovery) {
+    next = {
+      ...next,
+      providerRecovery: error.providerRecovery,
+    };
   }
   saveState(statePath, next);
   ctx.log(`[BLOCKED] slice ${slice.id} implementation failed; retry with: ${failure.retryCommand}`);
@@ -344,11 +372,47 @@ function resumePipelineRun(ctx, options, positionals) {
   if (stateObj.mode !== 'pipeline') {
     throw new Error('resumePipelineRun: state.mode must be "pipeline"');
   }
-  const resolve = ctx.optionValue(options, 'resolve');
-  if (resolve) return resolveContractConflict(ctx, options, runDir, statePath, stateObj, resolve);
-  const unblockSlice = ctx.optionValue(options, 'unblock');
-  if (unblockSlice) return unblockBlockedSlice(ctx, options, runDir, statePath, stateObj, unblockSlice);
-  return advancePipeline(ctx, options, runDir, statePath, stateObj);
+  const effectiveOptions = nativeExecutionControl.resolveExecutionPolicyOptions(
+    options,
+    stateObj.executionPolicy
+  );
+  return runLock.withRunLock(
+    runDir,
+    'provider-dispatch',
+    { command: 'resume', runId: stateObj.runId },
+    () => {
+      const resolve = ctx.optionValue(effectiveOptions, 'resolve');
+      if (resolve) {
+        return resolveContractConflict(
+          ctx,
+          effectiveOptions,
+          runDir,
+          statePath,
+          stateObj,
+          resolve
+        );
+      }
+      const unblockSlice = ctx.optionValue(effectiveOptions, 'unblock');
+      if (unblockSlice) {
+        return unblockBlockedSlice(
+          ctx,
+          effectiveOptions,
+          runDir,
+          statePath,
+          stateObj,
+          unblockSlice
+        );
+      }
+      return advancePipeline(
+        ctx,
+        effectiveOptions,
+        runDir,
+        statePath,
+        stateObj
+      );
+    },
+    controlStoreOptions(ctx, effectiveOptions, stateObj.workdir)
+  );
 }
 
 function resolveContractConflict(ctx, options, runDir, statePath, stateObj, action) {
@@ -626,7 +690,21 @@ function startPipelineRun(ctx, options, positionals) {
   fs.mkdirSync(path.join(runDir, 'logs'), { recursive: true });
   fs.mkdirSync(path.join(runDir, 'slices'), { recursive: true });
 
+  const dispatchLock = runLock.acquireRunLock(runDir, 'provider-dispatch', {
+    command: 'run',
+    runId,
+  }, controlStoreOptions(ctx, options, workdir));
+  try {
+  if (fs.existsSync(statePath)) {
+    throw new Error(`Run already exists after dispatch lock acquisition: ${runDir}`);
+  }
+  const executionPolicy = nativeExecutionControl.executionPolicy(options);
   let stateObj = newPipelineState(workdir, runDir, runId, requirement);
+  stateObj = {
+    ...stateObj,
+    orchestrationOwner: executionPolicy.orchestrationOwner,
+    executionPolicy,
+  };
   writePipelineSkeleton(runDir, requirement);
   fs.writeFileSync(
     path.join(runDir, 'prompts', 'global-contract.md'),
@@ -636,7 +714,21 @@ function startPipelineRun(ctx, options, positionals) {
 
   const preflight = ctx.buildPreflightReport(workdir, options, runDir);
   ctx.writePreflight(runDir, preflight);
-  stateObj = { ...stateObj, files: { ...stateObj.files, preflight: 'preflight.json' } };
+  const executionPlan = ctx.buildNativeExecutionPlan(
+    options,
+    runId,
+    requirement,
+    preflight
+  );
+  writeJson(path.join(runDir, 'execution-plan.json'), executionPlan);
+  stateObj = {
+    ...stateObj,
+    files: {
+      ...stateObj.files,
+      preflight: 'preflight.json',
+      executionPlan: 'execution-plan.json',
+    },
+  };
   saveState(statePath, stateObj);
 
   if (ctx.boolOption(options, 'preflight-only')) {
@@ -692,6 +784,9 @@ function startPipelineRun(ctx, options, positionals) {
   }
   stateObj = advancePipeline(ctx, options, runDir, statePath, stateObj);
   return stateObj;
+  } finally {
+    dispatchLock.release();
+  }
 }
 
 module.exports = {

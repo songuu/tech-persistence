@@ -7,7 +7,7 @@ description: "当 /sprint 执行中上下文压力过大，或任务拆分超过
 ## 问题
 
 长时间 `/sprint` 会遇到上下文窗口耗尽：
-- Codex 开始忘记早期约定
+- Claude 开始忘记早期约定
 - 工具调用参数出错增多
 - 回答变得笼统、丢失细节
 - 出现"context anxiety"——急于收工，跳过步骤
@@ -16,7 +16,7 @@ description: "当 /sprint 执行中上下文压力过大，或任务拆分超过
 
 ## 解决方案：Checkpoint + 上下文重置
 
-在 Task 之间插入 checkpoint：保存当前所有状态到一个交接文件，然后用户执行 `/compact`（或开新会话），下次 Codex 从交接文件冷启动。
+在 Task 之间插入 checkpoint：保存当前所有状态到一个交接文件，然后用户执行 `/compact`（或开新会话），下次 Claude 从交接文件冷启动。
 
 ```
 Task 1 → Task 2 → Task 3 → ⚡ CHECKPOINT
@@ -28,7 +28,7 @@ Task 4 → Task 5 → ... → ⚡ CHECKPOINT（如果需要）
 
 ## Checkpoint 触发条件
 
-### 自动触发（Codex 主动建议）
+### 自动触发（Claude 主动建议）
 1. **Task 完成数 ≥ 5** — 每 5 个 Task 建议一次 checkpoint
 2. **退化信号** — 工具参数出错、忘记约定、重复提问
 3. **会话轮次 > 30** — 即使没有明显退化也预防性 checkpoint

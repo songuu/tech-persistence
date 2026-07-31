@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/route-decision.schema.json",
+  "title": "Deterministic Runtime Route Decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "taskRef",
+    "taskHash",
+    "orchestrationOwner",
+    "intent",
+    "status",
+    "primary",
+    "writer",
+    "fallbacks",
+    "fallbackPolicy",
+    "rejected",
+    "decisionHash"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "route-decision-v1" },
+    "taskRef": { "type": "string", "minLength": 1 },
+    "taskHash": { "$ref": "#/$defs/hash" },
+    "orchestrationOwner": {
+      "type": "string",
+      "enum": ["tp", "codex-host", "claude-host"]
+    },
+    "intent": {
+      "type": "string",
+      "enum": ["read-only", "write"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["selected", "blocked"]
+    },
+    "primary": {
+      "oneOf": [
+        { "$ref": "#/$defs/assignment" },
+        { "type": "null" }
+      ]
+    },
+    "writer": {
+      "oneOf": [
+        { "$ref": "#/$defs/assignment" },
+        { "type": "null" }
+      ]
+    },
+    "fallbacks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/readOnlyAssignment" }
+    },
+    "fallbackPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "reason"],
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "partial-effects",
+            "policy-disabled",
+            "no-primary",
+            "no-read-only-candidate",
+            "pre-effects-read-only-only"
+          ]
+        }
+      }
+    },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidateRef", "reasons"],
+        "properties": {
+          "candidateRef": { "type": "string", "minLength": 1 },
+          "reasons": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "decisionHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateRef",
+        "providerKey",
+        "runtime",
+        "profileId",
+        "adapter",
+        "access",
+        "capabilitySnapshotHash"
+      ],
+      "properties": {
+        "candidateRef": { "type": "string", "minLength": 1 },
+        "providerKey": { "type": "string", "minLength": 1 },
+        "runtime": {
+          "type": "string",
+          "enum": ["codex", "claude"]
+        },
+        "profileId": { "type": ["string", "null"], "minLength": 1 },
+        "adapter": { "type": ["string", "null"], "minLength": 1 },
+        "access": {
+          "type": "string",
+          "enum": ["read-only", "write"]
+        },
+        "capabilitySnapshotHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "readOnlyAssignment": {
+      "allOf": [
+        { "$ref": "#/$defs/assignment" },
+        {
+          "type": "object",
+          "properties": {
+            "access": { "const": "read-only" }
+          }
+        }
+      ]
+    }
+  }
+}

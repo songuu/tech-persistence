@@ -3,3 +3,5 @@
 _shared_homunculus/
 *.bak.*
 docs/plans/.handoff/
+site/dist/
+site/.dist-staging-*/

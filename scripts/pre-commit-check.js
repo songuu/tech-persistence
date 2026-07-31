@@ -131,14 +131,15 @@ function checkPropagateSync(stagedFiles, repoRoot) {
       if (Array.isArray(t.expectedCommands) && t.expectedCommands.includes(`${name}.md`)) {
         const skillRel = `plugins/tech-persistence/skills/${name}/SKILL.md`;
         const skillActual = readIfExists(path.join(repoRoot, skillRel));
-        const skillExpected = t.commandToSkill(`${name}.md`, sourceContent);
-        if (skillActual !== skillExpected) {
-          mismatches.push({ source: sourceRel, derived: skillRel, kind: 'command', reason: 'skill wrapper mismatch' });
+        if (skillActual !== null) {
+          mismatches.push({ source: sourceRel, derived: skillRel, kind: 'command', reason: 'command leaked into Claude skills projection' });
         }
         const codexSkillRel = `plugins/tech-persistence/codex-skills/${name}/SKILL.md`;
         const codexSkillActual = readIfExists(path.join(repoRoot, codexSkillRel));
         const nativeSkill = readIfExists(path.join(repoRoot, 'codex-native', 'skills', name, 'SKILL.md'));
-        const codexSkillExpected = nativeSkill == null ? skillExpected : nativeSkill;
+        const codexSkillExpected = nativeSkill == null
+          ? t.commandToSkill(`${name}.md`, sourceContent)
+          : nativeSkill;
         if (codexSkillActual !== codexSkillExpected) {
           mismatches.push({ source: sourceRel, derived: codexSkillRel, kind: 'command', reason: 'codex skill projection mismatch' });
         }

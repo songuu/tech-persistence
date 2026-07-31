@@ -8,6 +8,9 @@
   },
   "scripts": {
     "test": "node scripts/run-tests.js",
-    "figma:audit": "node scripts/figma-fidelity-audit.js"
+    "figma:audit": "node scripts/figma-fidelity-audit.js",
+    "site:data": "node site/lib/project-model.js",
+    "site:test": "node --test \"site/tests/*.test.js\"",
+    "site:build": "node site/build.js --base /tech-persistence/ --output site/dist"
   }
 }

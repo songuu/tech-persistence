@@ -155,7 +155,6 @@ function syncedDerivedSet(dir, name, sourceContent) {
   // plugin command 是 plain copy (与 pre-commit-check.js 期望对齐, 服务 Claude Code 2.x plugin)
   writeFile(dir, `plugins/tech-persistence/commands/${name}.md`, build.normalizeLf(sourceContent));
   if (build.expectedCommands.includes(`${name}.md`)) {
-    writeFile(dir, `plugins/tech-persistence/skills/${name}/SKILL.md`, build.commandToSkill(`${name}.md`, sourceContent));
     const nativeSkill = path.join(dir, 'codex-native', 'skills', name, 'SKILL.md');
     writeFile(
       dir,
@@ -186,7 +185,7 @@ function scenarioUserLevelChangedNotSynced() {
   gitAdd(dir, 'user-level/commands/sprint.md',
     '.codex/commands/sprint.md',
     'plugins/tech-persistence/commands/sprint.md',
-    'plugins/tech-persistence/skills/sprint/SKILL.md');
+    'plugins/tech-persistence/codex-skills/sprint/SKILL.md');
   execSync('git commit -q -m "v1 synced"', { cwd: dir });
 
   // Now modify source, do NOT update derived
@@ -208,7 +207,7 @@ function scenarioUserLevelChangedAndSynced() {
   gitAdd(dir, 'user-level/commands/sprint.md',
     '.codex/commands/sprint.md',
     'plugins/tech-persistence/commands/sprint.md',
-    'plugins/tech-persistence/skills/sprint/SKILL.md');
+    'plugins/tech-persistence/codex-skills/sprint/SKILL.md');
   execSync('git commit -q -m "v1 synced"', { cwd: dir });
 
   // Modify source AND derived together
@@ -217,7 +216,7 @@ function scenarioUserLevelChangedAndSynced() {
   gitAdd(dir, 'user-level/commands/sprint.md',
     '.codex/commands/sprint.md',
     'plugins/tech-persistence/commands/sprint.md',
-    'plugins/tech-persistence/skills/sprint/SKILL.md');
+    'plugins/tech-persistence/codex-skills/sprint/SKILL.md');
 
   const res = runCheck(dir);
   assert(res.code === 0, `expected exit 0, got ${res.code}. stderr=${res.stderr}`);
@@ -228,7 +227,7 @@ function scenarioUserLevelChangedAndSynced() {
   );
 }
 
-function scenarioPropagateRefreshesCommandSkillDescription() {
+function scenarioPropagatePreservesCommandSkillBoundary() {
   const dir = makeRepo('s2b');
   clearRequireCache(dir);
 
@@ -240,17 +239,22 @@ function scenarioPropagateRefreshesCommandSkillDescription() {
   writeFile(dir, 'user-level/commands/sprint.md', SPRINT_V2);
   writeFile(dir, '.codex/commands/sprint.md', NATIVE_SPRINT_COMMAND);
   writeFile(dir, 'plugins/tech-persistence/commands/sprint.md', build.normalizeLf(SPRINT_V1));
-  writeFile(dir, 'plugins/tech-persistence/skills/sprint/SKILL.md', build.commandToSkill('sprint.md', SPRINT_V1));
   writeFile(dir, 'plugins/tech-persistence/codex-skills/sprint/SKILL.md', NATIVE_SPRINT_SKILL);
 
   propagate.propagateCommand('sprint');
 
-  const pluginSkill = fs.readFileSync(path.join(dir, 'plugins/tech-persistence/skills/sprint/SKILL.md'), 'utf8');
   const codexSkill = fs.readFileSync(path.join(dir, 'plugins/tech-persistence/codex-skills/sprint/SKILL.md'), 'utf8');
-  assert(pluginSkill.includes('test command v2 (modified)'), 'plugin skill description was not refreshed');
+  assert(
+    !fs.existsSync(path.join(dir, 'plugins/tech-persistence/skills/sprint/SKILL.md')),
+    'command leaked into the Claude skills projection'
+  );
   assert(codexSkill.includes('native sprint skill'), 'codex skill did not retain native override');
-  assert(!pluginSkill.includes('test command v1'), 'plugin skill kept stale v1 description');
   assert(!codexSkill.includes('test command v2'), 'native codex skill was overwritten by legacy command');
+  assert(
+    fs.readFileSync(path.join(dir, 'plugins/tech-persistence/commands/sprint.md'), 'utf8')
+      === build.normalizeLf(SPRINT_V2),
+    'Claude command projection was not refreshed'
+  );
   assert(
     fs.readFileSync(path.join(dir, '.codex/commands/sprint.md'), 'utf8') === NATIVE_SPRINT_COMMAND,
     'thin sprint command was overwritten by legacy projection'
@@ -862,7 +866,7 @@ function main() {
   process.stdout.write('\nsmoke: pre-commit-check.js\n');
   runScenario('S1: user-level changed but derived not synced → exit 1', scenarioUserLevelChangedNotSynced);
   runScenario('S2: user-level changed and derived synced → exit 0 (not fail-open)', scenarioUserLevelChangedAndSynced);
-  runScenario('S2b: propagate refreshes command skill descriptions', scenarioPropagateRefreshesCommandSkillDescription);
+  runScenario('S2b: propagate keeps command wrappers out of Claude skills', scenarioPropagatePreservesCommandSkillBoundary);
   runScenario('S3: new plan doc missing 关键假设验证 → exit 1', scenarioPlanMissingAssumptionSection);
   runScenario('S4: new plan doc with 关键假设验证 → exit 0', scenarioPlanWithAssumptionSection);
   runScenario('S5: grandfathered old plan (filename date < 2026-05-12) → exit 0', scenarioGrandfatheredPlan);

@@ -19,7 +19,7 @@ description: "当用户上传原型截图（墨刀/Figma/Axure）或执行 /prot
 
 ## 假设构建优先级
 
-1. 读取 `.codex/rules/prototype-conventions.md`（项目规范）→ 直接 ✅确认
+1. 读取 `.claude/rules/prototype-conventions.md`（项目规范）→ 直接 ✅确认
 2. 读取高置信本能 (>=0.7) → 直接用作默认值，标 ✅
 3. 截图中明确可见的元素 → ✅确认
 4. 从截图推断的行为 → ⚡假设

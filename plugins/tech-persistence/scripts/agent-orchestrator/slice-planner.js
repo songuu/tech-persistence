@@ -59,7 +59,7 @@ function buildSlicePlannerPrompt(globalContract, alreadyPlanned, options) {
   lines.push('Goal: emit the next batch of executable slices given the FROZEN global contract.');
   lines.push('');
   lines.push('Hard rules:');
-  lines.push('- Output exactly one JSON object: { "slices": [<sliceObject>, ...] } where each sliceObject validates against agent-loop/pipeline-slice.schema.json.');
+  lines.push('- Output exactly one JSON object that validates against agent-loop/pipeline-slice-batch.schema.json: { "slices": [<sliceObject>, ...] }. Each item follows agent-loop/pipeline-slice.schema.json.');
   lines.push('- Each slice id must be unique among already-planned ids: ' + alreadyPlanned.map((id) => `"${id}"`).join(', ') || 'none.');
   lines.push('- A slice may declare ownedFiles, readFiles, dependsOn, risk (L0..L4), acceptanceCriteria, doneCriteria, validationCommands, questions[].');
   lines.push('- Risk L4 or sensitive areas (auth, secret, migration, destructive, api, data-schema, storage-path) MUST be split into smaller scope — orchestrator will reject otherwise.');

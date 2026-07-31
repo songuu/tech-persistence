@@ -1,0 +1,1742 @@
+{
+  "schemaVersion": 1,
+  "meta": {
+    "name": "Tech Persistence",
+    "packageName": "tech-persistence",
+    "version": "1.0.7",
+    "description": "Persistent engineering memory for Codex",
+    "longDescription": "Use Tech Persistence to run planning, work, review, compound learning, instinct evolution, risk-adaptive testing, context handoff, and Obsidian-compatible knowledge capture directly inside Codex.",
+    "repository": "https://github.com/songuu/tech-persistence",
+    "homepage": "https://github.com/songuu/tech-persistence",
+    "license": "MIT",
+    "runtimeVersions": {
+      "codex": "1.0.7",
+      "claudeCode": "1.0.0"
+    },
+    "buildId": "tp-1.0.7-103468d64139",
+    "generatedAt": "2026-07-29T02:59:54.620Z",
+    "sourceHash": "103468d6413984de2feedefce300ac3b6dc508d8382440a3ca8736dbd890db7a"
+  },
+  "metrics": {
+    "codexSkills": 32,
+    "claudeCommands": 22,
+    "hooks": 7,
+    "mcpTools": 5,
+    "architectureDocs": 6,
+    "solutions": 48
+  },
+  "catalog": [
+    {
+      "id": "agent-loop",
+      "name": "Agent Loop",
+      "description": "Codex-compatible entry point for the former /agent-loop command. v6 外部编排器：claude 产出冻结 spec，codex 按 spec 执行，claude 复审；可选 --pipeline 启用分片流水线",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/agent-loop/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/agent-loop",
+      "featured": true,
+      "profile": "core",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$agent-loop",
+        "/agent-loop"
+      ]
+    },
+    {
+      "id": "compound",
+      "name": "Compound",
+      "description": "Codex-native evidence-gated knowledge compounding with bounded solution indexing and explicit write boundaries.",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/compound/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/compound",
+      "featured": true,
+      "profile": "core",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$compound",
+        "/compound"
+      ]
+    },
+    {
+      "id": "memory",
+      "name": "Memory",
+      "description": "Codex on-demand memory retrieval and explicit durable writes with deduplication, provenance, and lifecycle controls.",
+      "type": "skill",
+      "category": "memory",
+      "path": "plugins/tech-persistence/codex-skills/memory/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/memory",
+      "featured": true,
+      "profile": "core",
+      "runtimes": [
+        "Codex"
+      ],
+      "invocations": [
+        "$memory"
+      ]
+    },
+    {
+      "id": "review",
+      "name": "Review",
+      "description": "Codex-native findings-first review with evidence, risk-based testing, and bounded parallel reviewers.",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/review/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/review",
+      "featured": true,
+      "profile": "core",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$review",
+        "/review"
+      ]
+    },
+    {
+      "id": "sprint",
+      "name": "Sprint",
+      "description": "Codex-native sprint state machine with phase-local loading and transactional recovery.",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/sprint/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/sprint",
+      "featured": true,
+      "profile": "core",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$sprint",
+        "/sprint"
+      ]
+    },
+    {
+      "id": "work",
+      "name": "Work",
+      "description": "Codex-native implementation workflow using TDD, risk-scaled verification, and shared-workspace collaboration.",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/work/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/work",
+      "featured": true,
+      "profile": "core",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$work",
+        "/work"
+      ]
+    },
+    {
+      "id": "caveman",
+      "name": "Caveman",
+      "description": "Codex opt-in compressed communication mode. Use only when the current user explicitly invokes $caveman or asks for terse, low-token output.",
+      "type": "skill",
+      "category": "communication",
+      "path": "plugins/tech-persistence/codex-skills/caveman/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/caveman",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex"
+      ],
+      "invocations": [
+        "$caveman"
+      ]
+    },
+    {
+      "id": "caveman-commit",
+      "name": "Caveman Commit",
+      "description": "Ultra-compressed commit message generator. Cuts noise from commit messages while preserving intent and reasoning. Conventional Commits format. Subject ≤50 chars, body only when \"why\" isn't obvious. Use when user says \"write a commit\", \"commit message\", \"generate commit\", \"/commit\", invokes /caveman-commit, or invokes Codex $caveman-commit. Auto-triggers when staging changes.",
+      "type": "skill",
+      "category": "communication",
+      "path": "plugins/tech-persistence/codex-skills/caveman-commit/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/caveman-commit",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex"
+      ],
+      "invocations": [
+        "$caveman-commit"
+      ]
+    },
+    {
+      "id": "caveman-compress",
+      "name": "Caveman Compress",
+      "description": "Compress natural language memory files (CLAUDE.md, todos, preferences) into caveman format to save input tokens. Preserves all technical substance, code, URLs, and structure. Compressed version overwrites the original file. Human-readable backup saved as FILE.original.md. Trigger: /caveman:compress <filepath>, Codex $caveman-compress <filepath>, or \"compress memory file\"",
+      "type": "skill",
+      "category": "communication",
+      "path": "plugins/tech-persistence/codex-skills/caveman-compress/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/caveman-compress",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex"
+      ],
+      "invocations": [
+        "$caveman-compress"
+      ]
+    },
+    {
+      "id": "caveman-help",
+      "name": "Caveman Help",
+      "description": "One-shot Codex reference for explicit caveman modes. Does not activate or persist a mode.",
+      "type": "skill",
+      "category": "communication",
+      "path": "plugins/tech-persistence/codex-skills/caveman-help/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/caveman-help",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex"
+      ],
+      "invocations": [
+        "$caveman-help"
+      ]
+    },
+    {
+      "id": "caveman-review",
+      "name": "Caveman Review",
+      "description": "Ultra-compressed code review comments. Cuts noise from PR feedback while preserving the actionable signal. Each comment is one line: location, problem, fix. Use when user says \"review this PR\", \"code review\", \"review the diff\", \"/review\", invokes /caveman-review, or invokes Codex $caveman-review. Auto-triggers when reviewing pull requests.",
+      "type": "skill",
+      "category": "communication",
+      "path": "plugins/tech-persistence/codex-skills/caveman-review/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/caveman-review",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex"
+      ],
+      "invocations": [
+        "$caveman-review"
+      ]
+    },
+    {
+      "id": "checkpoint",
+      "name": "Checkpoint",
+      "description": "Codex-compatible entry point for the former /checkpoint command. 保存当前 sprint/任务状态到交接文件，为上下文重置做准备",
+      "type": "skill",
+      "category": "continuity",
+      "path": "plugins/tech-persistence/codex-skills/checkpoint/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/checkpoint",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$checkpoint",
+        "/checkpoint"
+      ]
+    },
+    {
+      "id": "context-handoff",
+      "name": "Context Handoff",
+      "description": "当 /sprint 执行中上下文压力过大，或任务拆分超过 5 个 Task 时加载。提供上下文重置和交接文件方法论。",
+      "type": "skill",
+      "category": "continuity",
+      "path": "plugins/tech-persistence/codex-skills/context-handoff/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/context-handoff",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex"
+      ],
+      "invocations": [
+        "$context-handoff"
+      ]
+    },
+    {
+      "id": "continuous-learning",
+      "name": "Continuous Learning",
+      "description": "Codex on-demand learning workflow: retrieve relevant durable knowledge, verify experience, and persist it explicitly through Compound.",
+      "type": "skill",
+      "category": "memory",
+      "path": "plugins/tech-persistence/codex-skills/continuous-learning/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/continuous-learning",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex"
+      ],
+      "invocations": [
+        "$continuous-learning"
+      ]
+    },
+    {
+      "id": "evolve",
+      "name": "Evolve",
+      "description": "Codex-compatible entry point for the former /evolve command. 将高置信度本能聚类进化为可复用的 skill、command 或 agent",
+      "type": "skill",
+      "category": "evolution",
+      "path": "plugins/tech-persistence/codex-skills/evolve/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/evolve",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$evolve",
+        "/evolve"
+      ]
+    },
+    {
+      "id": "instinct-export",
+      "name": "Instinct Export",
+      "description": "Codex-compatible entry point for the former /instinct-export command. 导出本能供团队成员或其他项目使用",
+      "type": "skill",
+      "category": "evolution",
+      "path": "plugins/tech-persistence/codex-skills/instinct-export/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/instinct-export",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$instinct-export",
+        "/instinct-export"
+      ]
+    },
+    {
+      "id": "instinct-import",
+      "name": "Instinct Import",
+      "description": "Codex-compatible entry point for the former /instinct-import command. 导入他人分享的本能文件",
+      "type": "skill",
+      "category": "evolution",
+      "path": "plugins/tech-persistence/codex-skills/instinct-import/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/instinct-import",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$instinct-import",
+        "/instinct-import"
+      ]
+    },
+    {
+      "id": "instinct-status",
+      "name": "Instinct Status",
+      "description": "Codex-compatible entry point for the former /instinct-status command. 查看所有已学习的本能及其置信度状态",
+      "type": "skill",
+      "category": "evolution",
+      "path": "plugins/tech-persistence/codex-skills/instinct-status/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/instinct-status",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$instinct-status",
+        "/instinct-status"
+      ]
+    },
+    {
+      "id": "learn",
+      "name": "Learn",
+      "description": "Codex-compatible entry point for the former /learn command. 从当前会话提取技术经验 + 创建/更新本能（/compound 的轻量版）",
+      "type": "skill",
+      "category": "memory",
+      "path": "plugins/tech-persistence/codex-skills/learn/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/learn",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$learn",
+        "/learn"
+      ]
+    },
+    {
+      "id": "plan",
+      "name": "Plan",
+      "description": "Codex-native risk-scaled architecture and implementation planning with explicit dependencies and verification.",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/plan/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/plan",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$plan",
+        "/plan"
+      ]
+    },
+    {
+      "id": "prototype",
+      "name": "Prototype",
+      "description": "Codex-compatible entry point for the former /prototype command. 从原型截图中提取需求：假设驱动、纠偏式收敛，不做冗长问答",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/prototype/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/prototype",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$prototype",
+        "/prototype"
+      ]
+    },
+    {
+      "id": "prototype-workflow",
+      "name": "Prototype Workflow",
+      "description": "Codex opt-in prototype convergence. 仅当用户显式调用 /prototype 或请求原型需求收敛时使用；参考截图、Figma 链接和设计实现不自动触发。",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/prototype-workflow/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/prototype-workflow",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex"
+      ],
+      "invocations": [
+        "$prototype-workflow"
+      ]
+    },
+    {
+      "id": "review-learnings",
+      "name": "Review Learnings",
+      "description": "Codex-compatible entry point for the former /review-learnings command. 回顾所有技术沉淀：经验 + 本能 + 观察，支持搜索、统计、裁剪",
+      "type": "skill",
+      "category": "memory",
+      "path": "plugins/tech-persistence/codex-skills/review-learnings/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/review-learnings",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$review-learnings",
+        "/review-learnings"
+      ]
+    },
+    {
+      "id": "session-summary",
+      "name": "Session Summary",
+      "description": "Codex-compatible entry point for the former /session-summary command. 生成当前会话的完整技术总结 + 自动调用 /learn 提取经验和本能",
+      "type": "skill",
+      "category": "memory",
+      "path": "plugins/tech-persistence/codex-skills/session-summary/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/session-summary",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$session-summary",
+        "/session-summary"
+      ]
+    },
+    {
+      "id": "skill",
+      "name": "Skill",
+      "description": "Codex-compatible entry point for the former /skill command. Skill 进化统一入口：diagnose/eval/improve/publish/auto/list",
+      "type": "skill",
+      "category": "evolution",
+      "path": "plugins/tech-persistence/codex-skills/skill/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/skill",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$skill",
+        "/skill"
+      ]
+    },
+    {
+      "id": "skill-diagnose",
+      "name": "Skill Diagnose",
+      "description": "Codex-compatible entry point for the former /skill-diagnose command. [alias → /skill diagnose] 诊断 skill 健康状况：使用信号分析、步骤热力图、纠正模式、本能差异、progressive disclosure",
+      "type": "skill",
+      "category": "evolution",
+      "path": "plugins/tech-persistence/codex-skills/skill-diagnose/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/skill-diagnose",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$skill-diagnose",
+        "/skill-diagnose"
+      ]
+    },
+    {
+      "id": "skill-eval",
+      "name": "Skill Eval",
+      "description": "Codex-compatible entry point for the former /skill-eval command. [alias → /skill eval] 用测试集验证 skill：A/B 对比当前版本和提案版本的通过率",
+      "type": "skill",
+      "category": "evolution",
+      "path": "plugins/tech-persistence/codex-skills/skill-eval/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/skill-eval",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$skill-eval",
+        "/skill-eval"
+      ]
+    },
+    {
+      "id": "skill-improve",
+      "name": "Skill Improve",
+      "description": "Codex-compatible entry point for the former /skill-improve command. [alias → /skill improve] 基于诊断结果为 skill 生成修改提案：合并/精简/吸收本能/拆分",
+      "type": "skill",
+      "category": "evolution",
+      "path": "plugins/tech-persistence/codex-skills/skill-improve/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/skill-improve",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$skill-improve",
+        "/skill-improve"
+      ]
+    },
+    {
+      "id": "skill-publish",
+      "name": "Skill Publish",
+      "description": "Codex-compatible entry point for the former /skill-publish command. [alias → /skill publish] 将已验证的 skill 改进提案发布为新版本，含备份、changelog、回滚能力",
+      "type": "skill",
+      "category": "evolution",
+      "path": "plugins/tech-persistence/codex-skills/skill-publish/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/skill-publish",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$skill-publish",
+        "/skill-publish"
+      ]
+    },
+    {
+      "id": "test",
+      "name": "Test",
+      "description": "Codex-compatible entry point for the former /test command. 根据代码变更的风险等级自动决定测试深度并执行：L0免测→L4全面测试",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/test/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/test",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$test",
+        "/test"
+      ]
+    },
+    {
+      "id": "test-strategy",
+      "name": "Test Strategy",
+      "description": "Codex opt-in testing strategy. 仅当用户显式调用 /test、test-strategy 或请求独立测试方案时使用；普通实现和审查不自动加载。",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/test-strategy/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/test-strategy",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex"
+      ],
+      "invocations": [
+        "$test-strategy"
+      ]
+    },
+    {
+      "id": "think",
+      "name": "Think",
+      "description": "Codex-native product framing for scope, user value, and observable success criteria.",
+      "type": "skill",
+      "category": "workflow",
+      "path": "plugins/tech-persistence/codex-skills/think/SKILL.md",
+      "sourceUrl": "https://github.com/songuu/tech-persistence/tree/main/plugins/tech-persistence/codex-skills/think",
+      "featured": false,
+      "profile": "extended",
+      "runtimes": [
+        "Codex",
+        "Claude Code"
+      ],
+      "invocations": [
+        "$think",
+        "/think"
+      ]
+    }
+  ],
+  "updates": [
+    {
+      "date": "2026-07-01",
+      "title": "obra/superpowers + garrytan/gstack 2026-06 更新评估 — 可借鉴项收敛到 token、安全、决策可见性、eval 隔离",
+      "summary": "用户请求：研究 obra/superpowers 和 garrytan/gstack 最近一个月更新了哪些内容，以及哪些值得直接借鉴到当前 tech-persistence 架构里。",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/solutions/2026-07-01-superpowers-gstack-june-2026-eval.md",
+      "path": "docs/solutions/2026-07-01-superpowers-gstack-june-2026-eval.md",
+      "status": "draft",
+      "tags": [
+        "solution",
+        "sibling-eval",
+        "external-reference",
+        "superpowers",
+        "gstack",
+        "architecture"
+      ]
+    },
+    {
+      "date": "2026-06-17",
+      "title": "Sibling-eval：Claude /goal × Codex /goal 原生命令 vs TP /sprint --goal（收窄到原生 goal 原语）",
+      "summary": "用户问\"结合 Claude Code 自带的 /goal 和 Codex 自带的 /goal，TP 当前架构的 /sprint --goal 需要改进哪里\"。作用域严格收窄到两个 runtime 各自的原生 /goal 命令本身，排除 Claude Dynamic Workflows / /loop / cron / Routines / fan-out（那些不是 /goal）。对比对象是 TP /sprint --goal（纯 markdown 协议 MVP，无宿主进程，…",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/solutions/2026-06-17-native-goal-sibling-eval.md",
+      "path": "docs/solutions/2026-06-17-native-goal-sibling-eval.md",
+      "status": "completed",
+      "tags": [
+        "solution",
+        "sibling-eval",
+        "goal-mode",
+        "claude-code",
+        "codex"
+      ]
+    },
+    {
+      "date": "2026-06-15",
+      "title": "Sibling-eval：BMAD-METHOD + SuperClaude_Framework vs tech-persistence",
+      "summary": "两个被评项规模都远大于 solo 自用的 TP（BMAD 团队敏捷 AI 方法论 / SuperClaude Claude-Code-only 配置框架），但「高 stars ≠ 借鉴理由」。19 个候选经多 agent 对抗核验（refute-by-default，每条 verdict 带 file:line 代码锚定）后：0 borrow / 0 adapt / 2 backlog（YAGNI-gated）/ 17 reject。",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/solutions/2026-06-15-bmad-superclaude-eval.md",
+      "path": "docs/solutions/2026-06-15-bmad-superclaude-eval.md",
+      "status": "reviewed",
+      "tags": [
+        "sibling-eval",
+        "external-reference",
+        "bmad",
+        "superclaude",
+        "identity-question-first",
+        "convergent-evolution",
+        "refute-by-default"
+      ]
+    },
+    {
+      "date": "2026-06-15",
+      "title": "Sibling-eval：MoAI-ADK (modu-ai) vs tech-persistence",
+      "summary": "MoAI-ADK = SPEC-First 重量级生产级 agentic 编码 harness（Go 单二进制 CLI，38,700+ 行 / 38 包，24-28 agents + 47-52 skills，Plan→Run→Sync→PR 全生命周期 + DB 管理 + design pipeline + GLM tmux 多 LLM）。规模与定位远超 solo 自用、纯 markdown+jsonl 的 TP。",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/solutions/2026-06-15-moai-adk-eval.md",
+      "path": "docs/solutions/2026-06-15-moai-adk-eval.md",
+      "status": "reviewed",
+      "tags": [
+        "sibling-eval",
+        "external-reference",
+        "moai-adk",
+        "identity-question-first",
+        "convergent-evolution",
+        "refute-by-default",
+        "target-user-mismatch",
+        "adversarial-verified"
+      ]
+    },
+    {
+      "date": "2026-06-09",
+      "title": "phuryn/pm-skills PRD 技能/命令评估 — 0 直接借鉴（目标用户错配）+ 2 收敛进化 + 1 不实施 follow-up",
+      "summary": "用户请求：\"--auto 对比下 https://github.dev/phuryn/pm-skills，主要是里面的 PRD 相关的技能和命令\"。",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/solutions/2026-06-09-pm-skills-eval.md",
+      "path": "docs/solutions/2026-06-09-pm-skills-eval.md",
+      "status": "draft",
+      "tags": [
+        "solution",
+        "sibling-eval",
+        "external-reference",
+        "identity-question-first",
+        "target-user-mismatch",
+        "convergent-evolution",
+        "prd",
+        "pm-skills"
+      ]
+    },
+    {
+      "date": "2026-06-08",
+      "title": "对比：tech-persistence /plan vs Claude Code 原生 plan mode vs Codex CLI 原生 plan mode（方法论层 vs 双 runtime enforcement 层）",
+      "summary": "用户先问\"对比当前 plan 模式和 Claude Code 自带的 plan 模式\"，再要求接入 Codex CLI 原生 plan 模式凑成三方对比。风险在于三者都叫 plan，容易当成竞品三选一。实际它们分两层——tech-persistence /plan 是 model-driven markdown 方法论协议（双 runtime），Claude Code / Codex 的原生 plan mode 各是其 harness/CLI 进程级强制的 read-onl…",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/solutions/2026-06-08-plan-mode-comparison.md",
+      "path": "docs/solutions/2026-06-08-plan-mode-comparison.md",
+      "status": "completed",
+      "tags": [
+        "solution",
+        "architecture",
+        "plan-mode",
+        "claude-code",
+        "codex"
+      ]
+    },
+    {
+      "date": "2026-06-05",
+      "title": "ECC (Enterprise Claude Code) sibling-eval",
+      "summary": "目标用户判定：同类（dev-tooling）。这是罕见情况——[[feedbacktargetusermismatchinvalidatesborrow]] 的失效过滤器不拦，机制借鉴相关性最高的一次 sibling-eval。但\"同类\"≠\"同规模\"：ECC 的 enterprise/multi-harness/team 驱动在 solo TP 多数失效（targetuser_fit 普遍 partial/mismatch）。",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/solutions/2026-06-05-ecc-eval.md",
+      "path": "docs/solutions/2026-06-05-ecc-eval.md",
+      "status": "reviewed",
+      "tags": [
+        "solution",
+        "sibling-eval",
+        "ecc",
+        "harness",
+        "parity",
+        "instinct",
+        "security",
+        "distribution"
+      ]
+    },
+    {
+      "date": "2026-06-02",
+      "title": "Obsidian 跨终端/跨设备同步对 tech-persistence 架构的优缺点与方案",
+      "summary": "用户问：不同终端 / 不同设备之间用 Obsidian 同步本项目的知识 vault，优缺点是什么，尤其针对当前这种架构。结论是知识层天生贴合 Obsidian 跨设备同步（4 不可妥协原则里 3 条正向加分），但「多设备双写」撞两个结构性硬伤：append-only jsonl 文件级同步会丢行、Claude auto-memory 用 cwd-key 路径根本不 portable。因此桌面多设备首选 git-based 同步（与现有 pre-commit/git-tra…",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/solutions/2026-06-02-obsidian-cross-device.md",
+      "path": "docs/solutions/2026-06-02-obsidian-cross-device.md",
+      "status": "completed",
+      "tags": [
+        "solution",
+        "obsidian",
+        "cross-device",
+        "sync",
+        "parity",
+        "memory-v5"
+      ]
+    }
+  ],
+  "architectureSources": [
+    {
+      "title": "agent-loop pipeline 模式架构",
+      "path": "docs/architecture/agent-loop-pipeline-architecture.md",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/architecture/agent-loop-pipeline-architecture.md",
+      "description": "日期：2026-05-11",
+      "status": "documented",
+      "updated": "undated"
+    },
+    {
+      "title": "agent-loop v6 根因复盘与架构调整文档",
+      "path": "docs/architecture/agent-loop-v6-root-architecture.md",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/architecture/agent-loop-v6-root-architecture.md",
+      "description": "日期：2026-04-28",
+      "status": "documented",
+      "updated": "undated"
+    },
+    {
+      "title": "agent-loop v7 caveman 架构接入说明",
+      "path": "docs/architecture/agent-loop-v7-caveman-architecture.md",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/architecture/agent-loop-v7-caveman-architecture.md",
+      "description": "日期：2026-04-30",
+      "status": "documented",
+      "updated": "undated"
+    },
+    {
+      "title": "agent-loop 架构问题诊断报告",
+      "path": "docs/architecture/ARCHITECTURE_ISSUES.md",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/architecture/ARCHITECTURE_ISSUES.md",
+      "description": "现象：Spec provider 输出了多轮 Markdown 格式的计划内容，而非符合 schema 的单轮 JSON。",
+      "status": "documented",
+      "updated": "undated"
+    },
+    {
+      "title": "agent-loop 问题总结",
+      "path": "docs/architecture/ISSUES.md",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/architecture/ISSUES.md",
+      "description": "错误信息",
+      "status": "documented",
+      "updated": "undated"
+    },
+    {
+      "title": "架构演进全景：V1→V7 与加固期（2026-04 ~ 05）",
+      "path": "docs/architecture/2026-05-28-evolution-overview.md",
+      "href": "https://github.com/songuu/tech-persistence/blob/main/docs/architecture/2026-05-28-evolution-overview.md",
+      "description": "整条演进史有一个被 README 版本图掩盖的相变：",
+      "status": "completed",
+      "updated": "2026-05-28"
+    }
+  ],
+  "hookSurfaces": [
+    {
+      "runtime": "Claude Code",
+      "event": "PostToolUse",
+      "handlers": 1,
+      "commands": [
+        "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" observe.js post"
+      ]
+    },
+    {
+      "runtime": "Claude Code",
+      "event": "PreToolUse",
+      "handlers": 2,
+      "commands": [
+        "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" guard-handoff-path.js",
+        "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" observe.js pre"
+      ]
+    },
+    {
+      "runtime": "Claude Code",
+      "event": "SessionStart",
+      "handlers": 2,
+      "commands": [
+        "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" inject-context.js",
+        "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" caveman-activate.js"
+      ]
+    },
+    {
+      "runtime": "Claude Code",
+      "event": "Stop",
+      "handlers": 1,
+      "commands": [
+        "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" evaluate-session.js"
+      ]
+    },
+    {
+      "runtime": "Claude Code",
+      "event": "UserPromptSubmit",
+      "handlers": 1,
+      "commands": [
+        "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" prompt-submit.js"
+      ]
+    },
+    {
+      "runtime": "Codex",
+      "event": "PreToolUse",
+      "handlers": 1,
+      "commands": [
+        "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/guard-handoff-path-codex.js\""
+      ]
+    },
+    {
+      "runtime": "Codex",
+      "event": "SessionStart",
+      "handlers": 1,
+      "commands": [
+        "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/inject-context-codex.js\""
+      ]
+    }
+  ],
+  "mcpServers": [
+    {
+      "id": "tech-persistence-memory",
+      "description": "Query Tech Persistence Memory v5: search, recent sessions, save notes, file history, project profile.",
+      "tools": [
+        "tp_memory_file_history",
+        "tp_memory_project_profile",
+        "tp_memory_recent",
+        "tp_memory_save",
+        "tp_memory_search"
+      ]
+    }
+  ],
+  "source": {
+    "algorithm": "sha256",
+    "hash": "103468d6413984de2feedefce300ac3b6dc508d8382440a3ca8736dbd890db7a",
+    "files": [
+      {
+        "path": "docs/architecture/2026-05-28-evolution-overview.md",
+        "sha256": "dd47496fa2b2ca22621b1005edf6e2740b38cf1adbca27fcefa45c42ca970ed0",
+        "bytes": 16370
+      },
+      {
+        "path": "docs/architecture/agent-loop-pipeline-architecture.md",
+        "sha256": "8719af34134423dddd5327c7697652a72700ac86104834291caa64732bf9ca4b",
+        "bytes": 21094
+      },
+      {
+        "path": "docs/architecture/agent-loop-v6-root-architecture.md",
+        "sha256": "1daa0e2cb58ec2aa3b78c08002b20b5b4d801a0f8b9e3c74deeec4475d53addc",
+        "bytes": 23986
+      },
+      {
+        "path": "docs/architecture/agent-loop-v7-caveman-architecture.md",
+        "sha256": "a1221235b47198e6cce1b18fcd27aeac5b3b184b199233e4d2d3b54b50c76331",
+        "bytes": 4277
+      },
+      {
+        "path": "docs/architecture/ARCHITECTURE_ISSUES.md",
+        "sha256": "9c93c713e3cce9b3144a322be300bf606c8c68e00e9b7d928c18518c0a1e38a6",
+        "bytes": 25920
+      },
+      {
+        "path": "docs/architecture/ISSUES.md",
+        "sha256": "15e69e71f37bb9afb19ff3f6452ee5be4f6e6129d9a0e3a668278106040a3400",
+        "bytes": 10993
+      },
+      {
+        "path": "docs/solutions/2026-04-09-obsidian-integration.md",
+        "sha256": "1b0f92056bc16d3c9173c7c73161f7fb7c61447886c751e6ee204cf8fa229e54",
+        "bytes": 5396
+      },
+      {
+        "path": "docs/solutions/2026-04-24-codex-memory-v5.md",
+        "sha256": "fb07a7d2f3da17c1d1c3c3bedc5aeffe7a2062deec224a563e71c67b4ce6fe9b",
+        "bytes": 2198
+      },
+      {
+        "path": "docs/solutions/2026-04-27-agent-orchestrator-v6.md",
+        "sha256": "6b75670dc266db96d4b3d2d656ccafe027a32f2816536f22820dd60ad2f54ce6",
+        "bytes": 2020
+      },
+      {
+        "path": "docs/solutions/2026-04-28-agent-loop-v6-provider-adapter.md",
+        "sha256": "8026f310bae9088e7573cb01fc7464983fb757c701c38d9bb596653ce2471e0a",
+        "bytes": 1850
+      },
+      {
+        "path": "docs/solutions/2026-04-29-agent-loop-recovery-flow.md",
+        "sha256": "63a070a70ccada55a8e9dcd90d6cb733844baac9152514845fced02a1b7bd7a7",
+        "bytes": 2910
+      },
+      {
+        "path": "docs/solutions/2026-04-30-agent-loop-v7-caveman.md",
+        "sha256": "ddbb3468888905695f22a41f05c5af31a5311187e8c948d70c09ec054ea75a1b",
+        "bytes": 2667
+      },
+      {
+        "path": "docs/solutions/2026-05-07-memory-parity.md",
+        "sha256": "cd7bb8c132458e6d270fc7ba4b7ddd234c94d92db19903d37c5748ba1a38fb62",
+        "bytes": 2442
+      },
+      {
+        "path": "docs/solutions/2026-05-09-agent-loop-caveman-audit.md",
+        "sha256": "899db9391660da3622eb53c9ffeaf478cbdcb20af73446de31cc4b51e277657b",
+        "bytes": 7337
+      },
+      {
+        "path": "docs/solutions/2026-05-11-active-sprint-frontmatter-status.md",
+        "sha256": "ca74d0e95cadd432e00c353e29bcfe246b8b5975ab38dc90e75de16fa077d29d",
+        "bytes": 2051
+      },
+      {
+        "path": "docs/solutions/2026-05-11-claude-settings-hook-merge.md",
+        "sha256": "83a1d5ef74186fec21731e0d1b471e0c790a023fa5482e97d5870e1f8a08bca0",
+        "bytes": 2202
+      },
+      {
+        "path": "docs/solutions/2026-05-11-sprint-speed-layer1.md",
+        "sha256": "065165c014eec01e1e6e40c80810b3559b182482c1101f959a3b50df8f7a7c9a",
+        "bytes": 5619
+      },
+      {
+        "path": "docs/solutions/2026-05-12-agent-loop-followup-fixes.md",
+        "sha256": "6c2afd7c3d0861a5d0c40bca46e73dfc960b8e566b903ee4370582670ac38159",
+        "bytes": 9965
+      },
+      {
+        "path": "docs/solutions/2026-05-12-gstack-analysis-reframe-lessons.md",
+        "sha256": "b2c1c9ee695afbb5ab2f6db555f1a66aedf0eabd7cf9fd5eabdd966fe563a5ba",
+        "bytes": 7747
+      },
+      {
+        "path": "docs/solutions/2026-05-12-nul-hook-shell-mismatch.md",
+        "sha256": "57215a55fe6ea9688d5073d8ed0dbb69d89cc1643e77993dff700d2234f8df75",
+        "bytes": 5184
+      },
+      {
+        "path": "docs/solutions/2026-05-12-pre-commit-defense.md",
+        "sha256": "460f763660ebffa4ed43fe7c44094a30cd3c792701fb01b824f1b6c7083c6dfa",
+        "bytes": 7971
+      },
+      {
+        "path": "docs/solutions/2026-05-14-claude-md-index-trim-via-prompt-recall.md",
+        "sha256": "0236bf12c7bf43142fff3b5a4bb2b48f4841716c1cb5f36aab08915238150023",
+        "bytes": 7413
+      },
+      {
+        "path": "docs/solutions/2026-05-14-plugin-migration-cascade-cleanup.md",
+        "sha256": "ff58e7a6686068db7825bf7996093eb253627ad73b871ebca333dd5561462dd6",
+        "bytes": 7327
+      },
+      {
+        "path": "docs/solutions/2026-05-14-spec-kit-eval.md",
+        "sha256": "70b4af0d84e58ffaad353f8c4906c620dfe2bce601b29b0b375263793b237757",
+        "bytes": 10169
+      },
+      {
+        "path": "docs/solutions/2026-05-15-persona-top-level-dimension.md",
+        "sha256": "0833333bf66a89961739dd549482e1687bb3b8b35f536c3cebd16be54fac7316",
+        "bytes": 6029
+      },
+      {
+        "path": "docs/solutions/2026-05-18-checkpoint-handoff-rolling-retention.md",
+        "sha256": "007a2cf1591eb664acb6464073df83e9acf6f3476005bd7eb141bd289f4b1c7c",
+        "bytes": 4315
+      },
+      {
+        "path": "docs/solutions/2026-05-18-sibling-eval-evidence-based-recalibration.md",
+        "sha256": "eed5a78e105627c9bb6f8bc271ca6444b26749a89aa0f6309e5aa220e4643d67",
+        "bytes": 4892
+      },
+      {
+        "path": "docs/solutions/2026-05-18-unit-test-architecture-baseline.md",
+        "sha256": "1df654491c4e9bf07d69c51c1a825781c96d8bd4a4ec82403b642ee5fe2b82f7",
+        "bytes": 7451
+      },
+      {
+        "path": "docs/solutions/2026-05-21-gsd-eval.md",
+        "sha256": "7b878855ad2da26e16da10154ea52aab5d0aa6684f800326b1ab0a9b2f6947f7",
+        "bytes": 21615
+      },
+      {
+        "path": "docs/solutions/2026-05-22-figma-1to1-fidelity.md",
+        "sha256": "8185de39ab931792138df0cc92b3827f08019619aff39eff4df913f747a65ac2",
+        "bytes": 9252
+      },
+      {
+        "path": "docs/solutions/2026-05-22-gstack-design-lens-double-track.md",
+        "sha256": "a68496749a6f28e46e1e256d0ff4a74477a1140e096bb21c9f2113c490d63bba",
+        "bytes": 9002
+      },
+      {
+        "path": "docs/solutions/2026-05-22-phase-warmup-protocol-rollback.md",
+        "sha256": "4fa2d13b75fa403023d5128747bb9256cc7e3740d362a07a08da32d495578923",
+        "bytes": 5731
+      },
+      {
+        "path": "docs/solutions/2026-05-26-claude-mem-eval.md",
+        "sha256": "86a93ebcaa46da3e5401fe5c0e3ce50691d346e16af052703b92c8aecaa775db",
+        "bytes": 18752
+      },
+      {
+        "path": "docs/solutions/2026-05-27-claude-mem-followups.md",
+        "sha256": "57db55efded20254724269431962c1066e3147ea4578a9827e82ee1a1b9a4ebe",
+        "bytes": 6739
+      },
+      {
+        "path": "docs/solutions/2026-05-28-a1-clarify-enhancement.md",
+        "sha256": "31c7021d213c1146da5117d3db3595bb905a99b0bda44b4aed43e70c59ffba7c",
+        "bytes": 3488
+      },
+      {
+        "path": "docs/solutions/2026-05-28-a2-grader-revise-loop.md",
+        "sha256": "1e8c01dae8e0df7f11211370064805bb62c30b34b9fd42d6754c2682a2bcd4c0",
+        "bytes": 4886
+      },
+      {
+        "path": "docs/solutions/2026-05-28-clarification-channel.md",
+        "sha256": "64376e2415b065c9ca5117c1cdd6793087950cd34ccb082069d7e88466f14c4f",
+        "bytes": 7596
+      },
+      {
+        "path": "docs/solutions/2026-05-28-skill-publish-baseline-guard.md",
+        "sha256": "7816e2a8a80ad1d7b1edccf871870d2f28aa1e0bdc0cd31437b19bc49ff1bdb3",
+        "bytes": 4020
+      },
+      {
+        "path": "docs/solutions/2026-05-28-skill-trace-aware-reflection.md",
+        "sha256": "c83c7747ee28e4c0fd50764c07bf05bcf9ceacee88304ef93a6446363ad33a33",
+        "bytes": 3727
+      },
+      {
+        "path": "docs/solutions/2026-05-28-trace-to-eval.md",
+        "sha256": "b6046e3316ffd883c9eaccd2ab080df96842d720601c083ae9aec67fb9ad6804",
+        "bytes": 4932
+      },
+      {
+        "path": "docs/solutions/2026-05-29-sprint-goal-mode.md",
+        "sha256": "fb5fd9a02f9878cf914ce9a26777009bdbc9a81e6bc4b002486ef17119b37837",
+        "bytes": 6062
+      },
+      {
+        "path": "docs/solutions/2026-06-01-claude-code-dynamic-workflows-architecture.md",
+        "sha256": "c1ba8e98188674e8469d480941465d0be933c3e86b22808ef91cecb28d6918ad",
+        "bytes": 5970
+      },
+      {
+        "path": "docs/solutions/2026-06-01-demand-side-recall-telemetry.md",
+        "sha256": "96a1a014527199241e30599e674dfdcfad34fa8a08a9c4ffa4136d6af00238fb",
+        "bytes": 4151
+      },
+      {
+        "path": "docs/solutions/2026-06-01-knowledge-drift-checker.md",
+        "sha256": "7c8ae31e9426772b9e542ac6b428548c6d5347c8a9a96e423f2739e7ae455212",
+        "bytes": 4162
+      },
+      {
+        "path": "docs/solutions/2026-06-01-mcp-retrieval-measure.md",
+        "sha256": "20a7a1cde979f9c43a8bb5f2813ca6ba06919e5104897a9dafaeaf47860cdf3d",
+        "bytes": 4347
+      },
+      {
+        "path": "docs/solutions/2026-06-01-planning-depth-rule.md",
+        "sha256": "5d01e6a6351d99151bd2330f92fb42fcf772ea465f3c1cec3226415ba7c90d27",
+        "bytes": 3766
+      },
+      {
+        "path": "docs/solutions/2026-06-02-obsidian-cross-device.md",
+        "sha256": "4588e4d176ccccc0acf87cd07a1fd77e754f9263dab52ccdc1f1923677bd548b",
+        "bytes": 9809
+      },
+      {
+        "path": "docs/solutions/2026-06-05-ecc-eval.md",
+        "sha256": "8e2593d6331f4259ae6f26bb2dcb1515accff0de056a34a6e8b7314a186b103b",
+        "bytes": 21624
+      },
+      {
+        "path": "docs/solutions/2026-06-08-plan-mode-comparison.md",
+        "sha256": "831239575317f2d18d6ff12885743d5cc6d92a26fdab2983c1c1cc6c3fa722ec",
+        "bytes": 17210
+      },
+      {
+        "path": "docs/solutions/2026-06-09-pm-skills-eval.md",
+        "sha256": "e73fdecd3e41d331ccd8aaa6dbe2195b0148c02a231df1fe333cc7e1ed7c9e10",
+        "bytes": 7376
+      },
+      {
+        "path": "docs/solutions/2026-06-15-bmad-superclaude-eval.md",
+        "sha256": "c6fcb5b3348938de7d38ee4f26f3f3db72e9790034f7023f6fb2c2d2200d8ae2",
+        "bytes": 22218
+      },
+      {
+        "path": "docs/solutions/2026-06-15-moai-adk-eval.md",
+        "sha256": "d42c2bf2edc47a9226c4fd324a555bed5d4cc30247b4a1f3f92d90d2a50def8e",
+        "bytes": 23298
+      },
+      {
+        "path": "docs/solutions/2026-06-17-native-goal-sibling-eval.md",
+        "sha256": "c774c3cbc247496fa96eb16e8c8ea4c1b8c00bf73f367b1dc779a690a433534a",
+        "bytes": 19199
+      },
+      {
+        "path": "docs/solutions/2026-07-01-superpowers-gstack-june-2026-eval.md",
+        "sha256": "286fe099b2090459538cee5367e13d6dc5d5fcc70a12ac67faf8739600e636b7",
+        "bytes": 16370
+      },
+      {
+        "path": "plugins/tech-persistence/.claude-plugin/plugin.json",
+        "sha256": "7804f33f164e5605ecedaa94904ac2654fe032b1c713979564146c3fdba40d57",
+        "bytes": 532
+      },
+      {
+        "path": "plugins/tech-persistence/.codex-plugin/.mcp.json",
+        "sha256": "aeb079e9d231082680f46f4218c7d77ed6e0e17344b83f79b61dd80452afa5d0",
+        "bytes": 281
+      },
+      {
+        "path": "plugins/tech-persistence/.codex-plugin/plugin.json",
+        "sha256": "5bf2ed3e3303a7616762e812712adb57023b40af99462d39c78c926f92862f49",
+        "bytes": 1777
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/guard-handoff-path-codex.js",
+        "sha256": "38c10c9befbb6ba5930fd669e22c612e52559e67b6c10f39d2eb2ca4b552ecd2",
+        "bytes": 5889
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/hooks.json",
+        "sha256": "fe895cfe5396e19a8bab979cede36d7d063134cb7f45863dd8e2c4c0897f4c25",
+        "bytes": 840
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/inject-context-codex.js",
+        "sha256": "a3d22c87c6302a350a4e07a24f3e32e995438607de2037517f4e0d841ad4b18c",
+        "bytes": 3091
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/clarifications.js",
+        "sha256": "91fa7aee53d80493b89c55d6b53c194263c3347817464936db71d5591a886b62",
+        "bytes": 7048
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/codex-active-sprint.js",
+        "sha256": "c313a8c1059cda8d03ada3cfe308f7a14d0dafe37f260c72759757ac2fa3931e",
+        "bytes": 96454
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/codex-hook-registry.js",
+        "sha256": "35d1602f0910d65ba82614f4a3fd78babc3f19aeae1e3a3072d114ce62ede800",
+        "bytes": 2391
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/hook-registry.js",
+        "sha256": "a9e67d68f8e9c688fca707ad209ef38891593ec686aff0afe4ddf89e4eb83be4",
+        "bytes": 7687
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/knowledge-drift.js",
+        "sha256": "6ca9e801bb501f932e8a8b91632270bfd91e4d810b52e2dc0ee22e822ccc9f4f",
+        "bytes": 4469
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/memory-search.js",
+        "sha256": "34b85f3aa835a43720908453f0fe7908062c92beac71aad1b16e4bcd9ac6d40c",
+        "bytes": 17804
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/memory-tools.js",
+        "sha256": "bc8181fe91dfd029c50b5305b895438bc7c6e994c5702d9c0d447bdcfa44ea55",
+        "bytes": 10271
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/memory-v5.js",
+        "sha256": "222b78c73bb7a9b28f2039982fdfd07901ced9f85ac5484c94390035c1681e41",
+        "bytes": 20753
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/recall-usage.js",
+        "sha256": "c1cf408b1af0e13b9cef4bd2f60b6130bace64050e670b0da27cd2267090cd82",
+        "bytes": 11792
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/redaction.js",
+        "sha256": "9b8eb1240657d2af351565d4ffc47964d993f779c743a57f5062bf08cff2ec51",
+        "bytes": 4457
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/runtime-paths.js",
+        "sha256": "71048c6cb7b857e0bd509e14b68a06cdaa723dccabee19ec5c16111cdd46bdd4",
+        "bytes": 7577
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/skill-eval-cases.js",
+        "sha256": "e3360a8966964f2eacc7f27c48dd2c92a2d72e974b812abe7c232afbaa17ebfd",
+        "bytes": 4971
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/skill-eval-results.js",
+        "sha256": "7721e1c213be8c4cb7c0165d2d5e7ed402249f00c1a00dc622eece4bd198d4f2",
+        "bytes": 4383
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/skill-signals.js",
+        "sha256": "0738275473d098fc7df656b4e0e6c7255647e4d629372e702b55b229b343fbcf",
+        "bytes": 5356
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/skill-traces.js",
+        "sha256": "5d5ce4eb1a74d496647268efbc7f725ef6a54ecfa369d7ba7880aa99b4ee4128",
+        "bytes": 2686
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/usage-aggregator.js",
+        "sha256": "dba2b76a6cd93d51ae2096b903a61e2bd51cb5fc8db883723fe6b9ec2f305648",
+        "bytes": 8559
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/run-hook.cmd",
+        "sha256": "eacc496708edee001d5ca6aa5578af37a0b70584e3301e75531601ce67700fb2",
+        "bytes": 91
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/run-hook.js",
+        "sha256": "1f56fde0f1fa277353cdc67b6c546a5982c30046ea0a265e6dd12c7ce0cadf5c",
+        "bytes": 1163
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/agent-loop/SKILL.md",
+        "sha256": "c8ddd1bfdf2f980413a498da6b9e9a95043bb80cc8b7ab46303785bbb3897c2f",
+        "bytes": 16005
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/caveman-commit/SKILL.md",
+        "sha256": "6f77b2b0907c2631c63ec3db96b154fd92819c0bce67c1c155b00d127b0a0042",
+        "bytes": 2513
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/caveman-compress/SKILL.md",
+        "sha256": "12eec90591f7b017d8e484235567b876a4f993f1a103ec583c880a0bec39168c",
+        "bytes": 4680
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/caveman-help/SKILL.md",
+        "sha256": "da8ff901835cee94e70e47a118246061ba5a00152f7bda5e735788edc8b664b2",
+        "bytes": 1344
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/caveman-review/SKILL.md",
+        "sha256": "e990a9c5596e80d8467ad7eba89fbf5708ce575b58587eb29814e3af3e096049",
+        "bytes": 2771
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/caveman/SKILL.md",
+        "sha256": "2c82035f1b47ed3b494ef92a4142e631eabcc348d79db288e432923ae45a19a9",
+        "bytes": 1807
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/checkpoint/SKILL.md",
+        "sha256": "b4a6f84b2ed5d6c9750b206011372a9c392ff8992e87ff2dc032384c9f9ab86e",
+        "bytes": 3977
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/compound/SKILL.md",
+        "sha256": "23da9c2a4d96e231e03b86b5fc97ea83ff0eb00759cc4f30cefaafd78bf8f317",
+        "bytes": 2976
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/context-handoff/SKILL.md",
+        "sha256": "ebc59b3f73515805e208c5b153c9305c688e4edc7ef2816d19d61c1b01bbe309",
+        "bytes": 4087
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/continuous-learning/SKILL.md",
+        "sha256": "c128c8227e6a6f98cd535cd2f4d4198351e62b913f7c68d2aad8f7d5d04d067d",
+        "bytes": 1995
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/evolve/SKILL.md",
+        "sha256": "d9914b43cd12a44505479310ee6441d1be11a9cb4555ac73a2a913dd10afe7df",
+        "bytes": 3583
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/instinct-export/SKILL.md",
+        "sha256": "05ee493032e139052e51d4757c3b1ac14cd0f0e8c4cf92d7541e9edf53cabfcf",
+        "bytes": 1592
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/instinct-import/SKILL.md",
+        "sha256": "601384210bcdda9b59fbc5fd4947c147acbcf199eeeccb6afd566ae994627a07",
+        "bytes": 1908
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/instinct-status/SKILL.md",
+        "sha256": "fa4baa27784e6894483bc220a0521dff112590e35831de9c1b74d3aaa033d921",
+        "bytes": 2926
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/learn/SKILL.md",
+        "sha256": "1ef40440dc7b330b2f7fcb3aeab49755790366fe7a69927afd288b043bbfa28f",
+        "bytes": 3502
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/memory/SKILL.md",
+        "sha256": "6b0a0c3e1b680660e15434541d3493822426ab68c96f49b202ce580eb628513d",
+        "bytes": 1690
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/plan/SKILL.md",
+        "sha256": "db67d5b7778e3427871af744d2a4e009f68cbed18c4e18482944e25a2501cb80",
+        "bytes": 1583
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/prototype-workflow/SKILL.md",
+        "sha256": "18e3f384c2a8a862f5966f4a8966aec5889b98987b391a3f7c434997c40023ec",
+        "bytes": 1041
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/prototype/SKILL.md",
+        "sha256": "01bf68390eb97d6ae81c86b0e6ddc0151c6ca8269a5f52cc8e4c663681fc6f05",
+        "bytes": 11497
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/review-learnings/SKILL.md",
+        "sha256": "865b0fac0273b1a067d79f603674eaefe25f6bd741329c140f92b8b115060bce",
+        "bytes": 5481
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/review/SKILL.md",
+        "sha256": "f8525955b38b13c187505d9e19d09c87897e0f0958a6b5ffa3676643f1ed29cb",
+        "bytes": 1864
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/session-summary/SKILL.md",
+        "sha256": "de8bc4343d491d56a5ebea939a37c4345728d05be0b0da3d58b67845080b80ed",
+        "bytes": 1905
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/skill-diagnose/SKILL.md",
+        "sha256": "17458db7e5e7b3bf0c93a88e91579e355beb67070f922786eeca2acc7a29db94",
+        "bytes": 3915
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/skill-eval/SKILL.md",
+        "sha256": "e5e076425f5c119b99e1b304bf6cee6b35bea36edc909ae5ce39877801c7135a",
+        "bytes": 3787
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/skill-improve/SKILL.md",
+        "sha256": "4e1c69359d59005195faa2238a02ecf13e1779bb9a0dfdb951028e4509069ba8",
+        "bytes": 2604
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/skill-publish/SKILL.md",
+        "sha256": "dfa86a05f6530f571cd122bd69e3cc4b108b896f6e8abbe8be2fe11831166d04",
+        "bytes": 2578
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/skill/SKILL.md",
+        "sha256": "0e8f0e1411dd39fca71d79a1166474789faf418b6ceb3f13777e457ee712369c",
+        "bytes": 6369
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/sprint/SKILL.md",
+        "sha256": "ac813a3bb167acddbb5a78eccb8de53a081c9522649ad12bf9f5ca6a11156ff7",
+        "bytes": 3915
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/test-strategy/SKILL.md",
+        "sha256": "6cfe79d885c9fe280da00d15f6fb1c09c59f0c2d342b507570522f8d3c6743bc",
+        "bytes": 1044
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/test/SKILL.md",
+        "sha256": "aa4f55eeb2ad3cc03caa851031f904b0b63b0656084acb82153fc52efc2debff",
+        "bytes": 6077
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/think/SKILL.md",
+        "sha256": "67b04e3e0f05132920b6913966cb580e74c7f87d38f412017ab86dc9dd085e20",
+        "bytes": 1400
+      },
+      {
+        "path": "plugins/tech-persistence/codex-skills/work/SKILL.md",
+        "sha256": "221a8424e2e9844ac19a57c0a3cfe4d4fecc7d0bc8d90d6a8075b14ee3982a03",
+        "bytes": 2043
+      },
+      {
+        "path": "plugins/tech-persistence/commands/agent-loop.md",
+        "sha256": "7385dd20b92900a3b411969285888aaa98de531ec937dbc6a502d8cb67470d6b",
+        "bytes": 15290
+      },
+      {
+        "path": "plugins/tech-persistence/commands/checkpoint.md",
+        "sha256": "58519ed37f7448aac2dde86373b353b0c9ce188b33ca458827a9faef39903ced",
+        "bytes": 3286
+      },
+      {
+        "path": "plugins/tech-persistence/commands/compound.md",
+        "sha256": "5c8d974e069c2e5e5f207a6d17c32a8f5a1217bf1a18380811e3fcc09e7635b9",
+        "bytes": 6196
+      },
+      {
+        "path": "plugins/tech-persistence/commands/evolve.md",
+        "sha256": "2fe2d1fa6a12eaab63e5382cb41394e7e429dc9dd523a6db02e5a89cb5da2897",
+        "bytes": 2931
+      },
+      {
+        "path": "plugins/tech-persistence/commands/instinct-export.md",
+        "sha256": "b828b492d013aa63b413e3071fed1eb5fcecdd1d9241db535126ac997d8602f4",
+        "bytes": 866
+      },
+      {
+        "path": "plugins/tech-persistence/commands/instinct-import.md",
+        "sha256": "42889b8be9fd75aec6e29c709a73228149407792432664b5d991d547a3cd32c3",
+        "bytes": 1184
+      },
+      {
+        "path": "plugins/tech-persistence/commands/instinct-status.md",
+        "sha256": "f3c5574ce84fcf5cad6c4d5badd03335adce2fd2183c60bf74e8ddfb66daa559",
+        "bytes": 2203
+      },
+      {
+        "path": "plugins/tech-persistence/commands/learn.md",
+        "sha256": "826b61643922a88a15f4ee3c38d96a5da47dbc1c32ce33a98223603b303f32ed",
+        "bytes": 2850
+      },
+      {
+        "path": "plugins/tech-persistence/commands/plan.md",
+        "sha256": "972874100050b9b7d361fce6edc394639e16da09f605c2ce361a7a0a555f13c8",
+        "bytes": 7621
+      },
+      {
+        "path": "plugins/tech-persistence/commands/prototype.md",
+        "sha256": "19d5fc89f8799cf8b34084c2ca65a5d9635258e34b4ee8c02d523e183205802a",
+        "bytes": 10823
+      },
+      {
+        "path": "plugins/tech-persistence/commands/review-learnings.md",
+        "sha256": "d34b85e89c4aa8994449d0f1a3b90bffdac33960b5ebf6d6368bcf0417c76c1b",
+        "bytes": 4763
+      },
+      {
+        "path": "plugins/tech-persistence/commands/review.md",
+        "sha256": "d5e5d629625a76fd1672a4f075d7c42d95e09868fcbb3b184bfabed72f81e3f9",
+        "bytes": 26824
+      },
+      {
+        "path": "plugins/tech-persistence/commands/session-summary.md",
+        "sha256": "3708143b5ea534737c110de46fe00df91c7818800945b5a9fddbf67703a5d86f",
+        "bytes": 1181
+      },
+      {
+        "path": "plugins/tech-persistence/commands/skill-diagnose.md",
+        "sha256": "f3e14a3fcc6820610184a1d2e173c2348ff92737ce59ac6e00cffb83c9d32e90",
+        "bytes": 3199
+      },
+      {
+        "path": "plugins/tech-persistence/commands/skill-eval.md",
+        "sha256": "8448937850f5db9157c76028a3bc08f131c885da9cd68a1aff94c835481a8374",
+        "bytes": 3099
+      },
+      {
+        "path": "plugins/tech-persistence/commands/skill-improve.md",
+        "sha256": "25b7143d6aeba3a463c449e47474c2ffaee36e6af2a2bdcaa3dc480edd1c20b9",
+        "bytes": 1892
+      },
+      {
+        "path": "plugins/tech-persistence/commands/skill-publish.md",
+        "sha256": "f7bb64b3ba67cf40210336d573d8e4da6bdf7747fffb92cb237c1f8032cdb827",
+        "bytes": 1867
+      },
+      {
+        "path": "plugins/tech-persistence/commands/skill.md",
+        "sha256": "7bf3eb22a1b5f130af6c13501f05c02248272288e99e4d850fcebf328ed8252f",
+        "bytes": 5724
+      },
+      {
+        "path": "plugins/tech-persistence/commands/sprint.md",
+        "sha256": "6f66387efcc33938afa735fa2eb95a6dca7d896d8ea265b60080f89a806f2f66",
+        "bytes": 31104
+      },
+      {
+        "path": "plugins/tech-persistence/commands/test.md",
+        "sha256": "2b4bc3d4e21f63eff8ff916b9cd281ad5a5f3ffe6ea6be0f1af77c9497388dce",
+        "bytes": 5429
+      },
+      {
+        "path": "plugins/tech-persistence/commands/think.md",
+        "sha256": "1219a81a5e1fec503e3aeebac77d185a069e8002e0e6fb8ea8b6fe9f9c695523",
+        "bytes": 5531
+      },
+      {
+        "path": "plugins/tech-persistence/commands/work.md",
+        "sha256": "c60e6f64712893ab58aa92399b376f15490eef32d14400fee1540630d4f073ab",
+        "bytes": 13133
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/caveman-activate.js",
+        "sha256": "a9d797ddc70b3cfa003dcbaf39d44d61fc932a1211b26138e8b777b63ef571ba",
+        "bytes": 2702
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/evaluate-session.js",
+        "sha256": "f044fa3805ebd7a131ec562154c4d81171d390a6070aed990e3cf3e4b1fb20ac",
+        "bytes": 34461
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/guard-handoff-path.js",
+        "sha256": "05bbdfb99f63481ee3a39cae0e3884f54b2064232506463d653ebffc112d247e",
+        "bytes": 2268
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/hooks.json",
+        "sha256": "64389c3731704fcb6346829bfed0287872c0899d78877c010e3e1fc030a89a7b",
+        "bytes": 2119
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/inject-context.js",
+        "sha256": "49af5bd2c55fd153babe4717047840f924ce67a04340723fc818bd751dc9a26f",
+        "bytes": 18410
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/clarifications.js",
+        "sha256": "91fa7aee53d80493b89c55d6b53c194263c3347817464936db71d5591a886b62",
+        "bytes": 7048
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/hook-registry.js",
+        "sha256": "a9e67d68f8e9c688fca707ad209ef38891593ec686aff0afe4ddf89e4eb83be4",
+        "bytes": 7687
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/knowledge-drift.js",
+        "sha256": "6ca9e801bb501f932e8a8b91632270bfd91e4d810b52e2dc0ee22e822ccc9f4f",
+        "bytes": 4469
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/memory-search.js",
+        "sha256": "34b85f3aa835a43720908453f0fe7908062c92beac71aad1b16e4bcd9ac6d40c",
+        "bytes": 17804
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/memory-tools.js",
+        "sha256": "bc8181fe91dfd029c50b5305b895438bc7c6e994c5702d9c0d447bdcfa44ea55",
+        "bytes": 10271
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/memory-v5.js",
+        "sha256": "222b78c73bb7a9b28f2039982fdfd07901ced9f85ac5484c94390035c1681e41",
+        "bytes": 20753
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/recall-usage.js",
+        "sha256": "c1cf408b1af0e13b9cef4bd2f60b6130bace64050e670b0da27cd2267090cd82",
+        "bytes": 11792
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/redaction.js",
+        "sha256": "9b8eb1240657d2af351565d4ffc47964d993f779c743a57f5062bf08cff2ec51",
+        "bytes": 4457
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/runtime-paths.js",
+        "sha256": "71048c6cb7b857e0bd509e14b68a06cdaa723dccabee19ec5c16111cdd46bdd4",
+        "bytes": 7577
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/skill-eval-cases.js",
+        "sha256": "e3360a8966964f2eacc7f27c48dd2c92a2d72e974b812abe7c232afbaa17ebfd",
+        "bytes": 4971
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/skill-eval-results.js",
+        "sha256": "7721e1c213be8c4cb7c0165d2d5e7ed402249f00c1a00dc622eece4bd198d4f2",
+        "bytes": 4383
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/skill-signals.js",
+        "sha256": "0738275473d098fc7df656b4e0e6c7255647e4d629372e702b55b229b343fbcf",
+        "bytes": 5356
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/skill-traces.js",
+        "sha256": "5d5ce4eb1a74d496647268efbc7f725ef6a54ecfa369d7ba7880aa99b4ee4128",
+        "bytes": 2686
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/lib/usage-aggregator.js",
+        "sha256": "dba2b76a6cd93d51ae2096b903a61e2bd51cb5fc8db883723fe6b9ec2f305648",
+        "bytes": 8559
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/observe.js",
+        "sha256": "21dab45e4b66849e4cb4d99a047705560fd3f0a612ec021c5aa5e51b85dda095",
+        "bytes": 3697
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/prompt-submit.js",
+        "sha256": "bd21c39e58a031fc000d5f00915f50b23d6912c658b6d00e0e9d8dcbfeeaff8c",
+        "bytes": 4523
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/run-hook.cmd",
+        "sha256": "eacc496708edee001d5ca6aa5578af37a0b70584e3301e75531601ce67700fb2",
+        "bytes": 91
+      },
+      {
+        "path": "plugins/tech-persistence/hooks/run-hook.js",
+        "sha256": "1f56fde0f1fa277353cdc67b6c546a5982c30046ea0a265e6dd12c7ce0cadf5c",
+        "bytes": 1163
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/clarifications.js",
+        "sha256": "91fa7aee53d80493b89c55d6b53c194263c3347817464936db71d5591a886b62",
+        "bytes": 7048
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/hook-registry.js",
+        "sha256": "a9e67d68f8e9c688fca707ad209ef38891593ec686aff0afe4ddf89e4eb83be4",
+        "bytes": 7687
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/knowledge-drift.js",
+        "sha256": "6ca9e801bb501f932e8a8b91632270bfd91e4d810b52e2dc0ee22e822ccc9f4f",
+        "bytes": 4469
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/memory-search.js",
+        "sha256": "34b85f3aa835a43720908453f0fe7908062c92beac71aad1b16e4bcd9ac6d40c",
+        "bytes": 17804
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/memory-tools.js",
+        "sha256": "bc8181fe91dfd029c50b5305b895438bc7c6e994c5702d9c0d447bdcfa44ea55",
+        "bytes": 10271
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/memory-v5.js",
+        "sha256": "222b78c73bb7a9b28f2039982fdfd07901ced9f85ac5484c94390035c1681e41",
+        "bytes": 20753
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/recall-usage.js",
+        "sha256": "c1cf408b1af0e13b9cef4bd2f60b6130bace64050e670b0da27cd2267090cd82",
+        "bytes": 11792
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/redaction.js",
+        "sha256": "9b8eb1240657d2af351565d4ffc47964d993f779c743a57f5062bf08cff2ec51",
+        "bytes": 4457
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/runtime-paths.js",
+        "sha256": "71048c6cb7b857e0bd509e14b68a06cdaa723dccabee19ec5c16111cdd46bdd4",
+        "bytes": 7577
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/skill-eval-cases.js",
+        "sha256": "e3360a8966964f2eacc7f27c48dd2c92a2d72e974b812abe7c232afbaa17ebfd",
+        "bytes": 4971
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/skill-eval-results.js",
+        "sha256": "7721e1c213be8c4cb7c0165d2d5e7ed402249f00c1a00dc622eece4bd198d4f2",
+        "bytes": 4383
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/skill-signals.js",
+        "sha256": "0738275473d098fc7df656b4e0e6c7255647e4d629372e702b55b229b343fbcf",
+        "bytes": 5356
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/skill-traces.js",
+        "sha256": "5d5ce4eb1a74d496647268efbc7f725ef6a54ecfa369d7ba7880aa99b4ee4128",
+        "bytes": 2686
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/lib/usage-aggregator.js",
+        "sha256": "dba2b76a6cd93d51ae2096b903a61e2bd51cb5fc8db883723fe6b9ec2f305648",
+        "bytes": 8559
+      },
+      {
+        "path": "plugins/tech-persistence/mcp/memory-mcp-server.js",
+        "sha256": "b4ca20718969dec3ad2a4a3f0cf0e0094b958a199112eb1f042774d392f60d63",
+        "bytes": 2889
+      },
+      {
+        "path": "plugins/tech-persistence/README.md",
+        "sha256": "feee25e8d11ed09033413904740ae102bf0a066cdff327e23e21abd1d88035cc",
+        "bytes": 4432
+      },
+      {
+        "path": "README.md",
+        "sha256": "c91f6aca31d49658f51f9f98e9678e63597e4dcfb5991a33bb8ba383c426f93e",
+        "bytes": 33906
+      }
+    ]
+  }
+}

@@ -9,6 +9,13 @@ const { redactSensitiveText, redactArtifactValue } = require('./lib/redaction');
 const policyGates = require('./agent-orchestrator/policy-gates');
 const validationCommandPolicy = require('./agent-orchestrator/validation-command-policy');
 const providerProfiles = require('./agent-orchestrator/provider-profiles');
+const runtimeAdapters = require('./agent-orchestrator/runtime-adapters');
+const nativeExecutionControl = require('./agent-orchestrator/native-execution-control');
+const goalLease = require('./agent-orchestrator/goal-lease');
+const executionEnvelopes = require('./agent-orchestrator/execution-envelopes');
+const runLock = require('./agent-orchestrator/run-lock');
+const providerLifecycle = require('./agent-orchestrator/provider-lifecycle');
+const structuredOutput = require('./agent-orchestrator/structured-output');
 
 const pipeline = require('./agent-orchestrator/pipeline');
 const pipelineState = require('./agent-orchestrator/pipeline-state');
@@ -121,6 +128,11 @@ function writeJson(file, data) {
   writeText(file, `${JSON.stringify(data, null, 2)}\n`);
 }
 
+function writeCanonicalJson(file, data, options = undefined) {
+  ensureDir(path.dirname(file));
+  fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, options);
+}
+
 function readJson(file) {
   return JSON.parse(readText(file));
 }
@@ -224,6 +236,16 @@ function resolveWorkdir(options) {
 
 function resolveRunsDir(workdir, options) {
   return path.resolve(workdir, optionValue(options, 'runs-dir') || DEFAULT_RUNS_DIR);
+}
+
+function goalLeaseStoreOptions(options, providerRoot) {
+  const controlRoot = optionValue(options, 'control-root');
+  return {
+    ...(controlRoot === undefined || controlRoot === true
+      ? {}
+      : { controlRoot: String(controlRoot) }),
+    ...(providerRoot ? { providerRoot: path.resolve(providerRoot) } : {}),
+  };
 }
 
 function latestRunDir(runsDir) {
@@ -549,27 +571,54 @@ function runProcess(label, launchOrCommand, args, settings) {
     stdinBytes: settings.stdin ? Buffer.byteLength(settings.stdin, 'utf8') : 0,
     phase: settings.phase || null,
     providerKey: settings.providerKey || null,
+    runtime: settings.runtime || null,
+    adapter: settings.adapter || null,
     profileId: settings.providerKey ? providerProfiles.profileId(settings.options || {}, settings.providerKey) : null,
-    capabilitySnapshot: settings.providerKey ? providerProfiles.capabilitySnapshot(settings.options || {}, settings.providerKey) : null,
+    capabilitySnapshot: settings.capabilitySnapshot
+      || (settings.providerKey
+        ? providerProfiles.capabilitySnapshot(settings.options || {}, settings.providerKey)
+        : null),
+    taskEnvelopeHash: settings.taskEnvelopeHash || null,
+    routeDecisionHash: settings.routeDecisionHash || null,
     promptHash: settings.stdin ? ('sha256:' + crypto.createHash('sha256').update(settings.stdin).digest('hex')) : null,
-    executionFingerprint: providerProfiles.hash({ phase: settings.phase || null, providerKey: settings.providerKey || null, command: launch.requested || launch.command, args: finalArgs, prompt: settings.stdin || '', schemaPath: settings.schemaPath || null }),
+    executionFingerprint: providerProfiles.hash({ phase: settings.phase || null, providerKey: settings.providerKey || null, adapter: settings.adapter || null, command: launch.requested || launch.command, args: finalArgs, prompt: settings.stdin || '', schemaPath: settings.schemaPath || null }),
     schemaPath: settings.schemaPath || null,
     usage: { inputTokens: null, cachedInputTokens: null, outputTokens: null, cost: null },
     timeoutMs,
     envOverrides: settings.env || null,
   };
 
-  function failWithRecord(message) {
+  function failWithRecord(message, kind) {
+    let failure = null;
+    if (typeof settings.onFailure === 'function') {
+      try {
+        failure = settings.onFailure({
+          kind,
+          message,
+          record,
+          result,
+        }) || null;
+      } catch (persistenceError) {
+        record.failurePersistenceError = persistenceError.message;
+        message = `${message}; failed to persist provider failure: ${persistenceError.message}`;
+      }
+    }
     const error = new Error(message);
     error.providerRecord = record;
+    if (failure && failure.providerRecovery) {
+      error.providerRecovery = failure.providerRecovery;
+    }
     throw error;
   }
 
   if (result.error && result.error.code === 'ETIMEDOUT') {
-    failWithRecord(`${label} timed out after ${timeoutMs}ms; see ${settings.stdoutFile || 'stdout'} and ${settings.stderrFile || 'stderr'}`);
+    failWithRecord(
+      `${label} timed out after ${timeoutMs}ms; see ${settings.stdoutFile || 'stdout'} and ${settings.stderrFile || 'stderr'}`,
+      'timeout'
+    );
   }
   if (result.error) {
-    failWithRecord(`${label} failed to start: ${result.error.message}`);
+    failWithRecord(`${label} failed to start: ${result.error.message}`, 'launch-error');
   }
   if (!settings.allowFailure && result.status !== 0) {
     const envelopeError = extractProviderEnvelopeError(result.stdout || '');
@@ -579,7 +628,10 @@ function runProcess(label, launchOrCommand, args, settings) {
       ? `stdout: ${stdoutPath}`
       : `stderr: ${stderrPath} / stdout: ${stdoutPath}`;
     const reason = envelopeError ? ` — ${envelopeError}` : '';
-    failWithRecord(`${label} exited with ${result.status}${reason}; see ${where}`);
+    failWithRecord(
+      `${label} exited with ${result.status}${reason}; see ${where}`,
+      'nonzero-exit'
+    );
   }
   return { result, record };
 }
@@ -996,7 +1048,7 @@ function statusFromReview(review, completionGate = { ok: true }) {
 
 function buildSpecPrompt(requirement, options) {
   return [
-    'You are the analysis and design provider in Tech Persistence agent-loop v6.',
+    'You are the analysis and design provider in Tech Persistence agent-loop v7.',
     'Do not implement code. Produce a frozen contract for a separate implementation provider.',
     'Return JSON only. Match the schema exactly enough for automated parsing.',
     'Use Chinese when the requirement is Chinese. Keep task ids stable and ASCII.',
@@ -1027,7 +1079,7 @@ function buildImplementationPrompt(state, runDir) {
   const reviewNotes = safeRead(path.join(runDir, 'review.json'));
   const priorRulings = readPriorRulingsBlock(runDir);
   return [
-    'You are the implementation provider in Tech Persistence agent-loop v6.',
+    'You are the implementation provider in Tech Persistence agent-loop v7.',
     'Implement only the frozen spec. Do not reinterpret or expand requirements.',
     'If the spec is ambiguous: adopt the smallest safe assumption, KEEP IMPLEMENTING (do not block),',
     'and record the ambiguity in handoff.clarifications[] as { assumption, question }.',
@@ -1086,7 +1138,7 @@ function buildReviewPrompt(state, runDir) {
     ].join('\n')
     : '';
   return [
-    'You are the review provider in Tech Persistence agent-loop v6.',
+    'You are the review provider in Tech Persistence agent-loop v7.',
     'You are also the spec-writer: rule on any open clarifications raised by the implementer.',
     'Review the implementation strictly against the frozen spec and technical design.',
     'Do not add new product requirements. Return JSON only and match the review schema.',
@@ -1207,43 +1259,792 @@ function codexSandboxMode(options) {
   return null;
 }
 
+function nativeAdapterPolicy(options) {
+  return nativeExecutionControl.adapterPolicy(options);
+}
+
+function claudePluginDirs(options, mode) {
+  const explicit = optionValues(options, 'claude-plugin-dir');
+  if (explicit.length > 0) return explicit.map((value) => path.resolve(value));
+  return mode === 'bare'
+    ? [path.join(toolRoot(), 'plugins', 'tech-persistence')]
+    : [];
+}
+
+function buildClaudeProviderInvocation(
+  options,
+  providerKey,
+  runDir,
+  prompt,
+  schemaName,
+  workdir = resolveWorkdir(options),
+  resumeRefs = {}
+) {
+  const policy = nativeAdapterPolicy(options);
+  const selectedSchemaPath = boolOption(options, 'skip-cli-schema')
+    ? null
+    : schemaPath(schemaName);
+  return runtimeAdapters.buildClaudeInvocation({
+    launch: providerLaunch(options, providerKey),
+    mode: policy.claude,
+    cwd: workdir,
+    prompt,
+    schemaJson: selectedSchemaPath ? schemaJson(schemaName) : null,
+    schemaPath: selectedSchemaPath,
+    pluginDir: claudePluginDirs(options, policy.claude),
+    settings: optionValue(options, 'claude-settings') || null,
+    sessionId: resumeRefs.sessionId || null,
+    env: {
+      ...claudeProviderEnv(),
+      TP_AGENT_RUN_DIR: path.resolve(runDir),
+      TP_AGENT_RUNS_DIR: path.dirname(path.resolve(runDir)),
+    },
+  });
+}
+
+function buildCodexProviderInvocation(
+  options,
+  runDir,
+  prompt,
+  lastMessageFile,
+  workdir = resolveWorkdir(options),
+  resumeRefs = {}
+) {
+  const policy = nativeAdapterPolicy(options);
+  if (policy.codex === 'app-server') {
+    throw new Error(
+      'Codex App Server is exposed as an experimental prepare-only adapter; '
+      + 'agent-loop provider execution remains codex exec until the JSON-RPC canary is promoted.'
+    );
+  }
+  const selectedSchemaPath = boolOption(options, 'skip-cli-schema')
+    ? null
+    : schemaPath('agent-handoff.schema.json');
+  return runtimeAdapters.buildCodexInvocation({
+    launch: providerLaunch(options, 'implementation'),
+    mode: policy.codex,
+    cwd: workdir,
+    prompt,
+    lastMessageFile,
+    sandbox: codexSandboxMode(options),
+    skipGitRepoCheck: !isGitRepository(workdir)
+      || boolOption(options, 'skip-git-repo-check'),
+    schemaPath: selectedSchemaPath,
+    resumeThreadId: resumeRefs.threadId || null,
+    allowExperimental: boolOption(options, 'allow-experimental-app-server'),
+    env: {
+      TP_AGENT_RUN_DIR: path.resolve(runDir),
+      TP_AGENT_RUNS_DIR: path.dirname(path.resolve(runDir)),
+    },
+  });
+}
+
+function providerResumeRefs(state, runtime, providerKey, stage) {
+  return providerLifecycle.providerResumeRefs(state && state.providerRecovery, {
+    runtime,
+    providerKey,
+    stage,
+  });
+}
+
+function safeStageName(value) {
+  return String(value || 'provider')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'provider';
+}
+
+function appendProviderRunOnce(state, record) {
+  if (!Array.isArray(state.providerRuns)) state.providerRuns = [];
+  const duplicate = state.providerRuns.some((entry) => (
+    entry.executionFingerprint === record.executionFingerprint
+    && entry.startedAt === record.startedAt
+  ));
+  if (!duplicate) state.providerRuns.push(record);
+}
+
+function providerStep(kind, run) {
+  try {
+    return run();
+  } catch (error) {
+    if (error && !error.providerFailureKind) error.providerFailureKind = kind;
+    throw error;
+  }
+}
+
+function providerPostAcceptanceStep(kind, run) {
+  try {
+    return run();
+  } catch (error) {
+    if (error) {
+      error.providerFailureKind = error.providerFailureKind || kind;
+      error.providerAccepted = true;
+    }
+    throw error;
+  }
+}
+
+function assertProviderStructuredOutput(value, schemaName, label, options = {}) {
+  return providerStep('schema-validation', () => structuredOutput.assertStructuredOutput(value, {
+    schemaRoot: path.join(toolRoot(), 'schemas', 'agent-loop'),
+    schemaName,
+    label,
+    collectionProperty: options.collectionProperty,
+  }));
+}
+
+function failProviderPostProcess(attempt, record, error, context = {}) {
+  if (!error || error.providerFailurePersisted === true) return error;
+  const runtimeResult = context.runtimeOutput
+    || error.runtimeResult
+    || null;
+  const failure = {
+    kind: error.providerFailureKind || context.kind || 'post-process',
+    message: error.message || String(error),
+    record,
+    result: context.result || null,
+    runtimeOutput: runtimeResult,
+    runtimeRefs: runtimeAdapters.extractRecoveryRuntimeRefs(
+      attempt.profile.runtime,
+      {
+        runtimeOutput: runtimeResult,
+        runtimeResult,
+        result: context.result,
+        stdout: context.stdout,
+        stderr: context.stderr,
+        lastMessage: context.lastMessage,
+      }
+    ),
+    providerAccepted: error.providerAccepted === true,
+  };
+  const persisted = attempt.onFailure(failure);
+  error.providerFailurePersisted = true;
+  error.providerRecord = error.providerRecord || record;
+  if (persisted && persisted.providerRecovery) {
+    error.providerRecovery = persisted.providerRecovery;
+  }
+  return error;
+}
+
+function runProviderPostProcess(attempt, record, context, run) {
+  try {
+    return run();
+  } catch (error) {
+    throw failProviderPostProcess(attempt, record, error, context);
+  }
+}
+
+function persistProviderFailure(state, runDir, attempt, failure) {
+  const postAcceptanceFailure = failure.providerAccepted === true;
+  const canonicalResultFile = path.join(attempt.contractDir, `${attempt.prefix}.result.json`);
+  const canonicalAcceptanceFile = path.join(
+    attempt.contractDir,
+    `${attempt.prefix}.acceptance.json`
+  );
+  const canonicalArtifactsExist = fs.existsSync(canonicalResultFile)
+    || fs.existsSync(canonicalAcceptanceFile);
+  const canonicalResult = fs.existsSync(canonicalResultFile)
+    ? readJson(canonicalResultFile)
+    : null;
+  const canonicalAcceptance = fs.existsSync(canonicalAcceptanceFile)
+    ? readJson(canonicalAcceptanceFile)
+    : null;
+  const canonicalAccepted = Boolean(canonicalAcceptance && canonicalAcceptance.accepted === true);
+  const preserveCanonical = postAcceptanceFailure || canonicalArtifactsExist;
+  const failureArtifactStem = postAcceptanceFailure
+    ? `${attempt.prefix}.post-acceptance-failure`
+    : (preserveCanonical ? `${attempt.prefix}.acceptance-failure` : attempt.prefix);
+  const afterSnapshot = captureWorktreeSnapshot(state.workdir, runDir);
+  const effects = providerLifecycle.createEffectSnapshot(
+    attempt.effectBaseline,
+    afterSnapshot,
+    { inheritedRecovery: state.providerRecovery }
+  );
+  const effectsFile = path.join(
+    attempt.contractDir,
+    `${failureArtifactStem}.effects.json`
+  );
+  writeCanonicalJson(effectsFile, effects);
+
+  const runtimeRefs = runtimeAdapters.extractRecoveryRuntimeRefs(
+    attempt.profile.runtime,
+    {
+      runtimeOutput: failure.runtimeOutput,
+      runtimeResult: failure.runtimeOutput,
+      runtimeRefs: failure.runtimeRefs,
+      result: failure.result,
+      stdout: failure.result && failure.result.stdout,
+      stderr: failure.result && failure.result.stderr,
+    }
+  );
+  const outcome = nativeExecutionControl.createAttemptResult({
+    stageControl: attempt,
+    ref: postAcceptanceFailure
+      ? `result:${state.runId}:${attempt.prefix}:post-acceptance-failure`
+      : `result:${state.runId}:${attempt.prefix}`,
+    status: 'failed',
+    effects: {
+      state: effects.state,
+      refs: effects.refs,
+    },
+    runtimeRefs,
+    evidence: {
+      failureKind: failure.kind,
+      effectsSnapshotHash: effects.snapshotHash,
+      stdoutHash: providerProfiles.hash(safeRead(failure.record.stdoutFile)),
+      stderrHash: providerProfiles.hash(safeRead(failure.record.stderrFile)),
+    },
+    payload: {
+      message: failure.message,
+      exitStatus: failure.record.status === null ? null : failure.record.status,
+      signal: failure.record.signal || null,
+    },
+  });
+  if (!preserveCanonical) {
+    writeCanonicalJson(
+      path.join(attempt.contractDir, `${attempt.prefix}.result.json`),
+      outcome.result
+    );
+  }
+  writeCanonicalJson(
+    path.join(attempt.contractDir, `${failureArtifactStem}.result.json`),
+    outcome.result
+  );
+  writeCanonicalJson(
+    path.join(attempt.contractDir, `${failureArtifactStem}.acceptance.json`),
+    outcome.acceptance
+  );
+
+  if (preserveCanonical) {
+    const canonicalHash = canonicalResult && canonicalResult.hash || null;
+    if (canonicalAccepted || postAcceptanceFailure) {
+      failure.record.acceptedResultEnvelopeHash = canonicalHash
+        || failure.record.resultEnvelopeHash
+        || null;
+    } else {
+      failure.record.rejectedResultEnvelopeHash = canonicalHash;
+    }
+    failure.record.failureResultEnvelopeHash = outcome.result.hash;
+    failure.record.postAcceptanceFailure = postAcceptanceFailure || canonicalAccepted;
+    if (canonicalAcceptance) failure.record.acceptance = canonicalAcceptance;
+  } else {
+    failure.record.resultEnvelopeHash = outcome.result.hash;
+    failure.record.acceptance = outcome.acceptance;
+  }
+  failure.record.failure = {
+    kind: failure.kind,
+    effectsState: effects.state,
+    effectsSnapshotHash: effects.snapshotHash,
+  };
+  failure.record.runtimeRefs = runtimeRefs;
+  appendProviderRunOnce(state, failure.record);
+
+  const providerRecovery = providerLifecycle.providerRecoveryRecord({
+    runId: state.runId,
+    attempt,
+    providerKey: attempt.lifecycle.providerKey,
+    stage: attempt.lifecycle.stage,
+    effects,
+    runtimeRefs,
+    failureKind: failure.kind,
+    forceReconcile: failure.providerAccepted === true || canonicalAccepted,
+  });
+  if (providerRecovery) state.providerRecovery = providerRecovery;
+  state.lastProviderFailure = {
+    providerRef: attempt.providerRef,
+    stage: attempt.lifecycle.stage,
+    failedAt: nowIso(),
+    resultHash: outcome.result.hash,
+    effectsState: effects.state,
+  };
+  state.files.contracts = 'contracts';
+  saveState(path.join(runDir, 'state.json'), state);
+  return { outcome, effects, providerRecovery };
+}
+
+function prepareProviderAttempt(state, runDir, options, input) {
+  const stageName = safeStageName(input.stage);
+  const stamp = input.stamp || logStamp();
+  const capabilityEvidence = input.capabilityEvidence
+    ? nativeExecutionControl.observedAdapterEvidence(
+      input.providerKey,
+      input.capabilityEvidence
+    )
+    : null;
+  const effectBaseline = captureWorktreeSnapshot(state.workdir, runDir);
+  const leaseStoreOptions = goalLeaseStoreOptions(options, state.workdir);
+  const currentLease = goalLease.readGoalLease(runDir, leaseStoreOptions);
+  const goalDispatchContext = {
+    runId: state.runId,
+    providerRuntime: null,
+    orchestrationOwner: state.executionPolicy
+      ? state.executionPolicy.orchestrationOwner
+      : state.orchestrationOwner,
+    objective: safeRead(path.join(runDir, 'requirement.md')).trim(),
+  };
+  const stageControl = nativeExecutionControl.buildStageControl({
+    options,
+    orchestrationOwner: state.orchestrationOwner
+      || nativeExecutionControl.orchestrationOwner(options),
+    runId: state.runId,
+    stage: input.stage,
+    taskRef: `task:${state.runId}:${stageName}:${stamp}`,
+    providerKey: input.providerKey,
+    intent: input.intent,
+    payload: {
+      promptHash: providerProfiles.hash(input.prompt || ''),
+      schemaPath: input.schemaPath || null,
+      contractHash: input.contractHash || null,
+      effectBaselineHash: providerProfiles.hash(effectBaseline),
+      goalLeaseRevision: currentLease && currentLease.revision || null,
+    },
+    runtimeRefs: input.runtimeRefs || {},
+    capabilityEvidence,
+  });
+  if (stageControl.routeMode === 'enforce'
+      && stageControl.route.status !== 'selected') {
+    throw new Error(
+      `native route blocked for ${input.stage}: ${JSON.stringify(stageControl.route.rejected)}`
+    );
+  }
+  goalLease.validateGoalLeaseForDispatch(currentLease, {
+    ...goalDispatchContext,
+    providerRuntime: stageControl.profile.runtime,
+  });
+  const activeRecovery = nativeExecutionControl.validateProviderRecovery(
+    state.providerRecovery,
+    stageControl,
+    {
+      providerKey: input.providerKey,
+      stage: input.stage,
+    }
+  );
+  if (activeRecovery && activeRecovery.reconcileRequired === true) {
+    throw new Error(
+      `provider recovery requires reconciliation before redispatch: no native ${activeRecovery.runtime} resume ref was captured`
+    );
+  }
+  const contractDir = path.join(runDir, 'contracts');
+  const prefix = `${stageName}.${stamp}`;
+  writeJson(path.join(contractDir, `${prefix}.task.json`), stageControl.task);
+  writeJson(path.join(contractDir, `${prefix}.route.json`), stageControl.route);
+  writeJson(
+    path.join(contractDir, `${prefix}.capabilities.json`),
+    stageControl.capabilitySnapshot
+  );
+  state.files.contracts = 'contracts';
+  const attempt = {
+    ...stageControl,
+    contractDir,
+    prefix,
+    effectBaseline,
+    lifecycle: {
+      providerKey: input.providerKey,
+      stage: input.stage,
+    },
+    goalLeaseControl: {
+      expectedRevision: currentLease && Number.isInteger(currentLease.revision)
+        ? currentLease.revision
+        : 0,
+      storeOptions: leaseStoreOptions,
+      dispatchContext: {
+        ...goalDispatchContext,
+        providerRuntime: stageControl.profile.runtime,
+      },
+    },
+  };
+  attempt.onFailure = (failure) => persistProviderFailure(state, runDir, attempt, failure);
+  return attempt;
+}
+
+function acceptProviderAttempt(state, attempt, input) {
+  const leaseControl = attempt.goalLeaseControl || {
+    expectedRevision: 0,
+    storeOptions: {},
+    dispatchContext: null,
+  };
+  const outcome = nativeExecutionControl.createAttemptResult({
+    stageControl: attempt,
+    ref: `result:${state.runId}:${attempt.prefix}`,
+    status: input.status,
+    effects: input.effects,
+    runtimeRefs: input.runtimeRefs || {},
+    nativeResult: input.runtimeResult,
+    evidence: input.evidence || {},
+    payload: input.payload || {},
+  });
+  const taskHashSuffix = attempt.task.hash.slice('sha256:'.length, 'sha256:'.length + 16);
+  const acceptedFile = path.join(
+    attempt.contractDir,
+    `${safeStageName(attempt.task.ref)}.${taskHashSuffix}.accepted.json`
+  );
+  goalLease.withValidatedGoalLease(
+    state.runDir,
+    {
+      runId: state.runId,
+      expectedRevision: leaseControl.expectedRevision,
+      dispatchContext: leaseControl.dispatchContext,
+    },
+    () => {
+      writeCanonicalJson(
+        path.join(attempt.contractDir, `${attempt.prefix}.result.json`),
+        outcome.result
+      );
+      writeCanonicalJson(
+        path.join(attempt.contractDir, `${attempt.prefix}.acceptance.json`),
+        outcome.acceptance
+      );
+      if (!outcome.acceptance.accepted) {
+        throw new Error(
+          `provider result rejected for ${attempt.prefix}: ${outcome.acceptance.errors.join('; ')}`
+        );
+      }
+      try {
+        writeCanonicalJson(acceptedFile, outcome.result, { flag: 'wx' });
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        const existing = readJson(acceptedFile);
+        if (existing.hash !== outcome.result.hash) {
+          throw new Error(
+            `conflicting accepted result for task ${attempt.task.ref}; resume/reconcile is required`
+          );
+        }
+        outcome.duplicate = true;
+      }
+    },
+    leaseControl.storeOptions
+  );
+  if (state.providerRecovery && state.providerRecovery.required === true) {
+    nativeExecutionControl.validateProviderRecovery(
+      state.providerRecovery,
+      attempt,
+      attempt.lifecycle
+    );
+    delete state.providerRecovery;
+  }
+  delete state.lastProviderFailure;
+  return outcome;
+}
+
+function capabilityEvidenceByProvider(preflight) {
+  const checks = new Map((preflight.checks || []).map((check) => [check.name, check]));
+  return Object.fromEntries(['spec', 'implementation', 'review']
+    .map((key) => [key, checks.get(`${key}Provider`)] )
+    .filter(([, check]) => check && check.detail
+      && typeof check.detail.capabilityEvidence === 'object')
+    .map(([key, check]) => [key, check.detail.capabilityEvidence]));
+}
+
+function buildNativeExecutionPlan(options, runId, requirement, preflight) {
+  return nativeExecutionControl.buildExecutionPlan({
+    options,
+    runId,
+    requirementHash: providerProfiles.hash(requirement),
+    capabilityEvidenceByProvider: capabilityEvidenceByProvider(preflight),
+  });
+}
+
+function currentGitSha(workdir) {
+  if (!isGitRepository(workdir)) return null;
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], {
+    cwd: workdir,
+    encoding: 'utf8',
+    maxBuffer: MAX_BUFFER,
+    shell: false,
+  });
+  return result.status === 0 ? String(result.stdout || '').trim() || null : null;
+}
+
+function reviewProviderRef(options) {
+  const policy = nativeAdapterPolicy(options);
+  return `claude:review:claude-${policy.claude}`;
+}
+
+function providerArtifactDefinitions(settings = {}) {
+  const paths = {
+    handoff: 'handoff.json',
+    diff: 'diff.patch',
+    validation: 'validation.json',
+    changedFiles: 'changed-files.json',
+    ...(settings.artifactPaths || {}),
+  };
+  return {
+    handoff: {
+      path: paths.handoff,
+      format: 'json',
+      evidenceKey: 'handoffHash',
+    },
+    diff: {
+      path: paths.diff,
+      format: 'text',
+      evidenceKey: 'diffHash',
+    },
+    validation: {
+      path: paths.validation,
+      format: 'json',
+      evidenceKey: 'validationHash',
+    },
+    changedFiles: {
+      path: paths.changedFiles,
+      format: 'json',
+      evidenceKey: 'changedFilesHash',
+    },
+    changedFilesGate: paths.changedFilesGate
+      ? {
+        path: paths.changedFilesGate,
+        format: 'json',
+        evidenceKey: 'changedFilesGateHash',
+      }
+      : { enabled: false },
+  };
+}
+
+function writeProviderHandoffBundle(
+  state,
+  runDir,
+  options,
+  attempt,
+  outcome,
+  settings = {}
+) {
+  const handoff = executionEnvelopes.createProviderHandoff({
+    ref: `handoff:${state.runId}:${attempt.prefix}`,
+    task: attempt.task,
+    route: attempt.route,
+    result: outcome.result,
+    from: attempt.providerRef,
+    to: reviewProviderRef(options),
+    readOnly: true,
+    runtimeRefs: outcome.result.runtimeRefs,
+  });
+  const evidence = outcome.result.evidence || {};
+  const artifactManifest = providerLifecycle.createArtifactManifest(
+    runDir,
+    providerArtifactDefinitions(settings),
+    evidence
+  );
+  const bundle = {
+    schemaVersion: 'provider-handoff-bundle-v1',
+    task: attempt.task,
+    route: attempt.route,
+    result: outcome.result,
+    handoff,
+    artifactManifest,
+    worktree: {
+      workdirHash: providerProfiles.hash(path.resolve(state.workdir)),
+      baseSha: evidence.baseSha || null,
+      headSha: evidence.headSha || null,
+      diffHash: evidence.diffHash,
+      changedFilesHash: evidence.changedFilesHash,
+    },
+  };
+  const relativeFile = settings.relativeFile || 'provider-handoff.json';
+  writeJson(path.join(runDir, relativeFile), bundle);
+  if (settings.recordStateFile !== false) {
+    state.files.providerHandoff = relativeFile;
+  }
+  return bundle;
+}
+
+function validateProviderHandoffBundle(state, runDir, options, settings = {}) {
+  const relativeFile = settings.relativeFile || state.files.providerHandoff;
+  const handoffPath = relativeFile
+    ? path.join(runDir, relativeFile)
+    : null;
+  if (!handoffPath || !fs.existsSync(handoffPath)) {
+    const executionPlanPath = state.files.executionPlan
+      ? path.join(runDir, state.files.executionPlan)
+      : null;
+    const plan = executionPlanPath && fs.existsSync(executionPlanPath)
+      ? readJson(executionPlanPath)
+      : null;
+    if (plan && plan.version === 'execution-plan-v2') {
+      throw new Error('provider handoff is required before v2 review');
+    }
+    return null;
+  }
+
+  const bundle = readJson(handoffPath);
+  const acceptance = executionEnvelopes.validateResultForAcceptance(
+    bundle.task,
+    bundle.result,
+    bundle.route,
+    {
+      routeMode: nativeExecutionControl.capabilityRouterMode(options),
+      requireNativeEvidence: true,
+    }
+  );
+  if (!acceptance.accepted) {
+    throw new Error(`provider handoff result is invalid: ${acceptance.errors.join('; ')}`);
+  }
+  const recreated = executionEnvelopes.createProviderHandoff({
+    ref: bundle.handoff.ref,
+    task: bundle.task,
+    route: bundle.route,
+    result: bundle.result,
+    from: bundle.handoff.from,
+    to: bundle.handoff.to,
+    readOnly: bundle.handoff.readOnly,
+    runtimeRefs: bundle.handoff.runtimeRefs,
+  });
+  if (bundle.handoff.hash !== recreated.hash
+      || bundle.handoff.idempotencyKey !== recreated.idempotencyKey) {
+    throw new Error('provider handoff hash or idempotency key is invalid');
+  }
+  if (bundle.handoff.readOnly !== true) {
+    throw new Error('review provider handoff must be read-only');
+  }
+  if (bundle.handoff.to !== reviewProviderRef(options)) {
+    throw new Error('provider handoff review target does not match active adapter policy');
+  }
+  const expectedContractHash = settings.expectedContractHash
+    || providerProfiles.hash(readText(path.join(runDir, 'spec.json')));
+  if (bundle.task.payload.contractHash !== expectedContractHash) {
+    throw new Error('provider handoff frozen contract hash does not match');
+  }
+  const evidence = bundle.result.evidence || {};
+  for (const key of [
+    'diffHash',
+    'validationHash',
+    'changedFilesHash',
+    'baseSha',
+    'headSha',
+  ]) {
+    if (!(key in evidence)) throw new Error(`provider handoff missing ${key} evidence`);
+  }
+  providerLifecycle.verifyArtifactManifest(
+    runDir,
+    bundle.artifactManifest,
+    evidence
+  );
+  const worktree = bundle.worktree || {};
+  if (worktree.workdirHash !== providerProfiles.hash(path.resolve(state.workdir))) {
+    throw new Error('provider handoff worktree identity does not match active run');
+  }
+  for (const key of ['baseSha', 'headSha', 'diffHash', 'changedFilesHash']) {
+    if (worktree[key] !== evidence[key]) {
+      throw new Error(`provider handoff worktree ${key} does not match result evidence`);
+    }
+  }
+  const currentSnapshot = captureWorktreeSnapshot(state.workdir, runDir);
+  if (currentSnapshot.headSha !== evidence.headSha) {
+    throw new Error('provider handoff headSha is stale for the current worktree');
+  }
+  if (currentSnapshot.diffHash !== evidence.diffHash) {
+    throw new Error('provider handoff diffHash is stale for the current worktree');
+  }
+  if (currentSnapshot.changedFilesHash !== evidence.changedFilesHash) {
+    throw new Error('provider handoff changedFilesHash is stale for the current worktree');
+  }
+  if (isGitRepository(state.workdir)) {
+    if (!gitObjectExists(state.workdir, evidence.baseSha)) {
+      throw new Error('provider handoff baseSha is not a reachable git commit');
+    }
+    if (!gitObjectExists(state.workdir, evidence.headSha)) {
+      throw new Error('provider handoff headSha is not a reachable git commit');
+    }
+  }
+  return bundle;
+}
+
 function runSpecProvider(state, statePath, runDir, options) {
   const prompt = readText(path.join(runDir, 'prompts', 'spec.md'));
   const providerLogStamp = logStamp();
   const stdoutFile = stampedLogPath(runDir, 'spec', 'stdout.log', providerLogStamp);
   const stderrFile = stampedLogPath(runDir, 'spec', 'stderr.log', providerLogStamp);
-  const args = ['-p', '--input-format', 'text', '--output-format', 'json'];
-  if (!boolOption(options, 'skip-cli-schema')) {
-    args.push('--json-schema', schemaJson('requirement-spec.schema.json'));
-  }
+  const invocation = buildClaudeProviderInvocation(
+    options,
+    'spec',
+    runDir,
+    prompt,
+    'requirement-spec.schema.json',
+    state.workdir,
+    providerResumeRefs(state, 'claude', 'spec', 'spec')
+  );
+  const attempt = prepareProviderAttempt(state, runDir, options, {
+    stage: 'spec',
+    providerKey: 'spec',
+    intent: 'read-only',
+    prompt,
+    schemaPath: invocation.schemaPath,
+    stamp: providerLogStamp,
+  });
 
   const { record, result } = runProcess(
     'spec provider',
-    providerLaunch(options, 'spec'),
-    args,
+    invocation.launch,
+    invocation.args,
     {
-      cwd: state.workdir,
+      cwd: invocation.cwd,
       stdoutFile,
       stderrFile,
-      stdin: prompt,
-      env: claudeProviderEnv(),
-      timeoutMs: providerTimeoutMs(options), phase: 'spec', providerKey: 'spec', schemaPath: schemaPath('requirement-spec.schema.json'),
+      stdin: invocation.stdin,
+      env: invocation.env,
+      timeoutMs: providerTimeoutMs(options),
+      phase: 'spec',
+      providerKey: 'spec',
+      schemaPath: invocation.schemaPath,
+      options,
+      runtime: invocation.runtime,
+      adapter: invocation.adapter,
+      capabilitySnapshot: attempt.capabilitySnapshot,
+      taskEnvelopeHash: attempt.task.hash,
+      routeDecisionHash: attempt.route.decisionHash,
+      onFailure: attempt.onFailure,
     }
   );
   state.providerRuns.push(record);
 
-  const rawSpec = extractJsonValue(result.stdout || '');
-  const spec = normalizeSpec(rawSpec);
-  const errors = validateSpec(spec);
-  if (errors.length > 0) throw new Error(`Invalid spec output: ${errors.join('; ')}`);
+  return runProviderPostProcess(attempt, record, { result }, () => {
+    const runtimeOutput = providerStep('output-normalization', () => (
+      runtimeAdapters.normalizeClaudeOutput({
+        stdout: result.stdout || '',
+        adapter: invocation.adapter,
+      })
+    ));
+    const rawSpec = providerStep('structured-output-parse', () => (
+      runtimeOutput.payload === undefined
+        ? extractJsonValue(result.stdout || '')
+        : runtimeOutput.payload
+    ));
+    assertProviderStructuredOutput(
+      rawSpec,
+      'requirement-spec.schema.json',
+      'classic requirement spec'
+    );
+    const spec = providerStep('output-normalization', () => normalizeSpec(rawSpec));
+    const errors = validateSpec(spec);
+    if (errors.length > 0) {
+      const error = new Error(`Invalid spec output: ${errors.join('; ')}`);
+      error.providerFailureKind = 'schema-validation';
+      throw error;
+    }
 
-  writeSpecArtifacts(runDir, spec, rawSpec);
-  state.status = 'spec-ready';
-  state.files.spec = 'spec.json';
-  state.files.requirementSpec = 'requirement-spec.md';
-  state.files.technicalDesign = 'technical-design.md';
-  state.files.taskBreakdown = 'task-breakdown.json';
-  saveState(statePath, state);
+    providerStep('artifact', () => writeSpecArtifacts(runDir, spec, rawSpec));
+    const accepted = providerStep('acceptance', () => acceptProviderAttempt(state, attempt, {
+      status: runtimeOutput.status,
+      effects: { state: 'none', refs: [] },
+      runtimeRefs: {
+        claudeSession: runtimeOutput.runtimeRefs.sessionId,
+      },
+      runtimeResult: runtimeOutput,
+      evidence: {
+        stdoutHash: providerProfiles.hash(result.stdout || ''),
+        schemaPath: invocation.schemaPath,
+      },
+      payload: spec,
+    }));
+    record.resultEnvelopeHash = accepted.result.hash;
+    record.acceptance = accepted.acceptance;
+    record.runtimeRefs = accepted.result.runtimeRefs;
+    record.usage = runtimeOutput.usage || record.usage;
+
+    state.status = 'spec-ready';
+    state.files.spec = 'spec.json';
+    state.files.requirementSpec = 'requirement-spec.md';
+    state.files.technicalDesign = 'technical-design.md';
+    state.files.taskBreakdown = 'task-breakdown.json';
+    providerPostAcceptanceStep('state-transition', () => saveState(statePath, state));
+  });
 }
 
 function freezeRun(options, positionals) {
@@ -1293,32 +2094,69 @@ function gitRoot(workdir) {
 
 function listChangedFiles(workdir, runDir) {
   if (!isGitRepository(workdir)) return [];
-  const status = spawnSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+  const status = spawnSync('git', [
+    '-c',
+    'core.quotePath=false',
+    'status',
+    '--porcelain=v1',
+    '-z',
+    '--untracked-files=all',
+  ], {
     cwd: workdir,
     encoding: 'utf8',
     maxBuffer: MAX_BUFFER,
     shell: false,
   });
-  if (status.status !== 0) return [];
+  if (status.status !== 0) {
+    throw new Error(
+      `failed to enumerate changed files: ${status.error && status.error.message || status.stderr || status.stdout || 'git status failed'}`
+    );
+  }
 
-  return (status.stdout || '')
-    .split(/\r?\n/)
+  return parseGitStatusPorcelainZ(status.stdout || '')
     .filter(Boolean)
-    .map(parseGitStatusLine)
-    .filter(Boolean)
-    .filter((entry) => !isManagedArtifact(entry.path, workdir, runDir));
+    .filter((entry) => {
+      const destinationManaged = isManagedArtifact(entry.path, workdir, runDir);
+      const sourceManaged = entry.originalPath
+        ? isManagedArtifact(entry.originalPath, workdir, runDir)
+        : false;
+      // A rename/copy that crosses the managed boundary still changes a
+      // provider-owned path. Drop the record only when every represented path
+      // is managed; otherwise the source deletion/addition must stay hash-bound.
+      return !destinationManaged || Boolean(entry.originalPath && !sourceManaged);
+    });
 }
 
-function parseGitStatusLine(line) {
-  const status = line.slice(0, 2);
-  let filePath = line.slice(3).trim();
-  if (filePath.includes(' -> ')) filePath = filePath.split(' -> ').pop();
-  filePath = filePath.replace(/^"|"$/g, '');
-  return { status, path: normalizeGitPath(filePath) };
+function parseGitStatusPorcelainZ(output) {
+  const fields = String(output || '').split('\0');
+  const entries = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index];
+    if (!field) continue;
+    if (field.length < 4 || field[2] !== ' ') {
+      throw new Error('failed to parse git status porcelain -z output');
+    }
+    const status = field.slice(0, 2);
+    const filePath = field.slice(3);
+    const entry = { status, path: normalizeGitPath(filePath) };
+    if (/[RC]/.test(status)) {
+      // In porcelain v1 -z mode the destination is in the current record and
+      // the original path is the following NUL field.
+      index += 1;
+      if (index >= fields.length || !fields[index]) {
+        throw new Error('git status rename/copy record is missing its original path');
+      }
+      entry.originalPath = normalizeGitPath(fields[index]);
+    }
+    entries.push(entry);
+  }
+  return entries;
 }
 
 function normalizeGitPath(value) {
-  return String(value || '').replace(/\\/g, '/').replace(/^\.\//, '');
+  const raw = String(value || '');
+  const platformPath = process.platform === 'win32' ? raw.replace(/\\/g, '/') : raw;
+  return platformPath.replace(/^\.\//, '');
 }
 
 function isManagedArtifact(filePath, workdir, runDir) {
@@ -1345,6 +2183,7 @@ function ensureCleanWorktree(workdir, options, runDir, state) {
 function runImplementationProvider(state, statePath, runDir, options) {
   if (!state.specFrozenAt) throw new Error('Spec is not frozen. Run freeze first.');
   ensureCleanWorktree(state.workdir, options, runDir, state);
+  const baseSha = currentGitSha(state.workdir);
 
   const prompt = buildImplementationPrompt(state, runDir);
   writeText(path.join(runDir, 'prompts', 'implement.md'), prompt);
@@ -1352,63 +2191,138 @@ function runImplementationProvider(state, statePath, runDir, options) {
   const stdoutFile = stampedLogPath(runDir, 'implementation', 'stdout.log', providerLogStamp);
   const stderrFile = stampedLogPath(runDir, 'implementation', 'stderr.log', providerLogStamp);
   const lastMessageFile = stampedLogPath(runDir, 'implementation', 'last-message.json', providerLogStamp);
-  const args = ['exec', '-C', state.workdir, '--json'];
-  args.push('--output-last-message', lastMessageFile);
-  const sandboxMode = codexSandboxMode(options);
-  if (sandboxMode) args.push('--sandbox', sandboxMode);
-  if (!isGitRepository(state.workdir) || boolOption(options, 'skip-git-repo-check')) {
-    args.push('--skip-git-repo-check');
-  }
-  if (!boolOption(options, 'skip-cli-schema')) {
-    args.push('--output-schema', schemaPath('agent-handoff.schema.json'));
-  }
-  args.push('-');
+  const invocation = buildCodexProviderInvocation(
+    options,
+    runDir,
+    prompt,
+    lastMessageFile,
+    state.workdir,
+    providerResumeRefs(state, 'codex', 'implementation', 'implementation')
+  );
+  const attempt = prepareProviderAttempt(state, runDir, options, {
+    stage: 'implementation',
+    providerKey: 'implementation',
+    intent: 'write',
+    prompt,
+    schemaPath: invocation.schemaPath,
+    contractHash: providerProfiles.hash(readText(path.join(runDir, 'spec.json'))),
+    stamp: providerLogStamp,
+  });
 
   const { record, result } = runProcess(
     'implementation provider',
-    providerLaunch(options, 'implementation'),
-    args,
+    invocation.launch,
+    invocation.args,
     {
-      cwd: state.workdir,
+      cwd: invocation.cwd,
       stdoutFile,
       stderrFile,
-      stdin: prompt,
+      stdin: invocation.stdin,
+      env: invocation.env,
       timeoutMs: providerTimeoutMs(options),
+      phase: 'implementation',
+      providerKey: 'implementation',
+      schemaPath: invocation.schemaPath,
+      options,
+      runtime: invocation.runtime,
+      adapter: invocation.adapter,
+      capabilitySnapshot: attempt.capabilitySnapshot,
+      taskEnvelopeHash: attempt.task.hash,
+      routeDecisionHash: attempt.route.decisionHash,
+      onFailure: attempt.onFailure,
     }
   );
   state.providerRuns.push(record);
 
-  let handoff;
-  try {
-    handoff = normalizeHandoff(extractJsonValue(safeRead(lastMessageFile) || result.stdout || ''));
-  } catch (error) {
-    handoff = {
-      summary: 'Implementation provider completed, but JSON handoff could not be parsed.',
-      changedFiles: [],
-      validation: [],
-      risks: [error.message],
-      followUp: [],
-    };
-    writeJson(path.join(runDir, 'handoff.parse-error.json'), {
-      message: error.message,
-      stdoutFile: path.relative(runDir, stdoutFile),
-      lastMessageFile: path.relative(runDir, lastMessageFile),
+  const lastMessageText = safeRead(lastMessageFile);
+  return runProviderPostProcess(attempt, record, {
+    result,
+    lastMessage: lastMessageText,
+  }, () => {
+    const runtimeOutput = providerStep('output-normalization', () => (
+      runtimeAdapters.normalizeCodexOutput({
+        stdout: result.stdout || '',
+        lastMessage: lastMessageText,
+        adapter: invocation.adapter,
+      })
+    ));
+    let rawHandoff;
+    try {
+      rawHandoff = providerStep('structured-output-parse', () => (
+        runtimeOutput.payload !== undefined && runtimeOutput.payload !== null
+          ? runtimeOutput.payload
+          : extractJsonValue(lastMessageText || result.stdout || '')
+      ));
+      assertProviderStructuredOutput(
+        rawHandoff,
+        'agent-handoff.schema.json',
+        'classic implementation handoff'
+      );
+    } catch (error) {
+      writeJson(path.join(runDir, 'handoff.parse-error.json'), {
+        message: error.message,
+        stdoutFile: path.relative(runDir, stdoutFile),
+        lastMessageFile: path.relative(runDir, lastMessageFile),
+      });
+      throw error;
+    }
+    const handoff = providerStep('output-normalization', () => normalizeHandoff(rawHandoff));
+    providerStep('artifact', () => {
+      writeJson(path.join(runDir, 'handoff.json'), handoff);
+      writeText(path.join(runDir, 'handoff.md'), renderHandoff(handoff));
+      recordImplementationClarifications(state, runDir, handoff);
     });
-  }
-  writeJson(path.join(runDir, 'handoff.json'), handoff);
-  writeText(path.join(runDir, 'handoff.md'), renderHandoff(handoff));
-  recordImplementationClarifications(state, runDir, handoff);
-  writeGitDiff(state.workdir, runDir);
-  writeValidation(state.workdir, runDir, options);
-  writeReviewContext(runDir);
+    providerStep('changed-files-gate', () => writeGitDiff(state.workdir, runDir));
+    providerStep('validation', () => writeValidation(state.workdir, runDir, options));
+    providerStep('artifact', () => writeReviewContext(runDir));
 
-  state.status = 'implemented';
-  state.files.handoff = 'handoff.md';
-  state.files.diff = 'diff.patch';
-  state.files.changedFiles = 'changed-files.json';
-  state.files.validation = 'validation.json';
-  state.files.reviewContext = 'review-context.md';
-  saveState(statePath, state);
+    const changedFiles = readJson(path.join(runDir, 'changed-files.json'));
+    const diffText = safeRead(path.join(runDir, 'diff.patch'));
+    const validation = readJson(path.join(runDir, 'validation.json'));
+    const effectRefs = changedFiles.length > 0
+      ? [providerProfiles.hash({ changedFiles, diffHash: providerProfiles.hash(diffText) })]
+      : [];
+    const accepted = providerStep('acceptance', () => acceptProviderAttempt(state, attempt, {
+      status: runtimeOutput.status,
+      effects: {
+        state: effectRefs.length > 0 ? 'committed' : 'none',
+        refs: effectRefs,
+      },
+      runtimeRefs: {
+        codexThread: runtimeOutput.runtimeRefs.threadId,
+        codexTurn: runtimeOutput.runtimeRefs.turnId,
+      },
+      runtimeResult: runtimeOutput,
+      evidence: {
+        handoffHash: providerProfiles.hash(handoff),
+        validationHash: providerProfiles.hash(validation),
+        diffHash: providerProfiles.hash(diffText),
+        changedFilesHash: providerProfiles.hash(changedFiles),
+        baseSha,
+        headSha: currentGitSha(state.workdir),
+      },
+      payload: handoff,
+    }));
+    record.resultEnvelopeHash = accepted.result.hash;
+    record.acceptance = accepted.acceptance;
+    record.runtimeRefs = accepted.result.runtimeRefs;
+    record.usage = runtimeOutput.usage || record.usage;
+    providerPostAcceptanceStep('post-acceptance-artifact', () => writeProviderHandoffBundle(
+      state,
+      runDir,
+      options,
+      attempt,
+      accepted
+    ));
+
+    state.status = 'implemented';
+    state.files.handoff = 'handoff.md';
+    state.files.diff = 'diff.patch';
+    state.files.changedFiles = 'changed-files.json';
+    state.files.validation = 'validation.json';
+    state.files.reviewContext = 'review-context.md';
+    providerPostAcceptanceStep('state-transition', () => saveState(statePath, state));
+  });
 }
 
 function recordImplementationClarifications(state, runDir, handoff) {
@@ -1448,37 +2362,121 @@ function renderHandoff(handoff) {
   ].join('\n');
 }
 
-function writeGitDiff(workdir, runDir) {
-  const changedFiles = listChangedFiles(workdir, runDir);
-  writeJson(path.join(runDir, 'changed-files.json'), changedFiles);
+function isGitDiffBufferOverflow(result) {
+  const code = result && result.error && result.error.code;
+  const message = String(result && result.error && result.error.message || '');
+  return code === 'ENOBUFS'
+    || code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+    || /maxBuffer|ENOBUFS/i.test(message);
+}
 
-  if (!isGitRepository(workdir)) {
-    const noRepoDiff = 'Not a git repository; diff unavailable.\n';
-    writeText(path.join(runDir, 'diff.patch'), noRepoDiff);
-    return noRepoDiff;
+function checkedGitDiffOutput(result, mode, maxBuffer) {
+  if (result && result.status === 0) {
+    return { text: result.stdout || '', overflow: false };
   }
+  if (isGitDiffBufferOverflow(result)) {
+    return { text: '', overflow: true, mode, maxBuffer };
+  }
+  const detail = result && (
+    result.error && result.error.message
+    || result.stderr
+    || result.stdout
+  );
+  throw new Error(`git diff ${mode} failed: ${detail || `exit ${result && result.status}`}`);
+}
 
-  const diffArgs = ['diff', '--no-ext-diff', '--binary', '--', '.'];
-  for (const exclude of DEFAULT_DIFF_EXCLUDES) diffArgs.push(`:(exclude)${exclude}`);
-  const result = spawnSync('git', diffArgs, {
+function collectGitDiff(
+  workdir,
+  runDir,
+  changedFiles = listChangedFiles(workdir, runDir),
+  settings = {}
+) {
+  if (!isGitRepository(workdir)) {
+    return 'Not a git repository; diff unavailable.\n';
+  }
+  const configuredMaxBuffer = Number(settings.maxBuffer);
+  const maxBuffer = Number.isInteger(configuredMaxBuffer) && configuredMaxBuffer > 0
+    ? configuredMaxBuffer
+    : MAX_BUFFER;
+  const pathspec = ['--', '.'];
+  for (const exclude of DEFAULT_DIFF_EXCLUDES) pathspec.push(`:(exclude)${exclude}`);
+  const runDiff = settings.runDiff || ((modeArgs) => spawnSync('git', [
+    'diff',
+    ...modeArgs,
+    '--no-ext-diff',
+    '--binary',
+    ...pathspec,
+  ], {
+    cwd: workdir,
+    encoding: 'utf8',
+    maxBuffer,
+    shell: false,
+  }));
+  const staged = checkedGitDiffOutput(runDiff(['--cached']), 'staged', maxBuffer);
+  const worktree = checkedGitDiffOutput(runDiff([]), 'worktree', maxBuffer);
+  const syntheticDiffs = changedFiles
+    .filter((entry) => entry.status === '??')
+    .map((entry) => buildUntrackedDiff(workdir, entry))
+    .filter(Boolean)
+    .join('\n');
+  const trackedBindings = changedFiles
+    .filter((entry) => entry.status !== '??')
+    .map((entry) => renderOmittedDiffSummary(
+      workdir,
+      entry,
+      shouldOmitDiff(entry.path) ? 'generated' : 'tracked-content-binding'
+    ))
+    .join('\n');
+  const omittedUntracked = changedFiles
+    .filter((entry) => entry.status === '??' && shouldOmitDiff(entry.path))
+    .map((entry) => renderOmittedDiffSummary(workdir, entry, 'generated'))
+    .join('\n');
+  const overflows = [staged, worktree].filter((entry) => entry.overflow);
+  const overflowMarker = overflows.length > 0
+    ? `Git diff output omitted after bounded overflow: ${JSON.stringify({
+      schemaVersion: 'git-diff-output-overflow-v1',
+      modes: overflows.map((entry) => entry.mode),
+      maxBuffer,
+      fallback: 'head-index-worktree-content-summaries',
+    })}`
+    : '';
+
+  return [
+    staged.text,
+    worktree.text,
+    overflowMarker,
+    trackedBindings,
+    syntheticDiffs,
+    omittedUntracked,
+  ].filter(Boolean).join('\n');
+}
+
+function captureWorktreeSnapshot(workdir, runDir) {
+  const changedFiles = listChangedFiles(workdir, runDir);
+  const diffText = collectGitDiff(workdir, runDir, changedFiles);
+  return {
+    headSha: currentGitSha(workdir),
+    changedFiles,
+    changedFilesHash: providerProfiles.hash(changedFiles),
+    diffHash: providerProfiles.hash(diffText),
+  };
+}
+
+function gitObjectExists(workdir, sha) {
+  if (!sha || !isGitRepository(workdir)) return false;
+  const result = spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`], {
     cwd: workdir,
     encoding: 'utf8',
     maxBuffer: MAX_BUFFER,
     shell: false,
   });
+  return result.status === 0;
+}
 
-  const trackedDiff = result.stdout || '';
-  const syntheticDiffs = changedFiles
-    .filter((entry) => entry.status === '??')
-    .map((entry) => buildUntrackedDiff(workdir, entry.path))
-    .filter(Boolean)
-    .join('\n');
-  const omitted = changedFiles
-    .filter((entry) => shouldOmitDiff(entry.path))
-    .map((entry) => `Diff omitted for generated or oversized file: ${entry.path}`)
-    .join('\n');
-
-  const diffPatch = [trackedDiff, syntheticDiffs, omitted].filter(Boolean).join('\n');
+function writeGitDiff(workdir, runDir) {
+  const changedFiles = listChangedFiles(workdir, runDir);
+  writeJson(path.join(runDir, 'changed-files.json'), changedFiles);
+  const diffPatch = collectGitDiff(workdir, runDir, changedFiles);
   writeText(path.join(runDir, 'diff.patch'), diffPatch);
   return diffPatch;
 }
@@ -1488,14 +2486,192 @@ function shouldOmitDiff(filePath) {
   return GENERATED_DIFF_OMIT_PATHS.has(normalized);
 }
 
-function buildUntrackedDiff(workdir, filePath) {
+function gitObjectSize(workdir, objectId) {
+  if (!objectId) return null;
+  const result = spawnSync('git', ['cat-file', '-s', objectId], {
+    cwd: workdir,
+    encoding: 'utf8',
+    maxBuffer: MAX_BUFFER,
+    shell: false,
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `failed to size git object ${objectId}: ${result.error && result.error.message || result.stderr || result.stdout || 'git cat-file failed'}`
+    );
+  }
+  const size = Number(String(result.stdout || '').trim());
+  return Number.isFinite(size) ? size : null;
+}
+
+function headFileFingerprint(workdir, filePath) {
+  const normalized = normalizeGitPath(filePath);
+  const result = spawnSync('git', [
+    '--literal-pathspecs',
+    'ls-tree',
+    '-z',
+    'HEAD',
+    '--',
+    normalized,
+  ], {
+    cwd: workdir,
+    encoding: 'utf8',
+    maxBuffer: MAX_BUFFER,
+    shell: false,
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `failed to fingerprint HEAD content for ${normalized}: ${result.error && result.error.message || result.stderr || result.stdout || 'git ls-tree failed'}`
+    );
+  }
+  const output = String(result.stdout || '').replace(/\0+$/, '');
+  if (!output) return { exists: false };
+  const match = output.match(/^(\d+)\s+([a-z]+)\s+([0-9a-f]+)\t/);
+  if (!match) throw new Error(`failed to parse HEAD fingerprint for ${normalized}`);
+  const objectId = match[3];
+  return {
+    exists: true,
+    mode: match[1],
+    objectType: match[2],
+    objectId,
+    size: gitObjectSize(workdir, objectId),
+  };
+}
+
+function indexFileFingerprint(workdir, filePath) {
+  const result = spawnSync('git', [
+    '--literal-pathspecs',
+    'ls-files',
+    '--stage',
+    '--',
+    normalizeGitPath(filePath),
+  ], {
+    cwd: workdir,
+    encoding: 'utf8',
+    maxBuffer: MAX_BUFFER,
+    shell: false,
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `failed to fingerprint index content for ${normalizeGitPath(filePath)}: ${result.error && result.error.message || result.stderr || result.stdout || 'git ls-files failed'}`
+    );
+  }
+  if (!String(result.stdout || '').trim()) return { exists: false };
+  const entries = String(result.stdout || '')
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => {
+      const match = line.match(/^(\d+)\s+([0-9a-f]+)\s+(\d+)\t/);
+      if (!match) return null;
+      const objectId = match[2];
+      return {
+        mode: match[1],
+        objectId,
+        size: gitObjectSize(workdir, objectId),
+        stage: Number(match[3]),
+      };
+    })
+    .filter(Boolean);
+  if (entries.length === 0) {
+    throw new Error(`failed to parse index fingerprint for ${normalizeGitPath(filePath)}`);
+  }
+  return { exists: true, entries };
+}
+
+function worktreeFileFingerprint(workdir, filePath) {
+  const normalized = normalizeGitPath(filePath);
+  const absolutePath = path.resolve(workdir, normalized);
+  let stat;
+  try {
+    stat = fs.lstatSync(absolutePath);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { exists: false };
+    throw error;
+  }
+  if (stat.isSymbolicLink()) {
+    let linkPayload;
+    try {
+      linkPayload = fs.readlinkSync(absolutePath, { encoding: 'buffer' });
+    } catch (error) {
+      throw new Error(`failed to read link payload for ${normalized}: ${error.message}`);
+    }
+    if (!Buffer.isBuffer(linkPayload)) {
+      throw new Error(`failed to safely fingerprint link payload for ${normalized}`);
+    }
+    return {
+      exists: true,
+      type: 'symlink',
+      size: stat.size,
+      linkPayloadBytes: linkPayload.length,
+      linkPayloadHash: `sha256:${crypto.createHash('sha256').update(linkPayload).digest('hex')}`,
+    };
+  }
+  if (!stat.isFile()) {
+    throw new Error(`cannot safely fingerprint non-regular worktree path ${normalized}`);
+  }
+  const result = spawnSync('git', ['hash-object', '--no-filters', '--', normalized], {
+    cwd: workdir,
+    encoding: 'utf8',
+    maxBuffer: MAX_BUFFER,
+    shell: false,
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `failed to fingerprint omitted diff content for ${normalized}: ${result.stderr || result.stdout || 'git hash-object failed'}`
+    );
+  }
+  return {
+    exists: true,
+    type: 'file',
+    size: stat.size,
+    objectId: String(result.stdout || '').trim(),
+  };
+}
+
+function renderOmittedDiffSummary(workdir, entry, reason) {
+  const filePath = normalizeGitPath(typeof entry === 'string' ? entry : entry.path);
+  const status = typeof entry === 'object' && entry ? String(entry.status || '') : '';
+  const originalPath = typeof entry === 'object' && entry && entry.originalPath
+    ? normalizeGitPath(entry.originalPath)
+    : null;
+  const summary = {
+    schemaVersion: 'omitted-diff-content-v1',
+    reason,
+    path: filePath,
+    originalPath,
+    status,
+    head: headFileFingerprint(workdir, filePath),
+    originalHead: originalPath ? headFileFingerprint(workdir, originalPath) : null,
+    index: indexFileFingerprint(workdir, filePath),
+    worktree: worktreeFileFingerprint(workdir, filePath),
+  };
+  return `Diff omitted; content summary: ${JSON.stringify(summary)}`;
+}
+
+function buildUntrackedDiff(workdir, entry) {
+  const filePath = normalizeGitPath(typeof entry === 'string' ? entry : entry.path);
   if (shouldOmitDiff(filePath)) return null;
   const absolutePath = path.join(workdir, filePath);
-  if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) return null;
-  const bytes = fs.statSync(absolutePath).size;
-  if (bytes > INLINE_FILE_DIFF_MAX_BYTES) return `Diff omitted for oversized new file: ${filePath}\n`;
+  let stat;
+  try {
+    stat = fs.lstatSync(absolutePath);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+  if (stat.isSymbolicLink()) {
+    return renderOmittedDiffSummary(workdir, entry, 'symlink-new-file');
+  }
+  if (!stat.isFile()) {
+    return renderOmittedDiffSummary(workdir, entry, 'non-regular-new-path');
+  }
+  const bytes = stat.size;
+  if (bytes > INLINE_FILE_DIFF_MAX_BYTES) {
+    return renderOmittedDiffSummary(workdir, entry, 'oversized-new-file');
+  }
   const buffer = fs.readFileSync(absolutePath);
-  if (buffer.includes(0)) return `Diff omitted for binary new file: ${filePath}\n`;
+  if (buffer.includes(0)) {
+    return renderOmittedDiffSummary(workdir, entry, 'binary-new-file');
+  }
   const text = buffer.toString('utf8');
   const lines = text.split(/\r?\n/);
   const body = lines.map((line) => `+${line}`).join('\n');
@@ -1577,57 +2753,128 @@ function writeValidation(workdir, runDir, options) {
 }
 
 function runReviewProvider(state, statePath, runDir, options) {
+  validateProviderHandoffBundle(state, runDir, options);
   const prompt = buildReviewPrompt(state, runDir);
   writeText(path.join(runDir, 'prompts', 'review.md'), prompt);
   const providerLogStamp = logStamp();
   const stdoutFile = stampedLogPath(runDir, 'review', 'stdout.log', providerLogStamp);
   const stderrFile = stampedLogPath(runDir, 'review', 'stderr.log', providerLogStamp);
-  const args = ['-p', '--input-format', 'text', '--output-format', 'json'];
-  if (!boolOption(options, 'skip-cli-schema')) {
-    args.push('--json-schema', schemaJson('review-result.schema.json'));
-  }
+  const invocation = buildClaudeProviderInvocation(
+    options,
+    'review',
+    runDir,
+    prompt,
+    'review-result.schema.json',
+    state.workdir,
+    providerResumeRefs(state, 'claude', 'review', 'review')
+  );
+  const attempt = prepareProviderAttempt(state, runDir, options, {
+    stage: 'review',
+    providerKey: 'review',
+    intent: 'read-only',
+    prompt,
+    schemaPath: invocation.schemaPath,
+    contractHash: providerProfiles.hash(readText(path.join(runDir, 'spec.json'))),
+    stamp: providerLogStamp,
+  });
 
   const { record, result } = runProcess(
     'review provider',
-    providerLaunch(options, 'review'),
-    args,
+    invocation.launch,
+    invocation.args,
     {
-      cwd: state.workdir,
+      cwd: invocation.cwd,
       stdoutFile,
       stderrFile,
-      stdin: prompt,
-      env: claudeProviderEnv(),
-      timeoutMs: providerTimeoutMs(options), phase: 'review', providerKey: 'review', schemaPath: schemaPath('review-result.schema.json'),
+      stdin: invocation.stdin,
+      env: invocation.env,
+      timeoutMs: providerTimeoutMs(options),
+      phase: 'review',
+      providerKey: 'review',
+      schemaPath: invocation.schemaPath,
+      options,
+      runtime: invocation.runtime,
+      adapter: invocation.adapter,
+      capabilitySnapshot: attempt.capabilitySnapshot,
+      taskEnvelopeHash: attempt.task.hash,
+      routeDecisionHash: attempt.route.decisionHash,
+      onFailure: attempt.onFailure,
     }
   );
   state.providerRuns.push(record);
 
-  let rawReview;
-  let review;
-  try {
-    rawReview = extractJsonValue(result.stdout || '');
-    review = normalizeReview(rawReview);
-  } catch (error) {
-    writeJson(path.join(runDir, 'review.parse-error.json'), {
-      message: error.message,
-      stdoutFile: path.relative(runDir, stdoutFile),
-      stderrFile: path.relative(runDir, stderrFile),
-    });
-    state.status = 'failed';
-    saveState(statePath, state);
-    throw error;
-  }
+  return runProviderPostProcess(attempt, record, { result }, () => {
+    const runtimeOutput = providerStep('output-normalization', () => (
+      runtimeAdapters.normalizeClaudeOutput({
+        stdout: result.stdout || '',
+        adapter: invocation.adapter,
+      })
+    ));
+    let rawReview;
+    let review;
+    try {
+      rawReview = providerStep('structured-output-parse', () => (
+        runtimeOutput.payload === undefined
+          ? extractJsonValue(result.stdout || '')
+          : runtimeOutput.payload
+      ));
+      assertProviderStructuredOutput(
+        rawReview,
+        'review-result.schema.json',
+        'classic review result'
+      );
+      review = providerStep('output-normalization', () => normalizeReview(rawReview));
+    } catch (error) {
+      writeJson(path.join(runDir, 'review.parse-error.json'), {
+        message: error.message,
+        stdoutFile: path.relative(runDir, stdoutFile),
+        stderrFile: path.relative(runDir, stderrFile),
+      });
+      throw error;
+    }
 
-  writeJson(path.join(runDir, 'review.raw.json'), rawReview);
-  writeJson(path.join(runDir, 'review.json'), review);
-  state.files.review = 'review.json';
-  recordReviewRulings(state, runDir, review);
-  const completionGate = policyGates.canCompleteRun({ validation: readJson(path.join(runDir, 'validation.json')), spec: readJson(path.join(runDir, 'spec.json')) });
-  writeJson(path.join(runDir, 'completion-gate.json'), completionGate);
-  state.files.completionGate = 'completion-gate.json';
-  state.status = statusFromReview(review, completionGate);
-  if (state.status === 'needs-followup' || state.status === 'blocked') writeFollowUpTask(runDir, review);
-  saveState(statePath, state);
+    providerStep('artifact', () => {
+      writeJson(path.join(runDir, 'review.raw.json'), rawReview);
+      writeJson(path.join(runDir, 'review.json'), review);
+    });
+    const completionGate = providerStep('validation', () => policyGates.canCompleteRun({
+      validation: readJson(path.join(runDir, 'validation.json')),
+      spec: readJson(path.join(runDir, 'spec.json')),
+    }));
+    providerStep('artifact', () => writeJson(
+      path.join(runDir, 'completion-gate.json'),
+      completionGate
+    ));
+
+    const accepted = providerStep('acceptance', () => acceptProviderAttempt(state, attempt, {
+      status: runtimeOutput.status,
+      effects: { state: 'none', refs: [] },
+      runtimeRefs: {
+        claudeSession: runtimeOutput.runtimeRefs.sessionId,
+      },
+      runtimeResult: runtimeOutput,
+      evidence: {
+        reviewHash: providerProfiles.hash(review),
+        completionGateHash: providerProfiles.hash(completionGate),
+      },
+      payload: review,
+    }));
+    record.resultEnvelopeHash = accepted.result.hash;
+    record.acceptance = accepted.acceptance;
+    record.runtimeRefs = accepted.result.runtimeRefs;
+    record.usage = runtimeOutput.usage || record.usage;
+
+    providerPostAcceptanceStep('state-transition', () => {
+      state.files.review = 'review.json';
+      state.files.completionGate = 'completion-gate.json';
+      recordReviewRulings(state, runDir, review);
+      state.status = statusFromReview(review, completionGate);
+      if (state.status === 'needs-followup' || state.status === 'blocked') {
+        writeFollowUpTask(runDir, review);
+      }
+      saveState(statePath, state);
+    });
+  });
 }
 
 function writeFollowUpTask(runDir, review) {
@@ -1694,6 +2941,23 @@ function buildPipelineCtx() {
     providerTimeoutMs,
     codexSandboxMode,
     claudeProviderEnv,
+    buildClaudeProviderInvocation,
+    buildCodexProviderInvocation,
+    prepareProviderAttempt,
+    acceptProviderAttempt,
+    runProviderPostProcess,
+    providerStep,
+    providerPostAcceptanceStep,
+    assertProviderStructuredOutput,
+    providerResumeRefs,
+    writeProviderHandoffBundle,
+    validateProviderHandoffBundle,
+    currentGitSha,
+    buildNativeExecutionPlan,
+    orchestrationOwner: nativeExecutionControl.orchestrationOwner,
+    normalizeClaudeOutput: runtimeAdapters.normalizeClaudeOutput,
+    normalizeCodexOutput: runtimeAdapters.normalizeCodexOutput,
+    hashArtifact: providerProfiles.hash,
     isGitRepository,
     writeGitDiff,
     listChangedFiles,
@@ -1850,22 +3114,34 @@ function runStart(options, positionals) {
   ensureDir(path.join(runDir, 'prompts'));
   ensureDir(path.join(runDir, 'logs'));
 
+  const dispatchLock = runLock.acquireRunLock(runDir, 'provider-dispatch', {
+    command: 'run',
+    runId,
+  }, goalLeaseStoreOptions(options, workdir));
+  try {
+  if (fs.existsSync(statePath)) {
+    throw new Error(`Run already exists after dispatch lock acquisition: ${runDir}`);
+  }
+  const executionPolicy = nativeExecutionControl.executionPolicy(options);
   const state = newState(workdir, runDir, runId, requirement);
+  state.orchestrationOwner = executionPolicy.orchestrationOwner;
+  state.executionPolicy = executionPolicy;
   writeText(path.join(runDir, 'requirement.md'), `${requirement}\n`);
   writeText(path.join(runDir, 'prompts', 'spec.md'), buildSpecPrompt(requirement, { workdir }));
   writeJson(path.join(runDir, 'commands.json'), commandPlan(options));
-  writeJson(path.join(runDir, 'execution-plan.json'), {
-    version: 'execution-plan-v1',
-    stages: Object.fromEntries(['spec', 'implementation', 'review'].map((key) => [key, {
-      profile: providerProfiles.profile(options, key),
-      capabilities: providerProfiles.capabilitySnapshot(options, key),
-    }])),
-  });
   saveState(statePath, state);
 
   const preflight = buildPreflightReport(workdir, options, runDir);
   writePreflight(runDir, preflight);
+  const executionPlan = buildNativeExecutionPlan(
+    options,
+    runId,
+    requirement,
+    preflight
+  );
+  writeJson(path.join(runDir, 'execution-plan.json'), executionPlan);
   state.files.preflight = 'preflight.json';
+  state.files.executionPlan = 'execution-plan.json';
   saveState(statePath, state);
 
   if (boolOption(options, 'preflight-only')) {
@@ -1903,14 +3179,26 @@ function runStart(options, positionals) {
   runImplementationProvider(state, statePath, runDir, options);
   runReviewProvider(state, statePath, runDir, options);
   printRunSummary(state);
+  } finally {
+    dispatchLock.release();
+  }
 }
 
 function runResume(options, positionals) {
   const { runDir, statePath, state } = loadRun(options, positionals);
+  const effectiveOptions = nativeExecutionControl.resolveExecutionPolicyOptions(
+    options,
+    state.executionPolicy
+  );
   if (state.mode === 'pipeline') {
-    pipeline.resumePipelineRun(buildPipelineCtx(), options, positionals);
+    pipeline.resumePipelineRun(buildPipelineCtx(), effectiveOptions, positionals);
     return;
   }
+  return runLock.withRunLock(
+    runDir,
+    'provider-dispatch',
+    { command: 'resume', runId: state.runId },
+    () => {
   if (state.status === 'dry-run') {
     console.log(`[INFO] ${state.runId} is a dry-run. No provider calls to resume.`);
     return;
@@ -1920,19 +3208,22 @@ function runResume(options, positionals) {
     console.log(`Freeze: node scripts/agent-orchestrator.js freeze --run ${state.runId}`);
     return;
   }
-  const preflight = buildPreflightReport(state.workdir, options, runDir);
+  const preflight = buildPreflightReport(state.workdir, effectiveOptions, runDir);
   writePreflight(runDir, preflight);
   state.files.preflight = 'preflight.json';
   saveState(statePath, state);
   assertPreflight(preflight);
 
   if (state.status === 'frozen' || state.status === 'needs-followup' || state.status === 'blocked') {
-    runImplementationProvider(state, statePath, runDir, options);
+    runImplementationProvider(state, statePath, runDir, effectiveOptions);
   }
   if (state.status === 'implemented') {
-    runReviewProvider(state, statePath, runDir, options);
+    runReviewProvider(state, statePath, runDir, effectiveOptions);
   }
   printRunSummary(state);
+    },
+    goalLeaseStoreOptions(effectiveOptions, state.workdir)
+  );
 }
 
 function printRunSummary(state) {
@@ -1948,6 +3239,55 @@ function runStatus(options, positionals) {
   console.log(`Created: ${state.createdAt}`);
   console.log(`Updated: ${state.updatedAt}`);
   console.log(`Frozen: ${state.specFrozenAt || 'no'}`);
+}
+
+function bindGoalLease(options, positionals) {
+  const { runDir, statePath, state } = loadRun(options, positionals);
+  const ownerRuntime = optionValue(options, 'runtime');
+  const hostRef = optionValue(options, 'host-ref');
+  const objective = optionValue(options, 'objective');
+  if (!ownerRuntime || !hostRef || !objective) {
+    throw new Error(
+      'goal-bind requires --runtime codex|claude, --host-ref <opaque-ref>, and --objective <text>'
+    );
+  }
+  const runObjective = readText(path.join(runDir, 'requirement.md')).trim();
+  if (goalLease.objectiveHash(objective) !== goalLease.objectiveHash(runObjective)) {
+    throw new Error('goal-bind objective conflict: objective must match the frozen run requirement');
+  }
+  const expectedOwner = `${ownerRuntime}-host`;
+  const activeOwner = state.executionPolicy
+    ? state.executionPolicy.orchestrationOwner
+    : state.orchestrationOwner;
+  if (activeOwner !== 'tp' && activeOwner !== expectedOwner) {
+    throw new Error(
+      `goal-bind owner conflict: ${ownerRuntime} Goal requires orchestration owner tp or ${expectedOwner}`
+    );
+  }
+  const lease = goalLease.bindGoalLease(runDir, {
+    runId: state.runId,
+    ownerRuntime: String(ownerRuntime),
+    hostRef: String(hostRef),
+    objective: String(objective),
+  }, {
+    expectedRevision: optionValue(options, 'expected-revision'),
+    ...goalLeaseStoreOptions(options, state.workdir),
+  });
+  state.files.goalLease = goalLease.GOAL_LEASE_FILE;
+  saveState(statePath, state);
+  console.log(`[OK] bound ${ownerRuntime} native Goal lease for ${state.runId}`);
+}
+
+function releaseGoalLease(options, positionals) {
+  const { runDir, statePath, state } = loadRun(options, positionals);
+  const lease = goalLease.releaseStoredGoalLease(runDir, {
+    reason: optionValue(options, 'reason') || 'released by operator',
+    expectedRevision: optionValue(options, 'expected-revision'),
+    ...goalLeaseStoreOptions(options, state.workdir),
+  });
+  state.files.goalLease = goalLease.GOAL_LEASE_FILE;
+  saveState(statePath, state);
+  console.log(`[OK] released native Goal lease for ${state.runId}`);
 }
 
 function runDoctor(options) {
@@ -2069,6 +3409,155 @@ function runSelfTest() {
   assertSelfTest('auto-evaluate alias parses as auto', boolOption({ 'auto-evaluate': true }, 'auto'), true);
   assertSelfTest('auto-freeze legacy alias parses as auto', boolOption({ 'auto-freeze': true }, 'auto'), true);
 
+  const controlRootSentinel = path.join(
+    os.tmpdir(),
+    `agent-loop-control-root-must-stay-host-only-${process.pid}-${Date.now()}`
+  );
+  const providerRunSentinel = path.join(
+    os.tmpdir(),
+    `agent-loop-provider-env-selftest-${process.pid}-${Date.now()}`
+  );
+  const providerInvocations = [
+    buildClaudeProviderInvocation(
+      { 'control-root': controlRootSentinel, 'skip-cli-schema': true },
+      'spec',
+      providerRunSentinel,
+      'self-test',
+      'agent-spec.schema.json'
+    ),
+    buildCodexProviderInvocation(
+      { 'control-root': controlRootSentinel, 'skip-cli-schema': true },
+      providerRunSentinel,
+      'self-test',
+      path.join(providerRunSentinel, 'last-message.json')
+    ),
+  ];
+  const controlRootLeaked = providerInvocations.some((invocation) => (
+    invocation.env.TP_AGENT_CONTROL_ROOT !== undefined
+    || Object.values(invocation.env).includes(controlRootSentinel)
+  ));
+  assertSelfTest(
+    'external control root is not exposed to provider environments',
+    controlRootLeaked,
+    false
+  );
+
+  const handoffTestDir = path.join(
+    os.tmpdir(),
+    `agent-loop-handoff-selftest-${process.pid}-${Date.now()}`
+  );
+  fs.mkdirSync(handoffTestDir, { recursive: true });
+  try {
+    writeJson(path.join(handoffTestDir, 'spec.json'), { frozen: true });
+    const handoffArtifact = { summary: 'done' };
+    const validationArtifact = { status: 'passed', commands: [] };
+    const changedFilesArtifact = [];
+    const diffArtifact = 'Not a git repository; diff unavailable.\n';
+    writeJson(path.join(handoffTestDir, 'handoff.json'), handoffArtifact);
+    writeJson(
+      path.join(handoffTestDir, 'validation.json'),
+      validationArtifact
+    );
+    writeJson(path.join(handoffTestDir, 'changed-files.json'), changedFilesArtifact);
+    writeText(path.join(handoffTestDir, 'diff.patch'), diffArtifact);
+    const contractHash = providerProfiles.hash(
+      readText(path.join(handoffTestDir, 'spec.json'))
+    );
+    const stageControl = nativeExecutionControl.buildStageControl({
+      options: {},
+      runId: 'handoff-selftest',
+      stage: 'implementation',
+      providerKey: 'implementation',
+      intent: 'write',
+      payload: { contractHash },
+      capabilityEvidence: nativeExecutionControl.observedAdapterEvidence(
+        'implementation',
+        {
+          runtimeObserved: {
+            stdin: true,
+            'structured-output': true,
+            'repo-read': true,
+            'workspace-write': true,
+          },
+          observedAt: nowIso(),
+          source: 'self-test-capability-probe',
+        }
+      ),
+    });
+    const accepted = nativeExecutionControl.createAttemptResult({
+      stageControl,
+      ref: 'result:handoff-selftest',
+      status: 'succeeded',
+      effects: {
+        state: 'committed',
+        refs: [providerProfiles.hash('selftest-diff')],
+      },
+      runtimeRefs: {
+        codexThread: 'thread-selftest',
+        codexTurn: 'turn-selftest',
+      },
+      nativeResult: {
+        runtime: 'codex',
+        adapter: 'codex-exec',
+        status: 'succeeded',
+        nativeAccepted: true,
+        terminalEvidence: {
+          observed: true,
+          event: 'turn.completed',
+          status: 'completed',
+        },
+        nativeAcceptanceErrors: [],
+        runtimeRefs: {
+          threadId: 'thread-selftest',
+          turnId: 'turn-selftest',
+        },
+      },
+      evidence: {
+        handoffHash: providerProfiles.hash(handoffArtifact),
+        diffHash: providerProfiles.hash(diffArtifact),
+        validationHash: providerProfiles.hash(validationArtifact),
+        changedFilesHash: providerProfiles.hash(changedFilesArtifact),
+        baseSha: null,
+        headSha: null,
+      },
+      payload: handoffArtifact,
+    });
+    const handoffState = {
+      runId: 'handoff-selftest',
+      orchestrationOwner: 'tp',
+      workdir: handoffTestDir,
+      files: {},
+    };
+    const attempt = {
+      ...stageControl,
+      prefix: 'implementation.selftest',
+    };
+    writeProviderHandoffBundle(
+      handoffState,
+      handoffTestDir,
+      {},
+      attempt,
+      accepted
+    );
+    const validated = validateProviderHandoffBundle(
+      handoffState,
+      handoffTestDir,
+      {}
+    );
+    assertSelfTest('provider handoff validates hash-bound evidence', validated.handoff.readOnly, true);
+    validated.handoff.hash = providerProfiles.hash('tampered');
+    writeJson(path.join(handoffTestDir, 'provider-handoff.json'), validated);
+    let tamperedHandoffThrew = false;
+    try {
+      validateProviderHandoffBundle(handoffState, handoffTestDir, {});
+    } catch (_) {
+      tamperedHandoffThrew = true;
+    }
+    assertSelfTest('provider handoff rejects tampering', tamperedHandoffThrew, true);
+  } finally {
+    fs.rmSync(handoffTestDir, { recursive: true, force: true });
+  }
+
   // ADR-008 backward-compat: state.json from pre-caveman-audit may lack these fields.
   const legacyState = applyStateDefaults({ runId: 'old-run', status: 'frozen' });
   assertSelfTest('legacy state gains providerRuns default', Array.isArray(legacyState.providerRuns) && legacyState.providerRuns.length === 0, true);
@@ -2130,6 +3619,7 @@ function runPipelineSelfTests() {
   for (const schemaName of [
     'global-contract.schema.json',
     'pipeline-slice.schema.json',
+    'pipeline-slice-batch.schema.json',
     'contract-revision.schema.json',
   ]) {
     assertSelfTest(`pipeline provider schema is strict ${schemaName}`, schemaHasStrictObjects(readJson(schemaPath(schemaName))), true);
@@ -2369,11 +3859,32 @@ function runPipelineSelfTests() {
 function runProviderIntegrationSelfTests() {
   const providers = require('./agent-orchestrator/pipeline-providers');
   const tmpBase = path.join(os.tmpdir(), `agent-loop-selftest-${process.pid}-${Date.now()}`);
+  const mockWorkdir = path.join(tmpBase, 'workdir');
   fs.mkdirSync(path.join(tmpBase, 'prompts'), { recursive: true });
   fs.mkdirSync(path.join(tmpBase, 'logs'), { recursive: true });
   fs.mkdirSync(path.join(tmpBase, 'slices'), { recursive: true });
+  fs.mkdirSync(mockWorkdir, { recursive: true });
 
-  let stateObj = pipeline.newPipelineState(tmpBase, tmpBase, 'selftest', 'a provider integration self-test requirement');
+  const gitCommands = [
+    ['init'],
+    ['config', 'user.email', 'agent-loop-selftest@example.invalid'],
+    ['config', 'user.name', 'Agent Loop Self Test'],
+  ];
+  for (const args of gitCommands) {
+    const outcome = spawnSync('git', args, { cwd: mockWorkdir, encoding: 'utf8', shell: false });
+    if (outcome.status !== 0) {
+      throw new Error(`self-test git ${args.join(' ')} failed: ${outcome.stderr || outcome.stdout || 'unknown error'}`);
+    }
+  }
+  writeText(path.join(mockWorkdir, 'baseline.txt'), 'baseline\n');
+  for (const args of [['add', 'baseline.txt'], ['commit', '-m', 'test: initialize provider fixture']]) {
+    const outcome = spawnSync('git', args, { cwd: mockWorkdir, encoding: 'utf8', shell: false });
+    if (outcome.status !== 0) {
+      throw new Error(`self-test git ${args.join(' ')} failed: ${outcome.stderr || outcome.stdout || 'unknown error'}`);
+    }
+  }
+
+  let stateObj = pipeline.newPipelineState(mockWorkdir, tmpBase, 'selftest', 'a provider integration self-test requirement');
   const statePath = path.join(tmpBase, 'state.json');
   writeJson(statePath, stateObj);
   writeText(
@@ -2381,7 +3892,11 @@ function runProviderIntegrationSelfTests() {
     'mock prompt for global contract',
   );
 
-  const mockCtx = buildMockCtx(tmpBase);
+  const mockCtx = buildMockCtx(mockWorkdir);
+  mockCtx.currentGitSha = currentGitSha;
+  mockCtx.isGitRepository = isGitRepository;
+  mockCtx.writeGitDiff = writeGitDiff;
+  mockCtx.listChangedFiles = listChangedFiles;
   let calls = 0;
   mockCtx.runProcess = (label, launchOrCommand, args, settings) => {
     calls += 1;
@@ -2452,14 +3967,18 @@ function runProviderIntegrationSelfTests() {
   mockCtx.runProcess = (label, launchOrCommand, args, settings) => {
     const outcome = originalRunProcess(label, launchOrCommand, args, settings);
     if (String(label).includes('slice impl provider')) {
-      writeText(path.join(tmpBase, 'mock.txt'), 'implemented\n');
+      writeText(path.join(mockWorkdir, 'mock.txt'), 'implemented\n');
+      const staged = spawnSync('git', ['add', 'mock.txt'], {
+        cwd: mockWorkdir,
+        encoding: 'utf8',
+        shell: false,
+      });
+      if (staged.status !== 0) {
+        throw new Error(`self-test failed to stage mock.txt: ${staged.stderr || staged.stdout || 'unknown error'}`);
+      }
     }
     return outcome;
   };
-  mockCtx.listChangedFiles = () => fs.existsSync(path.join(tmpBase, 'mock.txt'))
-    ? [{ status: '??', path: 'mock.txt' }]
-    : [];
-  mockCtx.writeGitDiff = () => 'diff --git a/mock.txt b/mock.txt\n';
   mockCtx._stdoutQueue.push(JSON.stringify({
     summary: 'implemented mock slice',
     changedFiles: ['mock.txt'],
@@ -2472,15 +3991,36 @@ function runProviderIntegrationSelfTests() {
     stateObj.pipeline.sliceStates['slice-001'], 'slice-implemented');
   assertSelfTest('provider integration: changed-files gate written',
     fs.existsSync(path.join(tmpBase, 'slices', 'slice-001', 'changed-files-gate.json')), true);
+  assertSelfTest('provider integration: changed-files artifact is slice scoped',
+    fs.existsSync(path.join(tmpBase, 'slices', 'slice-001', 'changed-files.json')), true);
   assertSelfTest('provider integration: changed-files gate passed',
     JSON.parse(fs.readFileSync(path.join(tmpBase, 'slices', 'slice-001', 'changed-files-gate.json'), 'utf8')).ok, true);
 
-  const reviewApprovedRaw = JSON.stringify({ decision: 'approved', contractRevisions: [], findings: [] });
+  writeText(path.join(mockWorkdir, 'mock.txt'), 'tampered staged content\n');
+  spawnSync('git', ['add', 'mock.txt'], { cwd: mockWorkdir, encoding: 'utf8', shell: false });
+  let stagedTamperRejected = false;
+  try {
+    mockCtx.validateProviderHandoffBundle(stateObj, tmpBase, {}, {
+      relativeFile: path.join('slices', slice.id, 'provider-handoff.json'),
+      expectedContractHash: globalContractModule.loadGlobalContract(tmpBase).contractHash,
+    });
+  } catch (error) {
+    stagedTamperRejected = /diffHash is stale/.test(error.message);
+  }
+  assertSelfTest('provider integration: staged index tampering invalidates handoff diff hash', stagedTamperRejected, true);
+  writeText(path.join(mockWorkdir, 'mock.txt'), 'implemented\n');
+  spawnSync('git', ['add', 'mock.txt'], { cwd: mockWorkdir, encoding: 'utf8', shell: false });
+
+  const reviewApprovedRaw = JSON.stringify({
+    decision: 'approved',
+    compliant: true,
+    contractRevisions: [],
+    findings: [],
+    followUpTasks: [],
+  });
   mockCtx._stdoutQueue.push(reviewApprovedRaw);
   const locksModule = require('./agent-orchestrator/locks');
   locksModule.saveLocks(tmpBase, locksModule.claimAll(locksModule.loadLocks(tmpBase), slice));
-  fs.writeFileSync(path.join(tmpBase, 'slices', 'slice-001', 'diff.patch'), 'mock diff');
-  fs.writeFileSync(path.join(tmpBase, 'slices', 'slice-001', 'handoff.json'), '{}');
   const stateBeforeApprovedReview = stateObj;
   const reviewOutcome = providers.runSliceReviewProvider(mockCtx, stateObj, statePath, tmpBase, {}, slice);
   assertSelfTest('provider integration: approved slice marked completed', reviewOutcome.state.pipeline.sliceStates['slice-001'], 'slice-completed');
@@ -2490,12 +4030,13 @@ function runProviderIntegrationSelfTests() {
   writeJson(statePath, stateObj);
   pipelineQueue.saveQueue(tmpBase, pipelineQueue.moveToRunning(pipelineQueue.emptyQueue(), slice.id));
   const reviewBreakingRaw = JSON.stringify({
-    decision: 'needs-followup',
+    decision: 'changes_requested',
+    compliant: false,
     findings: [],
+    followUpTasks: ['resolve the breaking contract revision'],
     contractRevisions: [{ revisionId: 'rev-001', fields: { goal: 'new goal' }, rationale: 'breaking shift' }],
   });
   mockCtx._stdoutQueue.push(reviewBreakingRaw);
-  fs.writeFileSync(path.join(tmpBase, 'slices', 'slice-001', 'diff.patch'), 'mock diff');
   const breakingOutcome = providers.runSliceReviewProvider(mockCtx, stateObj, statePath, tmpBase, {}, slice);
   assertSelfTest('provider integration: breaking revision enters contract-conflict', breakingOutcome.state.status, 'contract-conflict');
   assertSelfTest('provider integration: breaking drift recorded', breakingOutcome.drift[0].classification, 'breaking');
@@ -2548,7 +4089,10 @@ function runProviderIntegrationSelfTests() {
     };
     throw error;
   };
-  const failedState = pipeline.resumePipelineRun(failureCtx, {}, []);
+  const failureControlRoot = `${failureBase}-control`;
+  const failedState = pipeline.resumePipelineRun(failureCtx, {
+    'control-root': failureControlRoot,
+  }, []);
   assertSelfTest('provider integration: implementation failure state recorded',
     failedState.pipeline.sliceStates[failureSlice.id], 'slice-implementation-failed');
   const failedQueue = pipelineQueue.loadQueue(failureBase);
@@ -2564,6 +4108,7 @@ function runProviderIntegrationSelfTests() {
   assertSelfTest('provider integration: failed provider run recorded',
     Array.isArray(failedState.providerRuns) && failedState.providerRuns.length === 1, true);
   fs.rmSync(failureBase, { recursive: true, force: true });
+  fs.rmSync(failureControlRoot, { recursive: true, force: true });
 
   const resolveBase = path.join(os.tmpdir(), `agent-loop-selftest-resolve-${process.pid}-${Date.now()}`);
   fs.mkdirSync(path.join(resolveBase, 'prompts'), { recursive: true });
@@ -2625,9 +4170,11 @@ function runProviderIntegrationSelfTests() {
     },
   };
   writeJson(resolveStatePath, resolveState);
+  const resolveControlRoot = `${resolveBase}-control`;
   const resolvedState = pipeline.resumePipelineRun(buildMockCtx(resolveBase), {
     resolve: 'accept-revision',
     revision: 'rev-accept',
+    'control-root': resolveControlRoot,
   }, []);
   assertSelfTest('provider integration: accept revision resumes execution', resolvedState.status, 'executing-slices');
   assertSelfTest('provider integration: accept revision applies contract',
@@ -2642,6 +4189,7 @@ function runProviderIntegrationSelfTests() {
   assertSelfTest('provider integration: accept revision records applied hash',
     Boolean(acceptedEvent && acceptedEvent.appliedContractHash), true);
   fs.rmSync(resolveBase, { recursive: true, force: true });
+  fs.rmSync(resolveControlRoot, { recursive: true, force: true });
 
   const rejectBase = path.join(os.tmpdir(), `agent-loop-selftest-reject-${process.pid}-${Date.now()}`);
   fs.mkdirSync(path.join(rejectBase, 'slices'), { recursive: true });
@@ -2667,10 +4215,12 @@ function runProviderIntegrationSelfTests() {
     pipeline: { ...rejectState.pipeline, conflictRevisionIds: ['rev-reject'] },
   };
   writeJson(rejectStatePath, rejectState);
+  const rejectControlRoot = `${rejectBase}-control`;
   const rejectedState = pipeline.resumePipelineRun(buildMockCtx(rejectBase), {
     resolve: 'reject-revision',
     revision: 'rev-reject',
     reason: 'self-test says no',
+    'control-root': rejectControlRoot,
   }, []);
   assertSelfTest('provider integration: reject revision resumes execution', rejectedState.status, 'executing-slices');
   assertSelfTest('provider integration: reject revision leaves contract unchanged',
@@ -2681,6 +4231,7 @@ function runProviderIntegrationSelfTests() {
   assertSelfTest('provider integration: reject revision records reason',
     rejectedEvent && rejectedEvent.reason, 'self-test says no');
   fs.rmSync(rejectBase, { recursive: true, force: true });
+  fs.rmSync(rejectControlRoot, { recursive: true, force: true });
 
   fs.rmSync(tmpBase, { recursive: true, force: true });
 }
@@ -2711,6 +4262,73 @@ function buildMockCtx(workdir) {
     providerTimeoutMs: () => 60000,
     codexSandboxMode: () => null,
     claudeProviderEnv: () => ({}),
+    buildClaudeProviderInvocation: (options, providerKey, runDir, prompt, schemaName) => ({
+      runtime: 'claude',
+      adapter: 'claude-print',
+      launch: { command: 'mock', argsPrefix: [], shell: false },
+      args: ['-p', '--input-format', 'text', '--output-format', 'json'],
+      cwd: workdir,
+      stdin: prompt,
+      env: runtimeAdapters.managedRunEnv('claude', { TP_AGENT_RUN_DIR: runDir }),
+      schemaPath: schemaPath(schemaName),
+    }),
+    buildCodexProviderInvocation: (options, runDir, prompt, lastMessageFile) => ({
+      runtime: 'codex',
+      adapter: 'codex-exec',
+      launch: { command: 'mock', argsPrefix: [], shell: false },
+      args: ['exec', '-C', workdir, '--json', '--output-last-message', lastMessageFile, '-'],
+      cwd: workdir,
+      stdin: prompt,
+      env: runtimeAdapters.managedRunEnv('codex', { TP_AGENT_RUN_DIR: runDir }),
+      schemaPath: schemaPath('agent-handoff.schema.json'),
+    }),
+    prepareProviderAttempt,
+    acceptProviderAttempt,
+    runProviderPostProcess,
+    providerStep,
+    providerPostAcceptanceStep,
+    assertProviderStructuredOutput,
+    providerResumeRefs,
+    writeProviderHandoffBundle,
+    validateProviderHandoffBundle,
+    currentGitSha: () => null,
+    buildNativeExecutionPlan,
+    orchestrationOwner: nativeExecutionControl.orchestrationOwner,
+    normalizeClaudeOutput: (input) => {
+      const source = input && typeof input === 'object' ? input.stdout : input;
+      return {
+        runtime: 'claude',
+        adapter: input && input.adapter ? input.adapter : 'claude-print',
+        status: 'succeeded',
+        accepted: true,
+        nativeAccepted: true,
+        terminalEvidence: { observed: true, event: 'result', status: 'success' },
+        nativeAcceptanceErrors: [],
+        runtimeRefs: { sessionId: 'claude-selftest-session' },
+        payload: JSON.parse(source),
+        usage: null,
+      };
+    },
+    normalizeCodexOutput: (input) => ({
+      runtime: 'codex',
+      adapter: input.adapter || 'codex-exec',
+      status: 'succeeded',
+      accepted: true,
+      nativeAccepted: true,
+      terminalEvidence: {
+        observed: true,
+        event: 'turn.completed',
+        status: 'completed',
+      },
+      nativeAcceptanceErrors: [],
+      runtimeRefs: {
+        threadId: 'codex-selftest-thread',
+        turnId: 'codex-selftest-turn',
+      },
+      payload: JSON.parse(input.lastMessage || input.stdout),
+      usage: null,
+    }),
+    hashArtifact: providerProfiles.hash,
     isGitRepository: () => false,
     writeGitDiff: () => '',
     listChangedFiles: () => [],
@@ -2744,6 +4362,8 @@ Usage:
   node scripts/agent-orchestrator.js freeze --run <runId>
   node scripts/agent-orchestrator.js resume --run <runId> --validation-command "npm test"
   node scripts/agent-orchestrator.js status --run latest
+  node scripts/agent-orchestrator.js goal-bind --run <runId> --runtime codex --host-ref <opaque-ref> --objective "..."
+  node scripts/agent-orchestrator.js goal-release --run <runId> [--reason "..."]
   node scripts/agent-orchestrator.js doctor
   node scripts/agent-orchestrator.js self-test
 
@@ -2759,6 +4379,7 @@ Pipeline mode (experimental opt-in):
 Options:
   --workdir <path>              Repository root. Defaults to cwd.
   --runs-dir <path>             Run directory under workdir. Defaults to .agent-runs.
+  --control-root <path>         External authoritative control root. Advanced/testing override.
   --run-id <id>                 Stable run id.
   --auto                        Auto-evaluate safe gates. Classic: freeze spec only when self-check passes.
   --auto-evaluate               Alias for --auto.
@@ -2780,6 +4401,13 @@ Options:
   --skip-cli-schema             Do not pass CLI schema flags.
   --skip-git-repo-check         Pass Codex --skip-git-repo-check.
   --codex-sandbox <mode>        Override Codex sandbox mode. Windows defaults to workspace-write.
+  --orchestration-owner <owner> Single scheduler owner: tp | codex-host | claude-host.
+  --capability-router <mode>    Capability routing: off | shadow | enforce. Defaults to shadow.
+  --claude-adapter <mode>       Claude adapter: print | bare | auto. Defaults to print.
+  --claude-plugin-dir <path>    Explicit plugin dir for Claude bare mode. Repeatable.
+  --claude-settings <path>      Explicit Claude settings file for the adapter.
+  --codex-adapter <mode>        Codex adapter: exec | app-server | auto. Defaults to exec.
+  --allow-experimental-app-server  Permit preparing the experimental App Server adapter.
   --provider-timeout-minutes <n> Override spec/implementation/review provider timeout.
   --provider-timeout-ms <n>     Override provider timeout in milliseconds.
   --dry-run                     Create run files and prompts without calling providers.
@@ -2808,6 +4436,12 @@ function main() {
     case 'status':
       runStatus(options, positionals);
       break;
+    case 'goal-bind':
+      bindGoalLease(options, positionals);
+      break;
+    case 'goal-release':
+      releaseGoalLease(options, positionals);
+      break;
     case 'doctor':
     case 'preflight':
       runDoctor(options);
@@ -2824,10 +4458,18 @@ function main() {
   }
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`[FAIL] ${error.message}`);
-  if (process.env.AGENT_LOOP_DEBUG) console.error(error.stack);
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`[FAIL] ${error.message}`);
+    if (process.env.AGENT_LOOP_DEBUG) console.error(error.stack);
+    process.exit(1);
+  }
 }
+
+module.exports = {
+  collectGitDiff,
+  listChangedFiles,
+  worktreeFileFingerprint,
+};

@@ -3,10 +3,11 @@
 /**
  * Propagate user-level/commands/*.md changes to:
  *  - plugins/tech-persistence/commands/*.md (verbatim)
- *  - plugins/tech-persistence/skills/<cmd>/SKILL.md (preserves SKILL frontmatter + wrapper, replaces "## Command Instructions" section body)
  *  - .codex/commands/*.md (native thin entry for think/plan/work/review/compound/sprint; regex otherwise)
  *  - plugins/tech-persistence/codex-skills/* (rebuilt projection)
- *  - user-level/skills/<cmd>/SKILL.md (when present)
+ *
+ * Claude plugin skills are independent canonical skills and are never derived
+ * from commands. Command wrappers exist only in the Codex projection.
  *
  * Also copies user-level/rules/<rule>.md to .codex/rules/<rule>.md for any rule
  * passed via --rules flag.
@@ -112,31 +113,6 @@ function propagateCommand(name) {
       continue;
     }
     writeText(target.path, target.transform(sourceText));
-    console.log(`[ok]   ${target.label}: ${path.relative(repoRoot, target.path)}`);
-  }
-
-  const skillTargets = [
-    {
-      label: 'plugin skill',
-      path: path.join(repoRoot, 'plugins', 'tech-persistence', 'skills', name, 'SKILL.md'),
-      transform: (_skill, body) => commandSkillWrapper(name, body),
-    },
-    {
-      label: 'user-level skill',
-      path: path.join(repoRoot, 'user-level', 'skills', name, 'SKILL.md'),
-      transform: (skill, body) => injectIntoSkillWrapper(skill, body),
-    },
-  ];
-
-  for (const target of skillTargets) {
-    if (!fs.existsSync(target.path)) continue;
-    const existing = readText(target.path);
-    const updated = target.transform(existing, sourceText);
-    if (!updated) {
-      console.warn(`[skip] ${target.label} for ${name}: no '## Command Instructions' marker`);
-      continue;
-    }
-    writeText(target.path, updated);
     console.log(`[ok]   ${target.label}: ${path.relative(repoRoot, target.path)}`);
   }
 

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/runtime-capability-snapshot.schema.json",
+  "title": "Runtime Capability Snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "runtime",
+    "profileId",
+    "adapter",
+    "declaredCapabilities",
+    "documentedMaturity",
+    "runtimeObserved",
+    "probeError",
+    "observedAt",
+    "effectiveCapabilities",
+    "source",
+    "snapshotHash"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "runtime-capability-snapshot-v1" },
+    "runtime": {
+      "type": "string",
+      "enum": ["codex", "claude"]
+    },
+    "profileId": { "type": "string", "minLength": 1 },
+    "adapter": { "type": "string", "minLength": 1 },
+    "declaredCapabilities": {
+      "$ref": "#/$defs/capabilities"
+    },
+    "documentedMaturity": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "stable",
+          "preview",
+          "experimental",
+          "deprecated",
+          "undocumented",
+          "unknown"
+        ]
+      }
+    },
+    "runtimeObserved": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "boolean" },
+          { "const": "unknown" }
+        ]
+      }
+    },
+    "probeError": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "observedAt": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "effectiveCapabilities": {
+      "$ref": "#/$defs/capabilities"
+    },
+    "source": { "type": "string", "minLength": 1 },
+    "snapshotHash": { "$ref": "#/$defs/hash" },
+    "capabilities": {
+      "description": "Legacy alias for declaredCapabilities.",
+      "$ref": "#/$defs/capabilities"
+    },
+    "verifiedAt": {
+      "description": "Legacy alias for observedAt.",
+      "type": ["string", "null"],
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

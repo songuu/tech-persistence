@@ -10,10 +10,22 @@
 const DEFAULT_PLUGIN_ROOT_EXPR = '${CLAUDE_PLUGIN_ROOT}';
 const SESSION_START_MATCHER = 'startup|clear|compact';
 const WRITE_TOOL_MATCHER = 'Write|Edit|MultiEdit|NotebookEdit|str_replace_editor|apply_patch|functions.apply_patch|write_file|edit_file|delete_file|move_file|create_file';
+const LIFECYCLE_EVIDENCE_EVENTS = Object.freeze([
+  'SubagentStart',
+  'SubagentStop',
+  'PostCompact',
+  'SessionEnd',
+]);
 
 const CODEX_HOOKS = Object.freeze([
   { event: 'SessionStart', matcher: SESSION_START_MATCHER, script: 'inject-context-codex.js', timeout: 3000, async: false },
   { event: 'PreToolUse', matcher: WRITE_TOOL_MATCHER, script: 'guard-handoff-path-codex.js', timeout: 1000, async: false, statusMessage: 'Checking handoff path' },
+  // Native lifecycle hooks are append-only evidence collectors. They never
+  // steer a turn, mutate orchestration state, or infer a run from the cwd.
+  { event: 'SubagentStart', matcher: '*', script: 'codex-lifecycle-evidence.js', timeout: 2, async: false },
+  { event: 'SubagentStop', matcher: '*', script: 'codex-lifecycle-evidence.js', timeout: 2, async: false },
+  { event: 'PostCompact', matcher: 'manual|auto', script: 'codex-lifecycle-evidence.js', timeout: 2, async: false },
+  { event: 'SessionEnd', matcher: 'other', script: 'codex-lifecycle-evidence.js', timeout: 3, async: false },
   // Codex 0.145 skips async command hooks. Keep Claude observation hooks in the
   // legacy registry, but do not project no-op registrations into Codex. The
   // legacy Stop evaluator consumes those observations; without them it adds a
@@ -56,6 +68,7 @@ function getCodexHookScriptNames() {
 module.exports = {
   CODEX_HOOKS,
   DEFAULT_PLUGIN_ROOT_EXPR,
+  LIFECYCLE_EVIDENCE_EVENTS,
   SESSION_START_MATCHER,
   WRITE_TOOL_MATCHER,
   buildCodexPluginHookConfig,

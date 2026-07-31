@@ -40,62 +40,136 @@ function transitionSlice(stateObj, sliceId, target, metadata = {}) {
   return pipelineState.transitionSlice(stateObj, sliceId, target, { source: 'pipeline-providers', ...metadata });
 }
 
-function callClaudeStructured(ctx, providerKey, stage, label, options, runDir, schemaName, prompt, logPrefix) {
+function callClaudeStructured(ctx, state, providerKey, stage, label, options, runDir, schemaName, prompt, logPrefix) {
   const stamp = ctx.logStamp();
   const stdoutFile = ctx.stampedLogPath(runDir, logPrefix, 'stdout.log', stamp);
   const stderrFile = ctx.stampedLogPath(runDir, logPrefix, 'stderr.log', stamp);
-  const args = ['-p', '--input-format', 'text', '--output-format', 'json'];
-  if (!ctx.boolOption(options, 'skip-cli-schema')) {
-    args.push('--json-schema', ctx.schemaJson(schemaName));
-  }
+  const workdir = ctx.resolveWorkdir(options);
+  const invocation = ctx.buildClaudeProviderInvocation(
+    options,
+    providerKey,
+    runDir,
+    prompt,
+    schemaName,
+    workdir,
+    ctx.providerResumeRefs(state, 'claude', providerKey, stage)
+  );
+  const attempt = ctx.prepareProviderAttempt(state, runDir, options, {
+    stage,
+    providerKey,
+    intent: 'read-only',
+    prompt,
+    schemaPath: invocation.schemaPath,
+    stamp,
+  });
   const { record, result } = ctx.runProcess(
     label,
-    ctx.providerLaunch(options, providerKey),
-    args,
+    invocation.launch,
+    invocation.args,
     {
-      cwd: ctx.resolveWorkdir(options),
+      cwd: invocation.cwd,
       stdoutFile,
       stderrFile,
-      stdin: prompt,
+      stdin: invocation.stdin,
       timeoutMs: ctx.providerTimeoutMs(options),
-      env: ctx.claudeProviderEnv(), phase: stage, providerKey, schemaPath: ctx.schemaPath(schemaName),
+      env: invocation.env,
+      phase: stage,
+      providerKey,
+      schemaPath: invocation.schemaPath,
+      options,
+      runtime: invocation.runtime,
+      adapter: invocation.adapter,
+      capabilitySnapshot: attempt.capabilitySnapshot,
+      taskEnvelopeHash: attempt.task.hash,
+      routeDecisionHash: attempt.route.decisionHash,
+      onFailure: attempt.onFailure,
     }
   );
-  return { record, result, stdoutFile, stderrFile };
+  const runtimeOutput = ctx.runProviderPostProcess(attempt, record, { result }, () => (
+    ctx.providerStep('output-normalization', () => ctx.normalizeClaudeOutput({
+      stdout: result.stdout || '',
+      adapter: invocation.adapter,
+    }))
+  ));
+  return { record, result, runtimeOutput, attempt, stdoutFile, stderrFile };
+}
+
+function acceptClaudeResult(ctx, state, attempt, record, runtimeOutput, payload, evidence = {}) {
+  const accepted = ctx.acceptProviderAttempt(state, attempt, {
+    status: runtimeOutput.status,
+    effects: { state: 'none', refs: [] },
+    runtimeRefs: {
+      claudeSession: runtimeOutput.runtimeRefs.sessionId,
+    },
+    runtimeResult: runtimeOutput,
+    evidence,
+    payload,
+  });
+  record.resultEnvelopeHash = accepted.result.hash;
+  record.acceptance = accepted.acceptance;
+  record.runtimeRefs = accepted.result.runtimeRefs;
+  record.usage = runtimeOutput.usage || record.usage;
+  return accepted;
 }
 
 function runGlobalContractProvider(ctx, state, statePath, runDir, options) {
   const prompt = safeRead(path.join(runDir, 'prompts', 'global-contract.md'));
   if (!prompt.trim()) throw new Error('global-contract prompt is empty');
-  const { record, result } = callClaudeStructured(
-    ctx, 'spec', 'global-contract', 'global contract provider', options, runDir,
+  const { record, result, runtimeOutput, attempt } = callClaudeStructured(
+    ctx, state, 'spec', 'global-contract', 'global contract provider', options, runDir,
     'global-contract.schema.json', prompt, 'global-contract'
   );
-  let parsed;
-  try {
-    parsed = ctx.extractJsonValue(result.stdout || '');
-  } catch (error) {
-    writeJson(path.join(runDir, 'global-contract.parse-error.json'), {
-      message: error.message,
-      stdoutFile: record.stdoutFile,
-      stderrFile: record.stderrFile,
-    });
-    throw new Error(`global contract provider output unparseable: ${error.message}`);
-  }
-  writeJson(path.join(runDir, 'global-contract.raw.json'), parsed);
-  const normalized = globalContract.writeGlobalContract(runDir, parsed, 'initial');
-  let next = transitionRun(
-    recordProviderRun(state, record),
-    pipelineState.RUN_STATES.GLOBAL_CONTRACT_READY,
-    { actor: 'spec-provider', reason: 'global contract generated' }
-  );
-  next = {
-    ...next,
-    files: { ...next.files, globalContract: 'global-contract.json' },
-  };
-  writeJson(statePath, next);
-  ctx.log(`[OK] global contract generated (hash=${normalized.contractHash}); review at ${path.join(runDir, 'global-contract.json')}`);
-  return next;
+  return ctx.runProviderPostProcess(attempt, record, { result, runtimeOutput }, () => {
+    let parsed;
+    try {
+      parsed = ctx.providerStep('structured-output-parse', () => (
+        runtimeOutput.payload === undefined
+          ? ctx.extractJsonValue(result.stdout || '')
+          : runtimeOutput.payload
+      ));
+      ctx.assertProviderStructuredOutput(
+        parsed,
+        'global-contract.schema.json',
+        'pipeline global contract'
+      );
+    } catch (error) {
+      writeJson(path.join(runDir, 'global-contract.parse-error.json'), {
+        message: error.message,
+        stdoutFile: record.stdoutFile,
+        stderrFile: record.stderrFile,
+      });
+      throw error;
+    }
+    ctx.providerStep('artifact', () => writeJson(
+      path.join(runDir, 'global-contract.raw.json'),
+      parsed
+    ));
+    const normalized = ctx.providerStep(
+      'artifact',
+      () => globalContract.writeGlobalContract(runDir, parsed, 'initial')
+    );
+    ctx.providerStep('acceptance', () => acceptClaudeResult(
+      ctx,
+      state,
+      attempt,
+      record,
+      runtimeOutput,
+      parsed,
+      { outputHash: ctx.hashArtifact(parsed) }
+    ));
+    let next = transitionRun(
+      recordProviderRun(state, record),
+      pipelineState.RUN_STATES.GLOBAL_CONTRACT_READY,
+      { actor: 'spec-provider', reason: 'global contract generated' }
+    );
+    next = {
+      ...next,
+      files: { ...next.files, globalContract: 'global-contract.json' },
+    };
+    ctx.providerPostAcceptanceStep('state-transition', () => writeJson(statePath, next));
+    ctx.log(`[OK] global contract generated (hash=${normalized.contractHash}); review at ${path.join(runDir, 'global-contract.json')}`);
+    return next;
+  });
 }
 
 function runSlicePlannerProvider(ctx, state, statePath, runDir, options) {
@@ -104,19 +178,27 @@ function runSlicePlannerProvider(ctx, state, statePath, runDir, options) {
   const alreadyPlanned = slicePlanner.listSliceIds(runDir);
   const prompt = slicePlanner.buildSlicePlannerPrompt(contract, alreadyPlanned, { workdir: ctx.resolveWorkdir(options) });
   writeText(path.join(runDir, 'prompts', `slice-planner-${alreadyPlanned.length}.md`), prompt);
-  const { record, result } = callClaudeStructured(
-    ctx, 'spec', 'slice-planner', 'slice planner provider', options, runDir,
-    'pipeline-slice.schema.json', prompt, `slice-planner-${alreadyPlanned.length}`
+  const { record, result, runtimeOutput, attempt } = callClaudeStructured(
+    ctx, state, 'spec', 'slice-planner', 'slice planner provider', options, runDir,
+    'pipeline-slice-batch.schema.json', prompt, `slice-planner-${alreadyPlanned.length}`
   );
+  return ctx.runProviderPostProcess(attempt, record, { result, runtimeOutput }, () => {
   let parsed;
   try {
-    parsed = ctx.extractJsonValue(result.stdout || '');
+    parsed = ctx.providerStep('structured-output-parse', () => (
+      runtimeOutput.payload === undefined
+        ? ctx.extractJsonValue(result.stdout || '')
+        : runtimeOutput.payload
+    ));
+    ctx.assertProviderStructuredOutput(
+      parsed,
+      'pipeline-slice-batch.schema.json',
+      'pipeline slice batch'
+    );
   } catch (error) {
-    throw new Error(`slice planner output unparseable: ${error.message}`);
+    throw error;
   }
-  const rawSlices = Array.isArray(parsed)
-    ? parsed
-    : Array.isArray(parsed && parsed.slices) ? parsed.slices : [];
+  const rawSlices = parsed.slices;
   let nextState = recordProviderRun(state, record);
   let q = queueModule.loadQueue(runDir);
   const offset = alreadyPlanned.length;
@@ -162,14 +244,25 @@ function runSlicePlannerProvider(ctx, state, statePath, runDir, options) {
     nextState = { ...nextState, pipeline: { ...nextState.pipeline, lastSliceBatchAt: ctx.nowIso() } };
     ctx.log(`[OK] slice planner produced ${rawSlices.length} slice(s).`);
   }
-  writeJson(statePath, nextState);
+  ctx.providerStep('acceptance', () => acceptClaudeResult(
+    ctx,
+    state,
+    attempt,
+    record,
+    runtimeOutput,
+    parsed,
+    { outputHash: ctx.hashArtifact(parsed) }
+  ));
+  ctx.providerPostAcceptanceStep('state-transition', () => writeJson(statePath, nextState));
   return nextState;
+  });
 }
 
 function runSliceImplementationProvider(ctx, state, statePath, runDir, options, slice) {
   const contract = globalContract.loadGlobalContract(runDir);
   if (!contract) throw new Error('slice impl: global contract not found');
   const workdir = ctx.resolveWorkdir(options);
+  const baseSha = ctx.currentGitSha(workdir);
   const prompt = sliceRunner.buildSliceImplementPrompt(contract, slice, { workdir });
   slicePlanner.writeSlicePrompts(runDir, slice.id, { implement: prompt });
   const beforeChangedFiles = ctx.listChangedFiles(workdir, runDir);
@@ -180,54 +273,97 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
   const stdoutFile = ctx.stampedLogPath(runDir, logPrefix, 'stdout.log', stamp);
   const stderrFile = ctx.stampedLogPath(runDir, logPrefix, 'stderr.log', stamp);
   const lastMessageFile = ctx.stampedLogPath(runDir, logPrefix, 'last-message.json', stamp);
-  const args = ['exec', '-C', workdir, '--json'];
-  args.push('--output-last-message', lastMessageFile);
-  const sandbox = ctx.codexSandboxMode(options);
-  if (sandbox) args.push('--sandbox', sandbox);
-  if (!ctx.isGitRepository(workdir) || ctx.boolOption(options, 'skip-git-repo-check')) {
-    args.push('--skip-git-repo-check');
-  }
-  if (!ctx.boolOption(options, 'skip-cli-schema')) {
-    args.push('--output-schema', ctx.schemaPath('agent-handoff.schema.json'));
-  }
-  args.push('-');
+  const invocation = ctx.buildCodexProviderInvocation(
+    options,
+    runDir,
+    prompt,
+    lastMessageFile,
+    workdir,
+    ctx.providerResumeRefs(
+      state,
+      'codex',
+      'implementation',
+      `slice-implementation-${slice.id}`
+    )
+  );
+  const attempt = ctx.prepareProviderAttempt(state, runDir, options, {
+    stage: `slice-implementation-${slice.id}`,
+    providerKey: 'implementation',
+    intent: 'write',
+    prompt,
+    schemaPath: invocation.schemaPath,
+    contractHash: contract.contractHash,
+    stamp,
+  });
 
-  const { record } = ctx.runProcess(
+  const { record, result } = ctx.runProcess(
     `slice impl provider [${slice.id}]`,
-    ctx.providerLaunch(options, 'implementation'),
-    args,
+    invocation.launch,
+    invocation.args,
     {
-      cwd: workdir,
+      cwd: invocation.cwd,
       stdoutFile,
       stderrFile,
-      stdin: prompt,
+      stdin: invocation.stdin,
+      env: invocation.env,
       timeoutMs: ctx.providerTimeoutMs(options),
+      phase: `slice-implementation-${slice.id}`,
+      providerKey: 'implementation',
+      schemaPath: invocation.schemaPath,
+      options,
+      runtime: invocation.runtime,
+      adapter: invocation.adapter,
+      capabilitySnapshot: attempt.capabilitySnapshot,
+      taskEnvelopeHash: attempt.task.hash,
+      routeDecisionHash: attempt.route.decisionHash,
+      onFailure: attempt.onFailure,
     }
   );
 
   const lastMessageText = safeRead(lastMessageFile);
+  return ctx.runProviderPostProcess(attempt, record, {
+    result,
+    lastMessage: lastMessageText,
+  }, () => {
+  const runtimeOutput = ctx.providerStep('output-normalization', () => ctx.normalizeCodexOutput({
+    stdout: result.stdout || safeRead(stdoutFile),
+    lastMessage: lastMessageText,
+    adapter: invocation.adapter,
+  }));
   let handoffParsed;
   try {
-    handoffParsed = ctx.extractJsonValue(lastMessageText || safeRead(stdoutFile));
+    handoffParsed = ctx.providerStep('structured-output-parse', () => (
+      runtimeOutput.payload !== undefined && runtimeOutput.payload !== null
+        ? runtimeOutput.payload
+        : ctx.extractJsonValue(lastMessageText || safeRead(stdoutFile))
+    ));
+    ctx.assertProviderStructuredOutput(
+      handoffParsed,
+      'agent-handoff.schema.json',
+      `pipeline implementation handoff ${slice.id}`
+    );
   } catch (error) {
     writeJson(path.join(runDir, 'slices', slice.id, 'handoff.parse-error.json'), {
       message: error.message,
       stdoutFile,
       lastMessageFile,
     });
-    throw withProviderRecord(new Error(`slice ${slice.id} impl handoff unparseable: ${error.message}`), record);
+    error.message = `slice ${slice.id} impl handoff invalid: ${error.message}`;
+    throw withProviderRecord(error, record);
   }
   sliceRunner.writeSliceHandoff(runDir, slice.id, handoffParsed);
 
   const diffPatch = ctx.writeGitDiff(workdir, runDir);
   sliceRunner.writeSliceDiff(runDir, slice.id, diffPatch);
   const afterChangedFiles = ctx.listChangedFiles(workdir, runDir);
+  sliceRunner.writeSliceChangedFiles(runDir, slice.id, afterChangedFiles);
   const afterSnapshot = sliceRunner.snapshotChangedFiles(workdir, afterChangedFiles);
   const changedFilesGate = sliceRunner.evaluateSliceChangedFiles(slice, beforeSnapshot, afterSnapshot);
   sliceRunner.writeSliceChangedFilesGate(runDir, slice.id, changedFilesGate);
   try {
     sliceRunner.assertSliceChangedFilesGate(changedFilesGate);
   } catch (error) {
+    error.providerFailureKind = error.providerFailureKind || 'changed-files-gate';
     throw withProviderRecord(error, record);
   }
 
@@ -242,7 +378,9 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
         validation.status = 'blocked';
         validation.commands.push({ command, policy: decision });
         sliceRunner.writeSliceValidation(runDir, slice.id, validation);
-        throw withProviderRecord(new Error(`slice ${slice.id} validation rejected: ${decision.reason}`), record);
+        const error = new Error(`slice ${slice.id} validation rejected: ${decision.reason}`);
+        error.providerFailureKind = 'validation';
+        throw withProviderRecord(error, record);
       }
       const vStamp = ctx.logStamp();
       const vOut = ctx.stampedLogPath(runDir, `slice-${slice.id}-validation-${index}`, 'stdout.log', vStamp);
@@ -259,11 +397,63 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
   }
   sliceRunner.writeSliceValidation(runDir, slice.id, validation);
   if (validation.status === 'failed') {
-    throw withProviderRecord(
-      new Error(`slice ${slice.id} validation failed; see ${path.join(runDir, 'slices', slice.id, 'validation.json')}`),
-      record
+    const error = new Error(
+      `slice ${slice.id} validation failed; see ${path.join(runDir, 'slices', slice.id, 'validation.json')}`
     );
+    error.providerFailureKind = 'validation';
+    throw withProviderRecord(error, record);
   }
+
+  const effectRefs = afterChangedFiles.length > 0
+    ? [ctx.hashArtifact({
+      changedFiles: afterChangedFiles,
+      diffHash: ctx.hashArtifact(diffPatch),
+    })]
+    : [];
+  const accepted = ctx.providerStep('acceptance', () => ctx.acceptProviderAttempt(state, attempt, {
+    status: runtimeOutput.status,
+    effects: {
+      state: effectRefs.length > 0 ? 'committed' : 'none',
+      refs: effectRefs,
+    },
+    runtimeRefs: {
+      codexThread: runtimeOutput.runtimeRefs.threadId,
+      codexTurn: runtimeOutput.runtimeRefs.turnId,
+    },
+    runtimeResult: runtimeOutput,
+    evidence: {
+      handoffHash: ctx.hashArtifact(handoffParsed),
+      changedFilesGateHash: ctx.hashArtifact(changedFilesGate),
+      validationHash: ctx.hashArtifact(validation),
+      diffHash: ctx.hashArtifact(diffPatch),
+      changedFilesHash: ctx.hashArtifact(afterChangedFiles),
+      baseSha,
+      headSha: ctx.currentGitSha(workdir),
+    },
+    payload: handoffParsed,
+  }));
+  record.resultEnvelopeHash = accepted.result.hash;
+  record.acceptance = accepted.acceptance;
+  record.runtimeRefs = accepted.result.runtimeRefs;
+  record.usage = runtimeOutput.usage || record.usage;
+  ctx.providerPostAcceptanceStep('post-acceptance-artifact', () => ctx.writeProviderHandoffBundle(
+    state,
+    runDir,
+    options,
+    attempt,
+    accepted,
+    {
+      relativeFile: path.join('slices', slice.id, 'provider-handoff.json'),
+      recordStateFile: false,
+      artifactPaths: {
+        handoff: path.join('slices', slice.id, 'handoff.json'),
+        diff: path.join('slices', slice.id, 'diff.patch'),
+        validation: path.join('slices', slice.id, 'validation.json'),
+        changedFiles: path.join('slices', slice.id, 'changed-files.json'),
+        changedFilesGate: path.join('slices', slice.id, 'changed-files-gate.json'),
+      },
+    }
+  ));
 
   let next = transitionSlice(
     recordProviderRun(state, record),
@@ -271,37 +461,65 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
     pipelineState.SLICE_STATES.IMPLEMENTED,
     { actor: 'implementation-provider', reason: 'slice implementation provider completed' }
   );
-  writeJson(statePath, next);
+  ctx.providerPostAcceptanceStep('state-transition', () => writeJson(statePath, next));
   return next;
+  });
 }
 
 function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
   const contract = globalContract.loadGlobalContract(runDir);
   if (!contract) throw new Error('slice review: global contract not found');
+  ctx.validateProviderHandoffBundle(state, runDir, options, {
+    relativeFile: path.join('slices', slice.id, 'provider-handoff.json'),
+    expectedContractHash: contract.contractHash,
+  });
   const diffPath = path.join(runDir, 'slices', slice.id, 'diff.patch');
   const handoffPath = path.join(runDir, 'slices', slice.id, 'handoff.json');
   const changedFilesGatePath = path.join(runDir, 'slices', slice.id, 'changed-files-gate.json');
   const prompt = slicePlanner.buildSliceReviewPrompt(contract, slice, { diffPath, handoffPath, changedFilesGatePath });
   slicePlanner.writeSlicePrompts(runDir, slice.id, { review: prompt });
 
-  const { record, result } = callClaudeStructured(
-    ctx, 'review', 'slice-review', `slice review provider [${slice.id}]`, options, runDir,
+  const { record, result, runtimeOutput, attempt } = callClaudeStructured(
+    ctx, state, 'review', `slice-review-${slice.id}`, `slice review provider [${slice.id}]`, options, runDir,
     'review-result.schema.json', prompt, `slice-${slice.id}-review`
   );
+  return ctx.runProviderPostProcess(attempt, record, { result, runtimeOutput }, () => {
   let reviewParsed;
   try {
-    reviewParsed = ctx.extractJsonValue(result.stdout || '');
+    reviewParsed = ctx.providerStep('structured-output-parse', () => (
+      runtimeOutput.payload === undefined
+        ? ctx.extractJsonValue(result.stdout || '')
+        : runtimeOutput.payload
+    ));
+    ctx.assertProviderStructuredOutput(
+      reviewParsed,
+      'review-result.schema.json',
+      `pipeline slice review ${slice.id}`
+    );
   } catch (error) {
     writeJson(path.join(runDir, 'slices', slice.id, 'review.parse-error.json'), {
       message: error.message,
       stdoutFile: record.stdoutFile,
       stderrFile: record.stderrFile,
     });
-    throw new Error(`slice ${slice.id} review unparseable: ${error.message}`);
+    throw error;
   }
-  reviewParsed = reconciliation.rejectRecursiveRevision({ ...reviewParsed, sliceId: slice.id });
-  review.writeSliceReview(runDir, slice.id, reviewParsed);
+  reviewParsed = ctx.providerStep(
+    'output-normalization',
+    () => reconciliation.rejectRecursiveRevision({ ...reviewParsed, sliceId: slice.id })
+  );
+  ctx.providerStep('artifact', () => review.writeSliceReview(runDir, slice.id, reviewParsed));
+  ctx.providerStep('acceptance', () => acceptClaudeResult(
+    ctx,
+    state,
+    attempt,
+    record,
+    runtimeOutput,
+    reviewParsed,
+    { reviewHash: ctx.hashArtifact(reviewParsed) }
+  ));
 
+  return ctx.providerPostAcceptanceStep('state-transition', () => {
   let next = recordProviderRun(state, record);
   const approved = review.reviewApproved(reviewParsed);
   const revisions = Array.isArray(reviewParsed.contractRevisions) ? reviewParsed.contractRevisions : [];
@@ -409,6 +627,8 @@ function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
   locksModule.saveLocks(runDir, locks);
   writeJson(statePath, next);
   return { state: next, drift: driftEntries, revisions };
+  });
+  });
 }
 
 function collectSlicesByState(state, target) {
@@ -424,22 +644,42 @@ function runIntegrationReviewProvider(ctx, state, statePath, runDir, options) {
   const prompt = slicePlanner.buildIntegrationReviewPrompt(contract, slices, { aggregatedValidation: aggregated });
   writeText(path.join(runDir, 'prompts', 'integration-review.md'), prompt);
 
-  const { record, result } = callClaudeStructured(
-    ctx, 'review', 'integration-review', 'integration review provider', options, runDir,
+  const { record, result, runtimeOutput, attempt } = callClaudeStructured(
+    ctx, state, 'review', 'integration-review', 'integration review provider', options, runDir,
     'review-result.schema.json', prompt, 'integration-review'
   );
+  return ctx.runProviderPostProcess(attempt, record, { result, runtimeOutput }, () => {
   let reviewParsed;
   try {
-    reviewParsed = ctx.extractJsonValue(result.stdout || '');
+    reviewParsed = ctx.providerStep('structured-output-parse', () => (
+      runtimeOutput.payload === undefined
+        ? ctx.extractJsonValue(result.stdout || '')
+        : runtimeOutput.payload
+    ));
+    ctx.assertProviderStructuredOutput(
+      reviewParsed,
+      'review-result.schema.json',
+      'pipeline integration review'
+    );
   } catch (error) {
     writeJson(path.join(runDir, 'integration-review.parse-error.json'), {
       message: error.message,
       stdoutFile: record.stdoutFile,
     });
-    throw new Error(`integration review unparseable: ${error.message}`);
+    throw error;
   }
-  review.writeIntegrationReview(runDir, reviewParsed);
+  ctx.providerStep('artifact', () => review.writeIntegrationReview(runDir, reviewParsed));
+  ctx.providerStep('acceptance', () => acceptClaudeResult(
+    ctx,
+    state,
+    attempt,
+    record,
+    runtimeOutput,
+    reviewParsed,
+    { reviewHash: ctx.hashArtifact(reviewParsed) }
+  ));
 
+  return ctx.providerPostAcceptanceStep('state-transition', () => {
   let next = recordProviderRun(state, record);
   if (review.reviewApproved(reviewParsed)) {
     next = transitionRun(next, pipelineState.RUN_STATES.COMPLETED, {
@@ -457,6 +697,8 @@ function runIntegrationReviewProvider(ctx, state, statePath, runDir, options) {
   writeJson(statePath, next);
   ctx.log(`[WARN] integration review decision=${reviewParsed.decision || 'unknown'}; run returns to executing-slices for follow-up.`);
   return next;
+  });
+  });
 }
 
 module.exports = {

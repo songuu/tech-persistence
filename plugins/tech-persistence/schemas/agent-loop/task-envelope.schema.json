@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/task-envelope.schema.json",
+  "title": "Dual Native Task Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "ref",
+    "hash",
+    "idempotencyKey",
+    "runtimeRefs",
+    "orchestrationOwner",
+    "intent",
+    "requiredCapabilities",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "task-envelope-v1" },
+    "kind": { "const": "task" },
+    "ref": { "type": "string", "minLength": 1 },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "pattern": "^idem:[a-f0-9]{64}$"
+    },
+    "runtimeRefs": { "$ref": "#/$defs/runtimeRefs" },
+    "orchestrationOwner": {
+      "type": "string",
+      "enum": ["tp", "codex-host", "claude-host"]
+    },
+    "intent": {
+      "type": "string",
+      "enum": ["read-only", "write"]
+    },
+    "requiredCapabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "runtimeRefs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "null"],
+        "minLength": 1
+      }
+    }
+  }
+}

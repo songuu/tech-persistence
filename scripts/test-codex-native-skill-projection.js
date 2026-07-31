@@ -17,6 +17,7 @@ const projectCommandRoot = path.join(root, '.codex', 'commands');
 const legacyRoot = path.join(pluginRoot, 'skills');
 const projectionRoot = path.join(pluginRoot, 'codex-skills');
 const builderPath = path.join(pluginRoot, 'scripts', 'build-codex-plugin.js');
+const builder = require(builderPath);
 const propagate = require(path.join(root, 'scripts', 'propagate-command-changes.js'));
 const { checkPropagateSync } = require(path.join(root, 'scripts', 'pre-commit-check.js'));
 const phaseNativeOverrides = ['compound', 'plan', 'review', 'sprint', 'think', 'work'];
@@ -66,22 +67,6 @@ function assertDirectoriesEqual(actualDir, expectedDir, label) {
   assert.strictEqual(directoryDigest(actualDir), directoryDigest(expectedDir), `${label}: bytes differ`);
 }
 
-function assertDirectoriesEqualWithCanonicalMarkdownEof(actualDir, expectedDir, label) {
-  const files = listFiles(expectedDir);
-  assert.deepStrictEqual(listFiles(actualDir), files, `${label}: file inventory differs`);
-  for (const relative of files) {
-    const expected = fs.readFileSync(path.join(expectedDir, relative));
-    const projected = relative.endsWith('.md')
-      ? Buffer.from(`${expected.toString('utf8').replace(/\r\n/g, '\n').replace(/\n+$/, '')}\n`)
-      : expected;
-    assert.deepStrictEqual(
-      fs.readFileSync(path.join(actualDir, relative)),
-      projected,
-      `${label}: ${relative} bytes differ`
-    );
-  }
-}
-
 function assertSourceTreeEmbedded(actualDir, expectedDir, label) {
   for (const relative of listFiles(expectedDir)) {
     const actual = path.join(actualDir, relative);
@@ -109,7 +94,6 @@ function readSkill(name) {
 }
 
 function runBuilder() {
-  const builder = require(builderPath);
   const messages = [];
   const originalLog = console.log;
   console.log = (...args) => messages.push(args.join(' '));
@@ -321,8 +305,23 @@ function assertSolutionIndexPluginRuntimeClosure() {
 }
 
 function assertProjectionContracts() {
-  const legacySkills = listSkillNames(legacyRoot);
-  assert.deepStrictEqual(listSkillNames(projectionRoot), legacySkills, 'codex projection inventory');
+  const claudeSkills = listSkillNames(legacyRoot);
+  const commandSkills = fs.readdirSync(path.join(root, 'user-level', 'commands'))
+    .filter((name) => name.endsWith('.md'))
+    .map((name) => path.basename(name, '.md'));
+  const expectedCodexSkills = [...new Set([...claudeSkills, ...commandSkills])].sort();
+  assert.deepStrictEqual(
+    listSkillNames(projectionRoot),
+    expectedCodexSkills,
+    'codex projection inventory'
+  );
+  for (const name of claudeSkills) {
+    assertDirectoriesEqual(
+      path.join(legacyRoot, name),
+      path.join(root, 'user-level', 'skills', name),
+      `${name} Claude native projection`
+    );
+  }
   assertMarkdownEofCanonical(path.join(pluginRoot, 'commands'), 'generated commands');
   assertMarkdownEofCanonical(projectionRoot, 'generated Codex skills');
   assertSolutionIndexPluginRuntimeClosure();
@@ -332,21 +331,24 @@ function assertProjectionContracts() {
     fs.readFileSync(path.join(root, 'user-level', 'commands', 'compound.md')),
     'Claude compound command projection must stay byte-identical'
   );
-  const legacyCompound = fs.readFileSync(path.join(legacyRoot, 'compound', 'SKILL.md'), 'utf8');
-  assert.match(legacyCompound, /Codex 按需读取；AGENTS\.md 无静态索引/);
-  assert.match(legacyCompound, /AGENTS\.md 不承载静态 solution index/);
-  assert.match(legacyCompound, /legacy managed block，仅删除该 block/);
-  assert.match(legacyCompound, /畸形 marker fail closed/);
-  assert.match(legacyCompound, /Codex solution index 的 always-on 注入为 0/);
-  assert.match(legacyCompound, /AGENTS projection: disabled/);
-  assert.doesNotMatch(legacyCompound, /AGENTS\.md 有界投影/);
-  assert.doesNotMatch(legacyCompound, /AGENTS\.md 仅保留 Codex 的有界 runtime 投影/);
+  const compoundWrapper = builder.commandToSkill(
+    'compound.md',
+    fs.readFileSync(path.join(root, 'user-level', 'commands', 'compound.md'), 'utf8')
+  );
+  assert.match(compoundWrapper, /Codex 按需读取；AGENTS\.md 无静态索引/);
+  assert.match(compoundWrapper, /AGENTS\.md 不承载静态 solution index/);
+  assert.match(compoundWrapper, /legacy managed block，仅删除该 block/);
+  assert.match(compoundWrapper, /畸形 marker fail closed/);
+  assert.match(compoundWrapper, /Codex solution index 的 always-on 注入为 0/);
+  assert.match(compoundWrapper, /AGENTS projection: disabled/);
+  assert.doesNotMatch(compoundWrapper, /AGENTS\.md 有界投影/);
+  assert.doesNotMatch(compoundWrapper, /AGENTS\.md 仅保留 Codex 的有界 runtime 投影/);
   assert.doesNotMatch(
-    legacyCompound,
+    compoundWrapper,
     /AGENTS\.md 的 `### 解决方案索引` managed block[^\n]*AGENTS\.md 不再承载/
   );
-  assert.doesNotMatch(legacyCompound, /只有 Codex 保留有界静态投影/);
-  assert.doesNotMatch(legacyCompound, /Claude|CLAUDE/);
+  assert.doesNotMatch(compoundWrapper, /只有 Codex 保留有界静态投影/);
+  assert.doesNotMatch(compoundWrapper, /Claude|CLAUDE/);
 
   for (const name of nativeOverrides) {
     const actual = path.join(projectionRoot, name);
@@ -388,10 +390,14 @@ function assertProjectionContracts() {
   }
   const fallbackName = 'test';
   assert(!nativeOverrides.includes(fallbackName), 'fallback fixture must not be native');
-  assertDirectoriesEqualWithCanonicalMarkdownEof(
-    path.join(projectionRoot, fallbackName),
-    path.join(legacyRoot, fallbackName),
-    `${fallbackName} legacy fallback projection`
+  const fallbackSource = fs.readFileSync(
+    path.join(root, 'user-level', 'commands', `${fallbackName}.md`),
+    'utf8'
+  );
+  assert.strictEqual(
+    fs.readFileSync(path.join(projectionRoot, fallbackName, 'SKILL.md'), 'utf8'),
+    builder.commandToSkill(`${fallbackName}.md`, fallbackSource),
+    `${fallbackName} command wrapper projection`
   );
 }
 

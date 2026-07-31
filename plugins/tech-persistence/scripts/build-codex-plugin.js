@@ -62,6 +62,7 @@ const expectedSkills = [
 const utilityScripts = [
   'configure-shared-homunculus.js',
   'agent-orchestrator.js',
+  'native-runtime-canary.js',
   'codex-active-sprint-state.js',
   'sync-solution-index.js',
   'update-codex-marketplace.js',
@@ -3083,10 +3084,13 @@ function transformCompoundCommandContent(content) {
   return projected;
 }
 function transformCommandContent(name, content) {
+  // agent-loop is intentionally cross-runtime: Claude remains the analysis/review
+  // provider while Codex is the implementation provider. A blanket Claude→Codex
+  // rewrite changes ownership semantics, so only normalize its line endings.
+  if (name === 'agent-loop.md') return normalizeLf(content);
   const transformed = name === 'compound.md'
     ? transformCompoundCommandContent(content)
     : normalizeLf(transform(content));
-  if (name === 'agent-loop.md') return preserveAgentLoopProviderProvenance(transformed);
   return transformed;
 }
 
@@ -3216,6 +3220,7 @@ function titleFromCommandName(name) {
 function commandToSkill(name, content) {
   const commandName = path.basename(name, '.md');
   const { data, body } = parseFrontmatter(transformCommandContent(name, content));
+  const commandBody = body.trimEnd();
   const description = data.description
     || `Run the former /${commandName} workflow in Codex.`;
   const title = titleFromCommandName(commandName);
@@ -3237,7 +3242,7 @@ When the command instructions below mention \`/${commandName}\`, interpret that 
 
 ## Command Instructions
 
-${body}
+${commandBody}
 `);
 }
 
@@ -3277,9 +3282,9 @@ function copyCommands() {
   return commandFiles.length;
 }
 
-function copySkills() {
+function copySkills(targetPluginRoot = pluginRoot) {
   const sourceDir = path.join(repoRoot, 'user-level', 'skills');
-  const targetDir = path.join(pluginRoot, 'skills');
+  const targetDir = path.join(targetPluginRoot, 'skills');
   const skillDirs = fs.readdirSync(sourceDir)
     .filter((name) => {
       const skillDir = path.join(sourceDir, name);
@@ -3294,16 +3299,64 @@ function copySkills() {
     copyDirectoryRecursive(
       path.join(sourceDir, name),
       path.join(targetDir, name),
-      { transformText: !name.startsWith('caveman') }
+      { transformText: false }
     );
   });
-  expectedCommands.forEach((name) => {
-    const source = path.join(repoRoot, 'user-level', 'commands', name);
-    const target = path.join(targetDir, path.basename(name, '.md'), 'SKILL.md');
-    const content = fs.readFileSync(source, 'utf-8');
-    writeTextFile(target, commandToSkill(name, content));
+  return skillDirs.length;
+}
+
+function copyClaudeAgents(targetPluginRoot = pluginRoot) {
+  const sourceDir = path.join(repoRoot, 'user-level', 'agents');
+  const targetDir = path.join(targetPluginRoot, 'agents');
+  const agentFiles = fs.readdirSync(sourceDir)
+    .filter((name) => name.endsWith('.md'))
+    .sort();
+  const expected = [
+    'claude-explorer.md',
+    'claude-implementer.md',
+    'claude-reviewer.md',
+  ];
+  assertInventory('Claude agents', agentFiles, expected);
+  emptyDir(targetDir);
+  agentFiles.forEach((name) => {
+    copyTextFile(path.join(sourceDir, name), path.join(targetDir, name), false);
   });
-  return skillDirs.length + expectedCommands.length;
+  return agentFiles.length;
+}
+
+function copyCodexAgents(targetPluginRoot = pluginRoot) {
+  const sourceDir = path.join(repoRoot, 'codex-native', 'agents');
+  const targetDir = path.join(targetPluginRoot, 'codex-agents');
+  const agentFiles = ['explorer.toml', 'implementer.toml', 'reviewer.toml'];
+  emptyDir(targetDir);
+  agentFiles.forEach((name) => {
+    copyTextFile(path.join(sourceDir, name), path.join(targetDir, name), false);
+  });
+  writeTextFile(path.join(targetDir, 'config.example.toml'), normalizeLf(`# Codex plugin manifests do not register custom agent roles.
+# Replace <plugin-root> with this installed plugin's absolute directory, then
+# merge these tables into a trusted project or user config.toml.
+
+[agents.tp_explorer]
+description = "Bounded read-only repository discovery and evidence collection"
+config_file = "<plugin-root>/codex-agents/explorer.toml"
+
+[agents.tp_implementer]
+description = "Scoped implementation in the active workspace with explicit verification"
+config_file = "<plugin-root>/codex-agents/implementer.toml"
+
+[agents.tp_reviewer]
+description = "Independent read-only review against the frozen contract and evidence"
+config_file = "<plugin-root>/codex-agents/reviewer.toml"
+`));
+  writeTextFile(path.join(targetDir, 'README.md'), normalizeLf(`# Codex native roles
+
+Codex custom roles are configured through \`[agents.<name>].config_file\`.
+The plugin manifest does not register roles, so use \`config.example.toml\` as
+an explicit opt-in configuration snippet. Relative role paths resolve from the
+config file that declares the role; the example therefore uses a plugin-root
+placeholder instead of guessing an install location.
+`));
+  return agentFiles.length;
 }
 
 function copyCodexSprintRuntime(sprintSkillDir) {
@@ -3314,22 +3367,29 @@ function copyCodexSprintRuntime(sprintSkillDir) {
 }
 
 
-function copyCodexSkills() {
-  const legacyDir = path.join(pluginRoot, 'skills');
+function copyCodexSkills(targetPluginRoot = pluginRoot) {
+  const canonicalSkillDir = path.join(repoRoot, 'user-level', 'skills');
   const nativeDir = path.join(repoRoot, 'codex-native', 'skills');
-  const targetDir = path.join(pluginRoot, 'codex-skills');
+  const targetDir = path.join(targetPluginRoot, 'codex-skills');
   emptyDir(targetDir);
 
-  fs.readdirSync(legacyDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(legacyDir, entry.name, 'SKILL.md')))
+  fs.readdirSync(canonicalSkillDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(canonicalSkillDir, entry.name, 'SKILL.md')))
     .sort((left, right) => left.name.localeCompare(right.name))
     .forEach((entry) => {
       copyDirectoryRecursive(
-        path.join(legacyDir, entry.name),
+        path.join(canonicalSkillDir, entry.name),
         path.join(targetDir, entry.name),
-        { transformText: false, canonicalizeMarkdownEof: true }
+        { transformText: !entry.name.startsWith('caveman') }
       );
     });
+
+  expectedCommands.forEach((name) => {
+    const source = path.join(repoRoot, 'user-level', 'commands', name);
+    const target = path.join(targetDir, path.basename(name, '.md'), 'SKILL.md');
+    const content = fs.readFileSync(source, 'utf-8');
+    writeTextFile(target, commandToSkill(name, content));
+  });
 
   fs.readdirSync(nativeDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(nativeDir, entry.name, 'SKILL.md')))
@@ -3346,9 +3406,15 @@ function copyCodexSkills() {
   copyCodexSprintRuntime(path.join(targetDir, 'sprint'));
 
 
-  return fs.readdirSync(targetDir)
+  const copiedSkills = fs.readdirSync(targetDir)
     .filter((name) => fs.existsSync(path.join(targetDir, name, 'SKILL.md')))
-    .length;
+    .sort();
+  const expectedCodexSkills = [...new Set([
+    ...expectedSkills,
+    ...expectedCommands.map((name) => path.basename(name, '.md')),
+  ])].sort();
+  assertInventory('generated codex skills', copiedSkills, expectedCodexSkills);
+  return copiedSkills.length;
 }
 
 function syncCodexSkill(name) {
@@ -3356,20 +3422,30 @@ function syncCodexSkill(name) {
     throw new Error(`invalid Codex skill name: ${name}`);
   }
   const nativeSource = path.join(repoRoot, 'codex-native', 'skills', name);
-  const legacySource = path.join(canonicalPluginRoot, 'skills', name);
-  const source = fs.existsSync(path.join(nativeSource, 'SKILL.md')) ? nativeSource : legacySource;
-  if (!fs.existsSync(path.join(source, 'SKILL.md'))) {
-    throw new Error(`missing Codex skill source: ${source}`);
+  const canonicalSkillSource = path.join(repoRoot, 'user-level', 'skills', name);
+  const commandSource = path.join(repoRoot, 'user-level', 'commands', `${name}.md`);
+  const hasNativeSource = fs.existsSync(path.join(nativeSource, 'SKILL.md'));
+  const hasCanonicalSkillSource = fs.existsSync(path.join(canonicalSkillSource, 'SKILL.md'));
+  const hasCommandSource = fs.existsSync(commandSource);
+  if (!hasNativeSource && !hasCanonicalSkillSource && !hasCommandSource) {
+    throw new Error(`missing Codex skill source: ${name}`);
   }
 
   const releaseLock = acquireBuildLock();
   const stageRoot = fs.mkdtempSync(path.join(os.tmpdir(), `tech-persistence-codex-skill-${name}-`));
   try {
-    copyDirectoryRecursive(
-      source,
-      stageRoot,
-      { transformText: false, canonicalizeMarkdownEof: source === legacySource }
-    );
+    if (hasNativeSource) {
+      copyDirectoryRecursive(nativeSource, stageRoot, { transformText: false });
+    } else if (hasCanonicalSkillSource) {
+      copyDirectoryRecursive(
+        canonicalSkillSource,
+        stageRoot,
+        { transformText: !name.startsWith('caveman') }
+      );
+    } else {
+      const content = fs.readFileSync(commandSource, 'utf8');
+      writeTextFile(path.join(stageRoot, 'SKILL.md'), commandToSkill(`${name}.md`, content));
+    }
     if (name === 'sprint') copyCodexSprintRuntime(stageRoot);
     syncManagedDirectory(
       stageRoot,
@@ -3508,7 +3584,9 @@ function main() {
       counts = {
         commandCount: copyCommands(),
         skillCount: copySkills(),
+        claudeAgentCount: copyClaudeAgents(),
         codexSkillCount: copyCodexSkills(),
+        codexAgentCount: copyCodexAgents(),
         hookCount: copyHooks(),
         codexHookCount: copyCodexHooks(),
         mcpCount: copyMcpRuntime(),
@@ -3521,7 +3599,7 @@ function main() {
     }
 
     const projectionDirectories = [
-      'commands', 'skills', 'codex-skills', 'hooks', 'codex-hooks', 'mcp', 'codex-homunculus-template',
+      'commands', 'skills', 'agents', 'codex-skills', 'codex-agents', 'hooks', 'codex-hooks', 'mcp', 'codex-homunculus-template',
       'scripts/lib', 'scripts/agent-orchestrator', 'schemas/agent-loop',
     ];
     // OFFLINE SOURCE-PROJECTION CONTRACT: this repository tree is never an
@@ -3544,13 +3622,15 @@ function main() {
   }
 
   const {
-    commandCount, skillCount, codexSkillCount, hookCount, codexHookCount,
+    commandCount, skillCount, claudeAgentCount, codexSkillCount, codexAgentCount, hookCount, codexHookCount,
     mcpCount, utilityCount, schemaCount,
   } = counts;
 
   console.log(`[OK] generated ${commandCount} commands`);
   console.log(`[OK] generated ${skillCount} skills`);
+  console.log(`[OK] generated ${claudeAgentCount} Claude agents`);
   console.log(`[OK] generated ${codexSkillCount} codex skills`);
+  console.log(`[OK] generated ${codexAgentCount} Codex agents`);
   console.log(`[OK] generated ${hookCount} hook files`);
   console.log(`[OK] generated ${codexHookCount} codex hook files`);
   console.log(`[OK] generated ${mcpCount} mcp runtime files`);
@@ -3597,7 +3677,10 @@ module.exports = {
   preserveAgentLoopProviderProvenance,
   transformCompoundCommandContent,
   transformCommandContent,
+  copySkills,
+  copyClaudeAgents,
   copyCodexSkills,
+  copyCodexAgents,
   copyCodexHooks,
   syncCodexSkill,
   assertSafePublishTarget,

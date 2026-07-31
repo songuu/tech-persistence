@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/result-envelope.schema.json",
+  "title": "Dual Native Result Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "ref",
+    "hash",
+    "idempotencyKey",
+    "runtimeRefs",
+    "taskRef",
+    "taskHash",
+    "taskIdempotencyKey",
+    "routeHash",
+    "providerRef",
+    "status",
+    "effects",
+    "native",
+    "evidence",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "result-envelope-v1" },
+    "kind": { "const": "result" },
+    "ref": { "type": "string", "minLength": 1 },
+    "hash": { "$ref": "#/$defs/hash" },
+    "idempotencyKey": { "$ref": "#/$defs/idempotencyKey" },
+    "runtimeRefs": { "$ref": "#/$defs/runtimeRefs" },
+    "taskRef": { "type": "string", "minLength": 1 },
+    "taskHash": { "$ref": "#/$defs/hash" },
+    "taskIdempotencyKey": { "$ref": "#/$defs/idempotencyKey" },
+    "routeHash": { "$ref": "#/$defs/hash" },
+    "providerRef": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["succeeded", "failed", "blocked"]
+    },
+    "effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "refs"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["none", "partial", "committed"]
+        },
+        "refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "native": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "runtime",
+            "adapter",
+            "nativeAccepted",
+            "terminalEvent",
+            "terminalStatus",
+            "acceptanceErrors"
+          ],
+          "properties": {
+            "runtime": { "type": ["string", "null"], "minLength": 1 },
+            "adapter": { "type": ["string", "null"], "minLength": 1 },
+            "nativeAccepted": { "type": "boolean" },
+            "terminalEvent": { "type": ["string", "null"], "minLength": 1 },
+            "terminalStatus": { "type": ["string", "null"], "minLength": 1 },
+            "acceptanceErrors": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "pattern": "^idem:[a-f0-9]{64}$"
+    },
+    "runtimeRefs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "null"],
+        "minLength": 1
+      }
+    }
+  }
+}

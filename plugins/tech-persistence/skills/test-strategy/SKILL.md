@@ -110,7 +110,7 @@ description: "当执行 /work、/review、/test 或涉及代码变更时加载�
 
 ## 测试框架约定
 
-读取项目 `.codex/rules/testing-patterns.md` 获取：
+读取项目 `.claude/rules/testing-patterns.md` 获取：
 - 测试框架（Jest/Vitest/Mocha/pytest）
 - 测试文件命名约定（`*.test.ts` / `*.spec.ts`）
 - Mock 策略偏好

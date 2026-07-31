@@ -1,0 +1,11 @@
+[agents.tp_explorer]
+description = "Bounded read-only repository discovery and evidence collection"
+config_file = "../codex-native/agents/explorer.toml"
+
+[agents.tp_implementer]
+description = "Scoped implementation in the active workspace with explicit verification"
+config_file = "../codex-native/agents/implementer.toml"
+
+[agents.tp_reviewer]
+description = "Independent read-only review against the frozen contract and evidence"
+config_file = "../codex-native/agents/reviewer.toml"

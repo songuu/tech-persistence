@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/provider-handoff.schema.json",
+  "title": "Dual Native Provider Handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "ref",
+    "hash",
+    "idempotencyKey",
+    "runtimeRefs",
+    "taskRef",
+    "taskHash",
+    "resultRef",
+    "resultHash",
+    "routeHash",
+    "from",
+    "to",
+    "readOnly"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "provider-handoff-v1" },
+    "kind": { "const": "provider-handoff" },
+    "ref": { "type": "string", "minLength": 1 },
+    "hash": { "$ref": "#/$defs/hash" },
+    "idempotencyKey": { "$ref": "#/$defs/idempotencyKey" },
+    "runtimeRefs": { "$ref": "#/$defs/runtimeRefs" },
+    "taskRef": { "type": "string", "minLength": 1 },
+    "taskHash": { "$ref": "#/$defs/hash" },
+    "resultRef": { "type": "string", "minLength": 1 },
+    "resultHash": { "$ref": "#/$defs/hash" },
+    "routeHash": { "$ref": "#/$defs/hash" },
+    "from": { "type": "string", "minLength": 1 },
+    "to": { "type": "string", "minLength": 1 },
+    "readOnly": { "type": "boolean" }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "pattern": "^idem:[a-f0-9]{64}$"
+    },
+    "runtimeRefs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "null"],
+        "minLength": 1
+      }
+    }
+  }
+}

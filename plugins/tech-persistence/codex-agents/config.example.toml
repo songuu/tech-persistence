@@ -1,0 +1,15 @@
+# Codex plugin manifests do not register custom agent roles.
+# Replace <plugin-root> with this installed plugin's absolute directory, then
+# merge these tables into a trusted project or user config.toml.
+
+[agents.tp_explorer]
+description = "Bounded read-only repository discovery and evidence collection"
+config_file = "<plugin-root>/codex-agents/explorer.toml"
+
+[agents.tp_implementer]
+description = "Scoped implementation in the active workspace with explicit verification"
+config_file = "<plugin-root>/codex-agents/implementer.toml"
+
+[agents.tp_reviewer]
+description = "Independent read-only review against the frozen contract and evidence"
+config_file = "<plugin-root>/codex-agents/reviewer.toml"

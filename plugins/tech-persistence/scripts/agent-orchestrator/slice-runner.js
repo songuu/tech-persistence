@@ -74,6 +74,10 @@ function sliceValidationPath(runDir, sliceId) {
   return path.join(sliceDir(runDir, sliceId), 'validation.json');
 }
 
+function sliceChangedFilesPath(runDir, sliceId) {
+  return path.join(sliceDir(runDir, sliceId), 'changed-files.json');
+}
+
 function sliceChangedFilesGatePath(runDir, sliceId) {
   return path.join(sliceDir(runDir, sliceId), 'changed-files-gate.json');
 }
@@ -88,6 +92,10 @@ function writeSliceDiff(runDir, sliceId, diff) {
 
 function writeSliceValidation(runDir, sliceId, validation) {
   writeJson(sliceValidationPath(runDir, sliceId), validation);
+}
+
+function writeSliceChangedFiles(runDir, sliceId, changedFiles) {
+  writeJson(sliceChangedFilesPath(runDir, sliceId), changedFiles);
 }
 
 function writeSliceChangedFilesGate(runDir, sliceId, gate) {
@@ -253,6 +261,7 @@ module.exports = {
   writeSliceHandoff,
   writeSliceDiff,
   writeSliceValidation,
+  writeSliceChangedFiles,
   writeSliceChangedFilesGate,
   loadSliceHandoff,
   snapshotChangedFiles,

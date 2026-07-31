@@ -26,6 +26,58 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-lifecycle-evidence.js\"",
+            "async": false,
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-lifecycle-evidence.js\"",
+            "async": false,
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-lifecycle-evidence.js\"",
+            "async": false,
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "other",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-lifecycle-evidence.js\"",
+            "async": false,
+            "timeout": 3
+          }
+        ]
+      }
     ]
   }
 }

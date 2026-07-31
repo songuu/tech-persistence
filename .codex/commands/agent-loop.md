@@ -1,16 +1,17 @@
 ---
-description: "v6 外部编排器：claude 产出冻结 spec，codex 按 spec 执行，claude 复审；可选 --pipeline 启用分片流水线"
+description: "v7 双原生控制面：Tech Persistence 单 owner 编排，Codex 产出/复审，Codex 实现；带 capability routing、验收 envelope 与 Goal lease"
 ---
 
-# /agent-loop — v6 外部 Agent 编排（可选 pipeline 流水线）
+# /agent-loop — v7 Codex × Codex 双原生编排
 
-v6 的主路径不是让两个 Agent 在各自命令里理解彼此，而是由外部 orchestrator 调用 provider：
+v7 保留 v6 的冻结 spec 主路径，同时把 Codex 与 Codex 的原生能力放进同一个可审计控制面：
 
-1. `claude -p` 只负责需求分析、技术设计、任务拆解。
-2. 人类 review 后 freeze spec。
-3. `codex exec` 只按冻结 spec 实现，并产出 diff、validation、handoff。
-4. `claude -p` 只按冻结 spec 做验收复审。
-5. 若复审不通过，orchestrator 把 review notes 转成 follow-up task，再交给 `codex exec`。
+1. Tech Persistence orchestrator 是默认且唯一的 scheduler/state owner；每个阶段只有一个 writer。
+2. Codex 只负责需求分析、技术设计、任务拆解和只读复审；默认保留 `print` adapter，`bare` 必须显式启用或由 enforce router 选择。
+3. 人类 review 后 freeze spec；Codex 默认通过 `exec` adapter 按冻结 spec 实现，并产出 diff、validation、handoff。
+4. provider 结果必须通过 task/route/capability hash 与幂等键验收，验收后才能推进状态机。
+5. Codex App Server 仅提供显式实验性 prepare/gate，不会在默认路径自动接管编排。
+6. 若复审不通过，orchestrator 把 review notes 转成 follow-up task，再交给原 writer；发生 partial effects 后禁止切换 provider。
 
 ## 用法
 
@@ -29,6 +30,8 @@ v6 的主路径不是让两个 Agent 在各自命令里理解彼此，而是由�
 /agent-loop resume <runId> --unblock <sliceId>
 /agent-loop abandon <runId>
 /agent-loop status [runId|latest]
+/agent-loop goal-bind <runId> --runtime <codex|claude> --host-ref <opaque-ref> --objective <目标>
+/agent-loop goal-release <runId> [--reason <原因>]
 /agent-loop doctor
 /agent-loop self-test
 ```
@@ -48,15 +51,22 @@ $agent-loop resume <runId> --resolve accept-revision --revision <revisionId>
 $agent-loop resume <runId> --unblock <sliceId>
 $agent-loop abandon <runId>
 $agent-loop status [runId|latest]
+$agent-loop goal-bind <runId> --runtime <codex|claude> --host-ref <opaque-ref> --objective <目标>
+$agent-loop goal-release <runId> [--reason <原因>]
 $agent-loop doctor
 $agent-loop self-test
 ```
 
 ## 可选参数
 
-- `--auto`：自动审查模式。orchestrator 在 spec 通过自校验（required 字段齐全、`questions: []` 为空、`assumptions` 不阻塞、acceptance 与 scope 不冲突）时自动 `freeze` 并继续 implementation + review；否则保留人工 freeze gate。review 通过即 `completed`；review 不通过仍按 follow-up 流程，不会绕过 P0。`--auto-evaluate` 与 `--auto-freeze` 是兼容别名，新文档和新调用统一使用 `--auto`。详见 `~/.codex/rules/auto-mode.md`。
+- `--auto`：自动审查模式。orchestrator 在 spec 通过自校验（required 字段齐全、`questions: []` 为空、`assumptions` 不阻塞、acceptance 与 scope 不冲突）时自动 `freeze` 并继续 implementation + review；否则保留人工 freeze gate。review 通过即 `completed`；review 不通过仍按 follow-up 流程，不会绕过 P0。`--auto-evaluate` 与 `--auto-freeze` 是兼容别名，新文档和新调用统一使用 `--auto`。是否允许追加该 flag 仍以当前项目的 auto-mode/risk 规则为准。
 - `--pipeline`：启用 pipeline 流水线模式。默认串行模式（`state.mode = "classic"`）行为完全不变；只有显式传 `--pipeline` 才进入新状态机。pipeline 模式先由 Codex 生成全局契约，冻结后再分批生成可执行 slice，每个 slice 独立冻结、独立 Codex 实现、独立 review，最后由 Codex 做 integration review。详见下方"Pipeline 模式"章节。`--pipeline --auto` 仅自动 freeze "safe" 对象，reconciliation slice 永不自动 freeze。
 - `--target`、`--slice-id`、`--resolve`、`--revision`、`--unblock`：pipeline 模式 freeze/resume 的细粒度控制。详见下方章节。
+- `--orchestration-owner <tp|codex-host|claude-host>`：声明唯一 scheduler owner；默认 `tp`。
+- `--control-root <path>`：仅供高级部署/测试覆盖权威控制存储位置；必须同时位于 runDir 与 provider workspace 之外。默认使用用户目录下的 `.tech-persistence/agent-loop-control/`，不会注入 provider 环境。
+- `--capability-router <off|shadow|enforce>`：能力路由模式；默认 `shadow`，记录决策但不改变旧 provider 路径。只有 `enforce` 才允许 effective capability 参与 adapter 选择。
+- `--claude-adapter <print|bare|auto>`：默认 `print`；`bare` 只在显式选择时使用，`auto` 在非 enforce 模式仍解析为 `print`。可配合 `--claude-plugin-dir`、`--claude-settings`。
+- `--codex-adapter <exec|app-server|auto>`：默认 `exec`；`app-server` 还必须显式传 `--allow-experimental-app-server`，当前只准备受控接口，不执行未验收的 live JSON-RPC 编排。
 
 ## 一致性保障
 
@@ -64,6 +74,15 @@ $agent-loop self-test
 - orchestrator 会自动解析 Windows npm shim，例如 `claude.cmd` 和 `codex.cmd`，不要求用户手动传真实 `.exe`。
 - spec、implementation、review prompt 都通过 stdin 或 artifact 文件传输，避免 Windows argv 过长。
 - provider 原始输出必须先归一化为 canonical spec / handoff / review，再驱动状态机。
+- CLI 的 schema 参数只是 provider 侧约束；即使显式 `--skip-cli-schema`，orchestrator 仍会使用本地、无依赖 schema 校验器拒绝空对象、缺字段、额外字段和非法枚举。
+- capability 只有在 declared、observed=true、policy 三者同时允许时才生效；`unknown` 永不授权。
+- task envelope、route decision、capability snapshot、result envelope 与 acceptance 必须 hash 绑定；duplicate/tamper 直接拒绝。
+- fallback 永远只读；存在 partial/committed effects 时禁止把 writer 切到另一个 runtime。
+- `executionPolicy` 会在创建 run 时持久化；resume 未显式覆盖时继承，显式 owner/router/adapter 冲突会在 provider 启动前拒绝。
+- 每个 run 的 provider dispatch 与 Goal mutation 都使用 provider workspace 外的权威锁。每个 lexical run locator 不可变绑定 canonical identity；canonical identity 再原子声明唯一 authority，因此同一 run 的不同 junction aliases 共享 dispatch/Goal lock，而 locator retarget 会 fail-closed。把 `controlRoot/runs`、`locators`、`identities` 或 run 专属控制目录重定向进 provider workspace 同样拒绝。删除 runDir 或伪造 runDir 内文件不能绕过活跃 owner；外部控制存储不可用时不回退到本地锁。
+- provider acceptance 固定使用 `provider-dispatch → goal-lease-update` 锁序，并在同一短临界区内重读 Goal revision、验证 dispatch context、写 canonical result/acceptance 与唯一 accepted record；bind/release 不反向获取 dispatch lock。
+- provider 失败会落盘 effect snapshot、失败 result/acceptance 与 opaque runtime refs。同 runtime/provider/stage 且存在原生 session/thread ref 时才可 native resume；已被 provider 接受、或 partial effects 无可验证原生 ref 时进入 reconcile，禁止静默重跑。
+- managed provider 只注入最小控制环境；Codex lifecycle hooks 仅在显式 `TP_AGENT_RUN_DIR` 下写 evidence，不推进状态、不写 Memory、不修改权限。
 - 如果 provider 或 schema 预检失败，先运行 `doctor`，不要手工绕过状态机。
 - 修改 orchestrator 后运行 `self-test`，它不调用外部 provider，只验证 codec / normalizer / schema 基础契约。
 
@@ -87,11 +106,11 @@ node scripts/agent-orchestrator.js self-test
 
 ### 新需求
 
-当参数不是 `freeze`、`resume`、`status`、`doctor`、`self-test`、`abandon` 时：
+当参数不是 `freeze`、`resume`、`status`、`goal-bind`、`goal-release`、`doctor`、`self-test`、`abandon` 时：
 
 1. 优先使用当前项目的 `scripts/agent-orchestrator.js`。
 2. 如果当前项目没有该脚本，查找 `~/plugins/tech-persistence/scripts/agent-orchestrator.js`。
-3. 若用户传了 `--pipeline`，进入 pipeline 流水线模式（详见下方章节）；否则走默认串行 v6 流程。
+3. 若用户传了 `--pipeline`，进入 pipeline 流水线模式（详见下方章节）；否则走默认串行 v7 流程。
 4. 运行：
 
 ```bash
@@ -191,11 +210,24 @@ node scripts/agent-orchestrator.js abandon --run <runId>
 node scripts/agent-orchestrator.js status --run <runId|latest>
 ```
 
+### Goal lease
+
+Goal lease 绑定当前 run 与一个原生 Codex/Codex **宿主 Goal**，不代表单个 worker stage，也不复制 provider 的 transcript、上下文或内部状态：
+
+```bash
+node scripts/agent-orchestrator.js goal-bind --run <runId> --runtime <codex|claude> --host-ref <opaque-ref> --objective "<目标>"
+node scripts/agent-orchestrator.js goal-release --run <runId> --reason "<可选原因>"
+```
+
+同一 run 同时只允许一个 active lease。`codex-host` / `claude-host` owner 只能绑定同 runtime Goal；默认 `tp` owner 可绑定任一宿主 Goal，并仍可让 Codex spec/review 与 Codex implementation 跨 runtime 执行。权威 lease 保存在外部控制存储，使用 revision/CAS；接收结果时在 `goal-lease-update` 临界区内重读并校验 revision、run、objective 与 owner，再提交 canonical acceptance。runDir 中只有不含 `hostRef` 的非权威投影。切换 host/runtime 前必须显式 release，防止两个原生任务同时成为 writer。
+
 ## 文件契约
 
 每次运行写入 `.agent-runs/<runId>/`：
 
 - `state.json`: orchestrator 状态机（`status`、`specFrozenAt`、`providerRuns[]`、`files`）。
+- `execution-plan.json`: v2 控制面快照（owner、adapter policy、capability snapshots、task/route hashes）。
+- `goal-lease.json`: 可选 Goal lease 的非权威投影；不含 host ref、原生 runtime transcript 或内部上下文。权威 lease 与 dispatch lock 位于 provider workspace 外的 control store。
 - `requirement.md`: 用户原始需求。
 - `commands.json`: 本次 run 解析出的 provider 启动命令快照。
 - `spec.json`: 冻结前的结构化需求契约（normalized）。
@@ -204,17 +236,21 @@ node scripts/agent-orchestrator.js status --run <runId|latest>
 - `technical-design.md`: 技术设计。
 - `task-breakdown.json`: 实现任务。
 - `changed-files.json`: 过滤 managed artifacts 后的变更清单。
-- `diff.patch`: codex 实现后的 diff（含 untracked synthetic diff）。
+- `diff.patch`: codex 实现后的 diff（含 untracked synthetic diff）。所有 tracked/staged path 额外使用有界摘要绑定 HEAD、index、worktree 与 porcelain rename/copy source；lockfile、generated、超大、二进制和 symlink 可省略正文但不能省略内容/链接目标摘要。`git diff` 非零会 fail-closed，buffer overflow 会写显式 marker 并使用摘要兜底；内容或跨 managed 边界 rename 漂移会使 handoff 失效。
 - `review-context.md`: review provider 使用的截断安全上下文。
 - `validation.json`: 验证结果（`status`/`commands[]`，包含每条命令 stdoutFile/stderrFile）。
 - `handoff.md`: 实现交接（人类可读）。
 - `handoff.json`: canonical 实现交接（normalized）。
+- `provider-handoff.json`: 跨 runtime 的只读交接 bundle，绑定 task/route/result/handoff hash 与 git/validation evidence。
 - `handoff.parse-error.json`: handoff JSON 解析失败时记录原始 stdout/last-message 文件位置。
 - `clarifications.md`: append-only 异步澄清通道（A3）。implementer 遇 spec 歧义时记录「采用的假设 + 问题」（status: open），不阻塞继续实现；spec-writer 在下一个 review gate 对每条追加 ruling（confirm-assumption / revise-spec，status: ruled）。ruling=revise-spec 时同时进 review findings/followUpTasks，走 `needs-followup` → resume re-implement 回路（classic 模式；不复用 pipeline 的 accept-revision）。
 - `review.json`: 验收复审（normalized）。
 - `review.raw.json`: provider 原始 review 输出。
 - `review.parse-error.json`: review JSON 解析失败时记录原始 stdout/stderr 文件位置。
 - `preflight.json`: 本机 provider/schema/workdir 预检。
+- `contracts/<stage>.<timestamp>.{task,route,capabilities,result,acceptance}.json`: 每次 provider attempt 的不可变控制与验收记录；同一 task 的 accepted canonical result 另存为 hash 命名文件。
+- `contracts/<stage>.<timestamp>.effects.json`: provider 失败时的前后 worktree snapshot、partial-effects 判定与 hash 证据；`state.json.providerRecovery` 保存 native/restart/reconcile 恢复决策和 opaque runtime refs。
+- `native-lifecycle-evidence/*.json`: 仅当 orchestrator 显式注入 `TP_AGENT_RUN_DIR` 时生成的 Codex lifecycle evidence；缺失 run 绑定时 hook 安全 no-op。
 - `follow-up-task.md`: 复审不通过时生成（含 findings 行式格式：`[severity] file:Lline: message — fix: ...`）。
 - `prompts/{spec,implement,review}.md`: 发给各 provider 的最终 prompt 文本。
 - `logs/{spec,implementation,review,validation-N}.<timestamp>.{stdout,stderr}.log`: 带时间戳的 provider 与 validation 日志，多次 resume 不互相覆盖。
@@ -227,6 +263,9 @@ node scripts/agent-orchestrator.js status --run <runId|latest>
 - review provider 只对照冻结 spec，不新增产品范围；同时兼任 spec-writer，对 implementer 提的 open clarification 逐条裁决。
 - implementer 遇 spec 歧义不阻塞：记录假设 + 问题到 `handoff.clarifications[]`，orchestrator append 进 `clarifications.md`，由下一个 gate 异步裁决（刻意不引入双向 runtime 实时通道）。
 - orchestrator 负责状态、日志、重试、恢复、diff 和 validation。
+- orchestrator 是默认唯一 scheduler/state owner；host 原生 agent、hooks、MCP 和 adapter 都不能绕过它推进状态。
+- 状态转换必须发生在 result acceptance 之后；相同幂等键的冲突结果必须进入 resume/reconcile，不能覆盖 accepted result。
+- 跨 runtime review 只能消费只读 provider handoff；fallback 不获得写权限。
 - `.agent-runs/`、`node_modules/`、构建产物等 managed artifacts 不参与 clean worktree 阻塞。
 - review 真通过时状态必须是 `completed`；`status: passed` / `canMerge: true` 等同义输出必须被归一化。
 

@@ -5,7 +5,7 @@ version: "5.0"
 
 # 持续自学习技能
 
-融合 ECC Continuous Learning v2 的本能架构 + Codex auto memory 的 `MEMORY.md` 索引方式 + Codex-Mem 的语义观察压缩。
+融合 ECC Continuous Learning v2 的本能架构 + Claude Code auto memory 的 `MEMORY.md` 索引方式 + Claude-Mem 的语义观察压缩。
 
 ## 系统架构
 
@@ -20,7 +20,7 @@ Memory v5 (memory/MEMORY.md + topic files)
   ↓ 验证/衰减/聚类
 进化产物 (evolved/ skills/commands/agents)
   ↓ 人工确认
-永久知识 (rules/ + AGENTS.md)
+永久知识 (rules/ + CLAUDE.md)
 ```
 
 ## Hook 配置
@@ -45,7 +45,7 @@ Memory v5 (memory/MEMORY.md + topic files)
 
 ### 1. 创建
 当检测到以下模式时自动创建，初始置信度 0.3：
-- 用户纠正了 Codex 的行为
+- 用户纠正了 Claude 的行为
 - 解决了一个错误（特别是花时间的）
 - 某个工具/工作流被反复使用
 - 做出了明确的技术偏好选择
@@ -68,12 +68,12 @@ Memory v5 (memory/MEMORY.md + topic files)
 3+ 个同域本能 → 可通过 /evolve 聚类为 skill/command/agent
 
 ### 6. 毕业
-进化产物经人工审核后 → 写入 .codex/rules/ 成为永久知识
+进化产物经人工审核后 → 写入 .claude/rules/ 成为永久知识
 
 ## 项目隔离
 
 系统自动检测项目身份（优先级）：
-1. `CODEX_PROJECT_DIR` 环境变量
+1. `CLAUDE_PROJECT_DIR` 环境变量
 2. `git remote get-url origin` → SHA256 hash 前 12 位
 3. `git rev-parse --show-toplevel` → 路径 hash
 4. 当前工作目录 hash（兜底）
@@ -83,7 +83,7 @@ Memory v5 (memory/MEMORY.md + topic files)
 ## 目录结构
 
 ```
-~/.codex/homunculus/
+~/.claude/homunculus/
 ├── projects.json                  # 项目注册表
 ├── instincts/
 │   ├── personal/                  # 全局本能
@@ -114,7 +114,7 @@ Memory v5 (memory/MEMORY.md + topic files)
 
 ## 配置项
 
-在 `~/.codex/homunculus/config.json` 中可调整：
+在 `~/.claude/homunculus/config.json` 中可调整：
 
 ```json
 {
