@@ -33,7 +33,7 @@ CLI 用持久 transaction、move-verify claim、exclusive-link、token/inode 锁
 
 - `reason === "sprint-recovery-required"` 优先于 canonical pointer：停止 Phase；原 mutation 可安全重试，completion 只用 `complete --expected compound` 闭环，不手工清记录。
 - `active === true`：普通 `/sprint` 与显式 `resume` 都恢复 pointer 当前 Phase，不扫描 handoff或重跑已完成 Phase。
-- `reason === "missing-pointer"`：普通启动新 sprint；仅显式 `resume` 按 `references/resume.md` 查 compact handoff。
+- `reason === "missing-pointer"`（非 `resume`）：本轮按请求建 `docs/plans/` 新 plan，`init` 后读回 `active=true,phase=think`；禁止只报告状态。仅显式 `resume` 按 `references/resume.md` 查 compact handoff。
 - `reason === "completed-sprint"`：上一轮已终结；新 sprint 可 `init`，CLI 在新 pointer 发布后消费 record，不恢复旧 Phase。
 - `reason === "completed-plan"`：仅 phase=`compound` 且证据核对后运行 `complete`；其他 phase 阻塞校正。
 - pointer/recovery 损坏、版本或路径非法均阻塞，不当作缺失或覆盖。新 plan 位于 `docs/plans/`；仅显式 resume 的唯一已验证 handoff 可用 `init --restore-phase`。

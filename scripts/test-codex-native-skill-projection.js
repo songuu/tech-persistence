@@ -185,6 +185,8 @@ function assertNativeContracts() {
   assert.match(sprint, /SPRINT_STATE_LOCKED/);
   assert.match(sprint, /禁止裸写/);
   assert.match(sprint, /active === true[^\n]*恢复 pointer 当前 Phase/);
+  assert.match(sprint, /missing-pointer[^\n]*按请求建[^\n]*docs\/plans\/[^\n]*init[^\n]*active=true,phase=think/);
+  assert.match(sprint, /missing-pointer[^\n]*禁止只报告状态/);
     assert(fs.existsSync(path.join(nativeRoot, 'sprint', 'references', reference)), `missing ${reference}`);
   }
 
