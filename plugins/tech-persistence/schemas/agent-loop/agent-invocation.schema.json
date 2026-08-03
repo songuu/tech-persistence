@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/agent-invocation.schema.json",
+  "title": "Agent Invocation Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "ref",
+    "hash",
+    "idempotencyKey",
+    "assignmentRef",
+    "assignmentHash",
+    "assignmentIdempotencyKey",
+    "runtime",
+    "adapter",
+    "enforcement",
+    "status",
+    "actualRole",
+    "runtimeRefs",
+    "native"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "agent-invocation-v1" },
+    "kind": { "const": "agent-invocation" },
+    "ref": { "type": "string", "minLength": 1 },
+    "hash": { "$ref": "#/$defs/hash" },
+    "idempotencyKey": { "$ref": "#/$defs/idempotencyKey" },
+    "assignmentRef": { "type": "string", "minLength": 1 },
+    "assignmentHash": { "$ref": "#/$defs/hash" },
+    "assignmentIdempotencyKey": { "$ref": "#/$defs/idempotencyKey" },
+    "runtime": { "type": "string", "minLength": 1 },
+    "adapter": { "type": "string", "minLength": 1 },
+    "enforcement": { "enum": ["contract-enforced", "native-enforced"] },
+    "status": { "enum": ["planned", "started", "completed", "failed", "blocked"] },
+    "actualRole": { "type": ["string", "null"], "minLength": 1 },
+    "runtimeRefs": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "null"], "minLength": 1 }
+    },
+    "native": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nativeAccepted", "terminalEvent", "terminalStatus", "acceptanceErrors"],
+      "properties": {
+        "nativeAccepted": { "type": "boolean" },
+        "terminalEvent": { "type": ["string", "null"], "minLength": 1 },
+        "terminalStatus": { "type": ["string", "null"], "minLength": 1 },
+        "acceptanceErrors": { "$ref": "#/$defs/stringArray" }
+      }
+    }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "idempotencyKey": { "type": "string", "pattern": "^idem:[a-f0-9]{64}$" },
+    "stringArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

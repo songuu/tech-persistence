@@ -44,6 +44,7 @@ function buildSliceImplementPrompt(globalContract, slice, options) {
   lines.push('You will implement exactly ONE slice. The global contract and the slice contract are FROZEN. Do not propose contract changes here — they belong in the slice review.');
   lines.push('');
   lines.push('Hard rules:');
+  lines.push('- Requested role contract: tp_implementer. This CLI execution is contract-enforced unless runtime evidence proves native role selection.');
   lines.push('- Touch only the files declared in ownedFiles. readFiles are read-only context.');
   lines.push('- Do not modify .agent-runs/ artifacts.');
   lines.push('- After implementation, return a JSON handoff that validates against agent-loop/agent-handoff.schema.json.');

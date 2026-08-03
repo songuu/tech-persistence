@@ -13,6 +13,9 @@ const {
   hashRouteDecision,
 } = require('./agent-orchestrator/capability-router');
 const {
+  createAgentAssignment,
+  createAgentInvocation,
+  validateAgentInvocation,
   createProviderHandoff,
   createResultEnvelope,
   createTaskEnvelope,
@@ -380,6 +383,78 @@ test('envelope and idempotency hashes are canonical', () => {
   );
 });
 
+test('agent assignment and invocation bind scope, role, and native proof', () => {
+  const task = createTaskEnvelope({
+    ref: 'task:agent-assignment',
+    orchestrationOwner: 'tp',
+    intent: 'write',
+    requiredCapabilities: ['repo-read', 'workspace-write'],
+    runtimeRefs: {},
+    payload: {},
+  });
+  const assignment = createAgentAssignment({
+    ref: 'assignment:agent-assignment',
+    task,
+    sliceRef: 'slice:agent-assignment',
+    role: 'tp_implementer',
+    intent: 'write',
+    ownedFiles: ['scripts/agent-orchestrator/execution-envelopes.js'],
+    readFiles: ['scripts/test-runtime-capability-router.js'],
+    workspaceMode: 'isolated',
+    worktreeRef: 'worktree:assignment-test',
+    enforcement: 'native-enforced',
+    requiredCapabilities: ['workspace-write'],
+  });
+  const invocation = createAgentInvocation({
+    ref: 'invocation:agent-assignment:1',
+    assignment,
+    runtime: 'codex',
+    adapter: 'codex-app-server',
+    enforcement: 'native-enforced',
+    status: 'completed',
+    actualRole: 'tp_implementer',
+    runtimeRefs: { codexThread: 'thread-assignment' },
+    native: {
+      nativeAccepted: true,
+      terminalEvent: 'turn.completed',
+      terminalStatus: 'completed',
+      acceptanceErrors: [],
+    },
+  });
+
+  assert.match(assignment.hash, /^sha256:[a-f0-9]{64}$/);
+  assert.match(invocation.hash, /^sha256:[a-f0-9]{64}$/);
+  assert.deepStrictEqual(validateAgentInvocation(assignment, invocation), {
+    accepted: true,
+    errors: [],
+  });
+  assert.throws(() => createAgentAssignment({
+    ref: 'assignment:invalid-reviewer-write',
+    task,
+    sliceRef: 'slice:invalid-reviewer-write',
+    role: 'tp_reviewer',
+    intent: 'write',
+    ownedFiles: ['x.js'],
+    enforcement: 'contract-enforced',
+  }), /read-only/);
+  assert.throws(() => createAgentInvocation({
+    ref: 'invocation:missing-native-proof',
+    assignment,
+    runtime: 'codex',
+    adapter: 'codex-app-server',
+    enforcement: 'native-enforced',
+    status: 'completed',
+    actualRole: null,
+    runtimeRefs: { codexThread: 'thread-assignment' },
+    native: {
+      nativeAccepted: false,
+      terminalEvent: null,
+      terminalStatus: null,
+      acceptanceErrors: ['target role unavailable'],
+    },
+  }), /actualRole/);
+});
+
 test('failed no-effect result permits only the routed read-only fallback', () => {
   const task = createTaskEnvelope({
     ref: 'task:fallback',
@@ -596,6 +671,16 @@ test('new JSON schemas expose strict versioned contract fields', () => {
     'route-decision.schema.json': [
       'schemaVersion', 'taskRef', 'taskHash', 'orchestrationOwner', 'status',
       'primary', 'writer', 'fallbacks', 'fallbackPolicy', 'decisionHash',
+    ],
+    'agent-assignment.schema.json': [
+      'schemaVersion', 'kind', 'ref', 'hash', 'idempotencyKey', 'taskRef',
+      'taskHash', 'sliceRef', 'role', 'intent', 'ownedFiles', 'readFiles',
+      'workspaceMode', 'worktreeRef', 'enforcement', 'requiredCapabilities',
+    ],
+    'agent-invocation.schema.json': [
+      'schemaVersion', 'kind', 'ref', 'hash', 'idempotencyKey', 'assignmentRef',
+      'assignmentHash', 'runtime', 'adapter', 'enforcement', 'status',
+      'actualRole', 'runtimeRefs', 'native',
     ],
   };
   for (const [name, required] of Object.entries(expectations)) {

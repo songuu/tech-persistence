@@ -15,6 +15,7 @@ const driftDetector = require('./drift-detector');
 const reconciliation = require('./reconciliation');
 const validationPolicy = require('./validation-command-policy');
 const { redactSensitiveText, redactArtifactValue } = require('../lib/redaction');
+const executionEnvelopes = require('./execution-envelopes');
 
 function ensureDir(dir) { fs.mkdirSync(dir, { recursive: true }); }
 function writeText(file, content) { ensureDir(path.dirname(file)); fs.writeFileSync(file, redactSensitiveText(String(content))); }
@@ -295,6 +296,38 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
     contractHash: contract.contractHash,
     stamp,
   });
+  const sliceArtifactsDir = path.join(runDir, 'slices', slice.id);
+  const agentAssignment = executionEnvelopes.createAgentAssignment({
+    ref: `assignment:${state.runId}:${slice.id}:${attempt.prefix}`,
+    task: attempt.task,
+    sliceRef: `slice:${slice.id}`,
+    role: 'tp_implementer',
+    intent: 'write',
+    ownedFiles: slice.ownedFiles || [],
+    readFiles: slice.readFiles || [],
+    workspaceMode: 'shared',
+    worktreeRef: null,
+    enforcement: 'contract-enforced',
+    requiredCapabilities: ['repo-read', 'workspace-write'],
+  });
+  writeJson(path.join(sliceArtifactsDir, 'agent-assignment.json'), agentAssignment);
+  const agentInvocationStarted = executionEnvelopes.createAgentInvocation({
+    ref: `invocation:${state.runId}:${slice.id}:${attempt.prefix}:started`,
+    assignment: agentAssignment,
+    runtime: invocation.runtime,
+    adapter: invocation.adapter,
+    enforcement: 'contract-enforced',
+    status: 'started',
+    actualRole: null,
+    runtimeRefs: {},
+    native: {
+      nativeAccepted: false,
+      terminalEvent: null,
+      terminalStatus: null,
+      acceptanceErrors: ['codex exec does not prove named native agent selection'],
+    },
+  });
+  writeJson(path.join(sliceArtifactsDir, 'agent-invocation.started.json'), agentInvocationStarted);
 
   const { record, result } = ctx.runProcess(
     `slice impl provider [${slice.id}]`,
@@ -330,6 +363,37 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
     lastMessage: lastMessageText,
     adapter: invocation.adapter,
   }));
+  const agentInvocation = executionEnvelopes.createAgentInvocation({
+    ref: `invocation:${state.runId}:${slice.id}:${attempt.prefix}:completed`,
+    assignment: agentAssignment,
+    runtime: runtimeOutput.runtime,
+    adapter: runtimeOutput.adapter,
+    enforcement: 'contract-enforced',
+    status: runtimeOutput.status === 'succeeded' ? 'completed' : 'failed',
+    actualRole: null,
+    runtimeRefs: {
+      codexThread: runtimeOutput.runtimeRefs.threadId,
+      codexTurn: runtimeOutput.runtimeRefs.turnId,
+    },
+    native: {
+      nativeAccepted: false,
+      terminalEvent: null,
+      terminalStatus: null,
+      acceptanceErrors: ['codex exec does not prove named native agent selection'],
+    },
+  });
+  const agentInvocationAcceptance = executionEnvelopes.validateAgentInvocation(
+    agentAssignment,
+    agentInvocation
+  );
+  if (!agentInvocationAcceptance.accepted) {
+    const error = new Error(
+      `slice ${slice.id} agent invocation rejected: ${agentInvocationAcceptance.errors.join('; ')}`
+    );
+    error.providerFailureKind = 'agent-invocation';
+    throw withProviderRecord(error, record);
+  }
+  writeJson(path.join(sliceArtifactsDir, 'agent-invocation.json'), agentInvocation);
   let handoffParsed;
   try {
     handoffParsed = ctx.providerStep('structured-output-parse', () => (
@@ -427,6 +491,9 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
       validationHash: ctx.hashArtifact(validation),
       diffHash: ctx.hashArtifact(diffPatch),
       changedFilesHash: ctx.hashArtifact(afterChangedFiles),
+      agentAssignmentHash: agentAssignment.hash,
+      agentInvocationHash: agentInvocation.hash,
+      agentInvocationAcceptanceHash: ctx.hashArtifact(agentInvocationAcceptance),
       baseSha,
       headSha: ctx.currentGitSha(workdir),
     },
@@ -436,6 +503,8 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
   record.acceptance = accepted.acceptance;
   record.runtimeRefs = accepted.result.runtimeRefs;
   record.usage = runtimeOutput.usage || record.usage;
+  record.agentAssignmentHash = agentAssignment.hash;
+  record.agentInvocationHash = agentInvocation.hash;
   ctx.providerPostAcceptanceStep('post-acceptance-artifact', () => ctx.writeProviderHandoffBundle(
     state,
     runDir,
@@ -451,6 +520,8 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
         validation: path.join('slices', slice.id, 'validation.json'),
         changedFiles: path.join('slices', slice.id, 'changed-files.json'),
         changedFilesGate: path.join('slices', slice.id, 'changed-files-gate.json'),
+        agentAssignment: path.join('slices', slice.id, 'agent-assignment.json'),
+        agentInvocation: path.join('slices', slice.id, 'agent-invocation.json'),
       },
     }
   ));

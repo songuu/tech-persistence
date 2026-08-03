@@ -915,6 +915,8 @@ validateLocalRequireClosure(
   'provider-handoff.schema.json',
   'runtime-capability-snapshot.schema.json',
   'route-decision.schema.json',
+  'agent-assignment.schema.json',
+  'agent-invocation.schema.json',
 ].forEach((schema) => {
   isFile(
     path.join(pluginRoot, 'schemas', 'agent-loop', schema),

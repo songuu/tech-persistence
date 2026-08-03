@@ -3995,6 +3995,24 @@ function runProviderIntegrationSelfTests() {
     fs.existsSync(path.join(tmpBase, 'slices', 'slice-001', 'changed-files.json')), true);
   assertSelfTest('provider integration: changed-files gate passed',
     JSON.parse(fs.readFileSync(path.join(tmpBase, 'slices', 'slice-001', 'changed-files-gate.json'), 'utf8')).ok, true);
+  assertSelfTest('provider integration: agent assignment is slice scoped',
+    fs.existsSync(path.join(tmpBase, 'slices', 'slice-001', 'agent-assignment.json')), true);
+  assertSelfTest('provider integration: agent invocation is slice scoped',
+    fs.existsSync(path.join(tmpBase, 'slices', 'slice-001', 'agent-invocation.json')), true);
+  const assignmentArtifact = JSON.parse(fs.readFileSync(
+    path.join(tmpBase, 'slices', 'slice-001', 'agent-assignment.json'),
+    'utf8'
+  ));
+  const invocationArtifact = JSON.parse(fs.readFileSync(
+    path.join(tmpBase, 'slices', 'slice-001', 'agent-invocation.json'),
+    'utf8'
+  ));
+  assertSelfTest('provider integration: assignment uses the implementer role',
+    assignmentArtifact.role, 'tp_implementer');
+  assertSelfTest('provider integration: CLI invocation remains contract-enforced',
+    invocationArtifact.enforcement, 'contract-enforced');
+  assertSelfTest('provider integration: CLI invocation does not claim a native role',
+    invocationArtifact.actualRole, null);
 
   writeText(path.join(mockWorkdir, 'mock.txt'), 'tampered staged content\n');
   spawnSync('git', ['add', 'mock.txt'], { cwd: mockWorkdir, encoding: 'utf8', shell: false });

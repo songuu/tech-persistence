@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/agent-assignment.schema.json",
+  "title": "Agent Assignment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "ref",
+    "hash",
+    "idempotencyKey",
+    "taskRef",
+    "taskHash",
+    "taskIdempotencyKey",
+    "sliceRef",
+    "role",
+    "intent",
+    "ownedFiles",
+    "readFiles",
+    "workspaceMode",
+    "worktreeRef",
+    "enforcement",
+    "requiredCapabilities"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "agent-assignment-v1" },
+    "kind": { "const": "agent-assignment" },
+    "ref": { "type": "string", "minLength": 1 },
+    "hash": { "$ref": "#/$defs/hash" },
+    "idempotencyKey": { "$ref": "#/$defs/idempotencyKey" },
+    "taskRef": { "type": "string", "minLength": 1 },
+    "taskHash": { "$ref": "#/$defs/hash" },
+    "taskIdempotencyKey": { "$ref": "#/$defs/idempotencyKey" },
+    "sliceRef": { "type": "string", "minLength": 1 },
+    "role": { "enum": ["tp_explorer", "tp_implementer", "tp_reviewer"] },
+    "intent": { "enum": ["read-only", "write"] },
+    "ownedFiles": { "$ref": "#/$defs/stringArray" },
+    "readFiles": { "$ref": "#/$defs/stringArray" },
+    "workspaceMode": { "enum": ["shared", "isolated"] },
+    "worktreeRef": { "type": ["string", "null"], "minLength": 1 },
+    "enforcement": { "enum": ["contract-enforced", "native-enforced"] },
+    "requiredCapabilities": { "$ref": "#/$defs/stringArray" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "idempotencyKey": { "type": "string", "pattern": "^idem:[a-f0-9]{64}$" },
+    "stringArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

@@ -97,6 +97,253 @@ function deriveIdempotencyKey(input) {
   return `idem:${stableHash(canonicalize(input)).slice('sha256:'.length)}`;
 }
 
+function roleIntent(role) {
+  const intents = {
+    tp_explorer: 'read-only',
+    tp_implementer: 'write',
+    tp_reviewer: 'read-only',
+  };
+  const normalized = nonEmptyString(role, 'role');
+  if (!Object.prototype.hasOwnProperty.call(intents, normalized)) {
+    throw new Error(`unsupported agent role ${normalized}`);
+  }
+  return { role: normalized, intent: intents[normalized] };
+}
+
+function normalizeEnforcement(value) {
+  const enforcement = value || 'contract-enforced';
+  if (!['contract-enforced', 'native-enforced'].includes(enforcement)) {
+    throw new Error('enforcement must be contract-enforced or native-enforced');
+  }
+  return enforcement;
+}
+
+function normalizeWorkspace(input) {
+  const workspaceMode = input.workspaceMode || 'shared';
+  if (!['shared', 'isolated'].includes(workspaceMode)) {
+    throw new Error('workspaceMode must be shared or isolated');
+  }
+  const worktreeRef = input.worktreeRef === undefined || input.worktreeRef === null
+    ? null
+    : nonEmptyString(input.worktreeRef, 'worktreeRef');
+  if (workspaceMode === 'isolated' && !worktreeRef) {
+    throw new Error('isolated workspaceMode requires worktreeRef');
+  }
+  return { workspaceMode, worktreeRef };
+}
+
+function normalizeAssignmentTask(task) {
+  if (!task || typeof task !== 'object' || Array.isArray(task)) {
+    throw new Error('assignment task envelope is required');
+  }
+  return {
+    taskRef: nonEmptyString(task.ref, 'task.ref'),
+    taskHash: nonEmptyString(task.hash, 'task.hash'),
+    taskIdempotencyKey: nonEmptyString(task.idempotencyKey, 'task.idempotencyKey'),
+  };
+}
+
+function createAgentAssignment(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('agent assignment input must be an object');
+  }
+  const task = normalizeAssignmentTask(input.task);
+  const assigned = roleIntent(input.role);
+  const intent = input.intent || assigned.intent;
+  if (intent !== assigned.intent) {
+    throw new Error(`${assigned.role} is ${assigned.intent}`);
+  }
+  const ownedFiles = normalizeStringArray(input.ownedFiles || [], 'ownedFiles');
+  const readFiles = normalizeStringArray(input.readFiles || [], 'readFiles');
+  if (intent === 'write' && ownedFiles.length === 0) {
+    throw new Error('write agent assignment requires ownedFiles');
+  }
+  if (ownedFiles.some((file) => readFiles.includes(file))) {
+    throw new Error('ownedFiles and readFiles must not overlap');
+  }
+  const workspace = normalizeWorkspace(input);
+  const enforcement = normalizeEnforcement(input.enforcement);
+  const core = {
+    schemaVersion: 'agent-assignment-v1',
+    kind: 'agent-assignment',
+    ref: nonEmptyString(input.ref, 'ref'),
+    ...task,
+    sliceRef: nonEmptyString(input.sliceRef, 'sliceRef'),
+    role: assigned.role,
+    intent,
+    ownedFiles,
+    readFiles,
+    ...workspace,
+    enforcement,
+    requiredCapabilities: normalizeStringArray(
+      input.requiredCapabilities || [],
+      'requiredCapabilities'
+    ),
+  };
+  const hash = stableHash(core);
+  return {
+    ...core,
+    hash,
+    idempotencyKey: deriveIdempotencyKey({
+      kind: core.kind,
+      ref: core.ref,
+      taskHash: core.taskHash,
+      sliceRef: core.sliceRef,
+      hash,
+    }),
+  };
+}
+
+function normalizeInvocationNative(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('invocation native proof is required');
+  }
+  if (typeof value.nativeAccepted !== 'boolean') {
+    throw new Error('native.nativeAccepted must be a boolean');
+  }
+  const optional = (field) => value[field] === undefined || value[field] === null
+    ? null
+    : nonEmptyString(value[field], `native.${field}`);
+  return {
+    nativeAccepted: value.nativeAccepted,
+    terminalEvent: optional('terminalEvent'),
+    terminalStatus: optional('terminalStatus'),
+    acceptanceErrors: normalizeStringArray(
+      value.acceptanceErrors || [],
+      'native.acceptanceErrors'
+    ),
+  };
+}
+
+function createAgentInvocation(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('agent invocation input must be an object');
+  }
+  const assignment = input.assignment;
+  if (!assignment || typeof assignment !== 'object' || Array.isArray(assignment)) {
+    throw new Error('agent invocation assignment is required');
+  }
+  const enforcement = normalizeEnforcement(input.enforcement);
+  if (enforcement !== assignment.enforcement) {
+    throw new Error('invocation enforcement must match assignment');
+  }
+  const status = input.status || 'planned';
+  if (!['planned', 'started', 'completed', 'failed', 'blocked'].includes(status)) {
+    throw new Error('invocation status is unsupported');
+  }
+  const actualRole = input.actualRole === undefined || input.actualRole === null
+    ? null
+    : nonEmptyString(input.actualRole, 'actualRole');
+  const native = normalizeInvocationNative(input.native);
+  if (actualRole !== null && actualRole !== assignment.role) {
+    throw new Error('actualRole must match assignment role');
+  }
+  if (enforcement === 'contract-enforced') {
+    if (actualRole !== null || native.nativeAccepted) {
+      throw new Error('contract-enforced invocation cannot claim a native role');
+    }
+  } else if (status === 'completed') {
+    if (actualRole === null) {
+      throw new Error('native-enforced completed invocation requires actualRole');
+    }
+    if (!native.nativeAccepted) {
+      throw new Error('native-enforced completed invocation requires native acceptance');
+    }
+  }
+  const core = {
+    schemaVersion: 'agent-invocation-v1',
+    kind: 'agent-invocation',
+    ref: nonEmptyString(input.ref, 'ref'),
+    assignmentRef: nonEmptyString(assignment.ref, 'assignment.ref'),
+    assignmentHash: nonEmptyString(assignment.hash, 'assignment.hash'),
+    assignmentIdempotencyKey: nonEmptyString(
+      assignment.idempotencyKey,
+      'assignment.idempotencyKey'
+    ),
+    runtime: nonEmptyString(input.runtime, 'runtime'),
+    adapter: nonEmptyString(input.adapter, 'adapter'),
+    enforcement,
+    status,
+    actualRole,
+    runtimeRefs: normalizeRuntimeRefs(input.runtimeRefs || {}),
+    native,
+  };
+  const hash = stableHash(core);
+  return {
+    ...core,
+    hash,
+    idempotencyKey: deriveIdempotencyKey({
+      kind: core.kind,
+      ref: core.ref,
+      assignmentHash: core.assignmentHash,
+      status: core.status,
+      hash,
+    }),
+  };
+}
+
+function validateAgentInvocation(assignment, invocation) {
+  const errors = [];
+  if (!assignment || typeof assignment !== 'object') {
+    errors.push('agent assignment is missing');
+  }
+  if (!invocation || typeof invocation !== 'object') {
+    errors.push('agent invocation is missing');
+  }
+  if (errors.length > 0) return { accepted: false, errors };
+  const { hash: assignmentHash, idempotencyKey: assignmentKey, ...assignmentCore } = assignment;
+  if (!HASH_PATTERN.test(assignmentHash) || stableHash(assignmentCore) !== assignmentHash) {
+    errors.push('agent assignment hash does not match');
+  }
+  if (assignmentKey !== deriveIdempotencyKey({
+    kind: assignment.kind,
+    ref: assignment.ref,
+    taskHash: assignment.taskHash,
+    sliceRef: assignment.sliceRef,
+    hash: assignment.hash,
+  })) {
+    errors.push('agent assignment idempotency key does not match');
+  }
+  if (invocation.assignmentRef !== assignment.ref
+      || invocation.assignmentHash !== assignment.hash
+      || invocation.assignmentIdempotencyKey !== assignment.idempotencyKey) {
+    errors.push('agent invocation does not belong to assignment');
+  }
+  if (invocation.enforcement !== assignment.enforcement) {
+    errors.push('agent invocation enforcement does not match assignment');
+  }
+  if (invocation.actualRole !== null && invocation.actualRole !== assignment.role) {
+    errors.push('agent invocation role does not match assignment');
+  }
+  if (assignment.enforcement === 'native-enforced'
+      && invocation.status === 'completed') {
+    if (invocation.actualRole !== assignment.role) {
+      errors.push('native assignment completed without assigned role proof');
+    }
+    if (!invocation.native || invocation.native.nativeAccepted !== true) {
+      errors.push('native assignment completed without native acceptance');
+    }
+  }
+  if (assignment.enforcement === 'contract-enforced'
+      && (invocation.actualRole !== null
+        || (invocation.native && invocation.native.nativeAccepted))) {
+    errors.push('contract assignment claims native role execution');
+  }
+  const { hash: invocationHash, idempotencyKey: invocationKey, ...invocationCore } = invocation;
+  if (!HASH_PATTERN.test(invocationHash) || stableHash(invocationCore) !== invocationHash) {
+    errors.push('agent invocation hash does not match');
+  }
+  if (invocationKey !== deriveIdempotencyKey({
+    kind: invocation.kind,
+    ref: invocation.ref,
+    assignmentHash: invocation.assignmentHash,
+    status: invocation.status,
+    hash: invocation.hash,
+  })) {
+    errors.push('agent invocation idempotency key does not match');
+  }
+  return { accepted: errors.length === 0, errors };
+}
 function createTaskEnvelope(input = {}) {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('task envelope input must be an object');
@@ -408,6 +655,9 @@ function validateResultForAcceptance(task, result, route, options = {}) {
 }
 
 module.exports = {
+  createAgentAssignment,
+  createAgentInvocation,
+  validateAgentInvocation,
   createProviderHandoff,
   createResultEnvelope,
   createTaskEnvelope,
