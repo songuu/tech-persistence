@@ -381,6 +381,14 @@ function resumePipelineRun(ctx, options, positionals) {
     'provider-dispatch',
     { command: 'resume', runId: stateObj.runId },
     () => {
+      ctx.turnBudget.ensureTurnBudgetForResume(
+        runDir,
+        stateObj.runId,
+        Object.prototype.hasOwnProperty.call(stateObj, 'turnBudgetPolicy')
+          ? stateObj.turnBudgetPolicy
+          : undefined,
+        controlStoreOptions(ctx, effectiveOptions, stateObj.workdir)
+      );
       const resolve = ctx.optionValue(effectiveOptions, 'resolve');
       if (resolve) {
         return resolveContractConflict(
@@ -704,7 +712,14 @@ function startPipelineRun(ctx, options, positionals) {
     ...stateObj,
     orchestrationOwner: executionPolicy.orchestrationOwner,
     executionPolicy,
+    turnBudgetPolicy: ctx.turnBudgetPolicyFromOptions(options),
   };
+  ctx.turnBudget.initializeTurnBudget(
+    runDir,
+    runId,
+    stateObj.turnBudgetPolicy,
+    controlStoreOptions(ctx, options, workdir)
+  );
   writePipelineSkeleton(runDir, requirement);
   fs.writeFileSync(
     path.join(runDir, 'prompts', 'global-contract.md'),

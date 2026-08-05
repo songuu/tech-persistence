@@ -9,6 +9,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const executionEnvelopes = require('./agent-orchestrator/execution-envelopes');
 const goalLease = require('./agent-orchestrator/goal-lease');
+const turnBudget = require('./agent-orchestrator/turn-budget');
 const turnTransaction = require('./agent-orchestrator/turn-transaction');
 
 const root = path.resolve(__dirname, '..');
@@ -416,6 +417,7 @@ function assertClassicValidationBlocksDurableWriteback(
     '--implementation-command', implementationCommand,
     '--review-command', specCommand,
     '--capability-router', 'shadow', '--control-root', controlRoot,
+    '--turn-budget-slots', '10',
     ...validationArgs,
   ];
 
@@ -440,17 +442,29 @@ function assertClassicValidationBlocksDurableWriteback(
 
   const contractsDir = path.join(runDir, 'contracts');
   const names = fs.readdirSync(contractsDir);
-  const journalName = names.find((name) => (
-    name.startsWith('implementation.') && name.endsWith('.turn-journal.json')
-  ));
-  assert(journalName, 'implementation validation failure must retain a turn journal');
-  const receipt = turnTransaction.replayTurnJournal(
-    turnTransaction.readTurnJournal(path.join(contractsDir, journalName))
-  );
+  const journalRecord = turnTransaction.listAuthoritativeTurnJournals(runDir, {
+    controlRoot,
+    providerRoot: temporaryRoot,
+    legacyFiles: [],
+  }).find((record) => record.receipt.phaseRecords.some((entry) => (
+    entry.phase === 'validation' && entry.payload.sourceStatus === sourceStatus
+  )));
+  assert(journalRecord, 'implementation validation failure must retain an authoritative turn journal');
+  const receipt = journalRecord.receipt;
   assert.strictEqual(receipt.validationStatus, 'failed');
   assert.strictEqual(receipt.currentPhase, 'validation');
   assert.strictEqual(receipt.nextPhase, 'durable-writeback');
   assert.strictEqual(receipt.phaseRecords.at(-1).payload.sourceStatus, sourceStatus);
+  const budgetLedger = turnBudget.readTurnBudgetLedger(runDir, {
+    controlRoot,
+    providerRoot: temporaryRoot,
+  });
+  assert(budgetLedger.spends.length > 0, 'earlier durable turns must spend budget');
+  assert.strictEqual(
+    budgetLedger.spends.some((entry) => entry.turnKey === receipt.turnKey),
+    false,
+    'validation failure before durable-writeback must not spend budget'
+  );
   const typedResultPhase = receipt.phaseRecords.find((entry) => entry.phase === 'typed-result');
   assert(typedResultPhase, 'validation failure receipt must retain its typed-result phase');
   const typedResult = readJson(
@@ -519,6 +533,7 @@ function assertPipelineValidationBlocksDurableWriteback(
     '--review-command', specCommand,
     '--capability-router', 'shadow',
     '--control-root', controlRoot,
+    '--turn-budget-slots', '10',
   ]);
 
   const sliceDir = path.join(runDir, 'slices', 'slice-001');
@@ -532,18 +547,29 @@ function assertPipelineValidationBlocksDurableWriteback(
 
   const contractsDir = path.join(runDir, 'contracts');
   const names = fs.readdirSync(contractsDir);
-  const journalName = names.find((name) => (
-    name.startsWith('slice-implementation-slice-001.')
-    && name.endsWith('.turn-journal.json')
-  ));
-  assert(journalName, 'pipeline validation failure must retain a turn journal');
-  const receipt = turnTransaction.replayTurnJournal(
-    turnTransaction.readTurnJournal(path.join(contractsDir, journalName))
-  );
+  const journalRecord = turnTransaction.listAuthoritativeTurnJournals(runDir, {
+    controlRoot,
+    providerRoot: temporaryRoot,
+    legacyFiles: [],
+  }).find((record) => record.receipt.phaseRecords.some((entry) => (
+    entry.phase === 'validation' && entry.payload.sourceStatus === sourceStatus
+  )));
+  assert(journalRecord, 'pipeline validation failure must retain an authoritative turn journal');
+  const receipt = journalRecord.receipt;
   assert.strictEqual(receipt.validationStatus, 'failed');
   assert.strictEqual(receipt.currentPhase, 'validation');
   assert.strictEqual(receipt.nextPhase, 'durable-writeback');
   assert.strictEqual(receipt.phaseRecords.at(-1).payload.sourceStatus, sourceStatus);
+  const budgetLedger = turnBudget.readTurnBudgetLedger(runDir, {
+    controlRoot,
+    providerRoot: temporaryRoot,
+  });
+  assert(budgetLedger.spends.length > 0, 'earlier durable turns must spend budget');
+  assert.strictEqual(
+    budgetLedger.spends.some((entry) => entry.turnKey === receipt.turnKey),
+    false,
+    'validation failure before durable-writeback must not spend budget'
+  );
   assert.strictEqual(receipt.completedPhases.includes('durable-writeback'), false);
   assert.strictEqual(
     names.some((name) => (
@@ -750,6 +776,7 @@ function main() {
       '--run-id', runId,
       '--dry-run',
       '--skip-git-repo-check',
+      '--turn-budget-slots', '2',
       '--spec-command', process.execPath,
       '--implementation-command', process.execPath,
       '--review-command', process.execPath,
@@ -768,6 +795,50 @@ function main() {
     assert.ok(executionPlan.stages.spec.capabilities, 'spec capability snapshot is required');
     assert.ok(executionPlan.stages.implementation.routeDecision, 'implementation route decision is required');
 
+    const initializedBudget = turnBudget.readTurnBudgetLedger(runDir, {
+      controlRoot,
+      providerRoot: temporaryRoot,
+    });
+    assert(initializedBudget, 'run initialization must create authority ledger');
+    assert.strictEqual(initializedBudget.runId, runId);
+    assert.strictEqual(initializedBudget.enabled, true);
+    assert.strictEqual(initializedBudget.maxSlots, 2);
+    assert.strictEqual(initializedBudget.revision, 0);
+    assert.deepStrictEqual(initializedBudget.spends, []);
+
+    const statePath = path.join(runDir, 'state.json');
+    let state = readJson(statePath);
+    state.turnBudgetPolicy = { enabled: false, maxSlots: null };
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\n');
+
+    const budgetStatus = JSON.parse(run([
+      'status',
+      '--workdir', temporaryRoot,
+      '--runs-dir', '.runs',
+      '--run', runId,
+      '--control-root', controlRoot,
+      '--json',
+    ]).stdout);
+    assert.strictEqual(budgetStatus.turnBudget.authority, 'external-control-store');
+    assert.strictEqual(budgetStatus.turnBudget.enabled, true);
+    assert.strictEqual(budgetStatus.turnBudget.max, 2);
+    assert.strictEqual(budgetStatus.turnBudget.revision, 0);
+
+    const dryResume = run([
+      'resume',
+      '--workdir', temporaryRoot,
+      '--runs-dir', '.runs',
+      '--run', runId,
+      '--control-root', controlRoot,
+    ]);
+    assert.match(dryResume.stdout, /dry-run.*No provider calls to resume/);
+    const budgetAfterResume = turnBudget.readTurnBudgetLedger(runDir, {
+      controlRoot,
+      providerRoot: temporaryRoot,
+    });
+    assert.strictEqual(budgetAfterResume.ledgerHash, initializedBudget.ledgerHash);
+    assert.strictEqual(budgetAfterResume.revision, 0);
+    assert.deepStrictEqual(budgetAfterResume.spends, []);
     run([
       'goal-bind',
       '--workdir', temporaryRoot,
@@ -788,7 +859,7 @@ function main() {
       'thread:test-opaque-ref'
     );
 
-    let state = readJson(path.join(runDir, 'state.json'));
+    state = readJson(path.join(runDir, 'state.json'));
     assert.strictEqual(state.files.goalLease, 'goal-lease.json');
 
     run([

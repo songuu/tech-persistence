@@ -297,6 +297,13 @@ node scripts\agent-orchestrator.js doctor
 node scripts\agent-orchestrator.js self-test
 node scripts\agent-orchestrator.js status --run latest
 node scripts\agent-orchestrator.js status --run latest --json  # 只读 Operator Review Packet + 最新 TurnReceipt
+
+# 可选：固定 compute-turn 预算；只在 durable-writeback 后幂等扣槽
+node scripts\agent-orchestrator.js run --requirement "原始需求" --turn-budget-slots 8
+
+# 宿主先实际应用 scheduler hint，再显式提交 apply 与 readback ACK
+node scripts\agent-orchestrator.js scheduler-apply --run <runId> --turn-key <sha256> --scheduler-owner <owner> --scheduler-ref <ref> --action <action> [--reset-token <token>] --applied-state-hash <sha256> --expected-journal-revision <n> --expected-journal-hash <sha256> --expected-goal-lease-revision <n>
+node scripts\agent-orchestrator.js scheduler-ack --run <runId> --turn-key <sha256> --scheduler-owner <owner> --scheduler-ref <ref> --apply-payload-hash <sha256> --observed-state-hash <sha256> --expected-journal-revision <n> --expected-journal-hash <sha256> --expected-goal-lease-revision <n>
 ```
 
 命令入口（参数与 CLI 对齐）：
@@ -311,9 +318,9 @@ node scripts\agent-orchestrator.js status --run latest --json  # 只读 Operator
 $agent-loop <原始需求>             # Codex 入口（同名 skill）
 ```
 
-运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review、follow-up task、`contracts/*.turn-journal.json`，以及带时间戳的 provider 日志和 prompt 文件。`.agent-runs/` 是运行态目录，不进入 Git。
+运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review、follow-up task，以及带时间戳的 provider 日志和 prompt 文件。Turn journal 与可选 budget ledger 的权威副本位于 provider workspace 之外的 external control store；旧 `contracts/*.turn-journal.json` 仅作为 gate 建立前的一次性迁移源。`turn-journals/` authority gate 建立后会冻结 legacy discovery，新 legacy turnKey 不再进入 read/list/migration。`.agent-runs/` 是运行态目录，不进入 Git。
 
-`status --json` 只读取既有 artifact，返回脱敏、有界的 Operator Review Packet 和最新 TurnReceipt。`schedulerHint.permission` 固定为 `none`，不会执行调度、写入 ACK 或授予新权限；Memory recall 同样显式标记为 advisory-only。
+`status --json` 只读取既有 artifact，返回脱敏、有界的 Operator Review Packet、确定性最新 TurnReceipt、Goal lease 与 turn budget 投影，不创建控制目录。`schedulerHint.permission` 始终为 `none`；只有宿主真实修改调度状态后，显式 `scheduler-apply` / `scheduler-ack` 才会在 owner、脱敏 Goal revision/identity/lease hash、journal CAS、reset token 和 readback hash 全部匹配时持久化证据。Memory recall 仍显式标记为 advisory-only。
 
 ### Agent Loop pipeline 模式（可选 opt-in，2026-05-11 新增）
 

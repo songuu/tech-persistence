@@ -14,10 +14,13 @@ const nativeExecutionControl = require('./agent-orchestrator/native-execution-co
 const goalLease = require('./agent-orchestrator/goal-lease');
 const executionEnvelopes = require('./agent-orchestrator/execution-envelopes');
 const runLock = require('./agent-orchestrator/run-lock');
+const controlStore = require('./agent-orchestrator/control-store');
 const providerLifecycle = require('./agent-orchestrator/provider-lifecycle');
 const structuredOutput = require('./agent-orchestrator/structured-output');
 const operatorReviewPacket = require('./agent-orchestrator/operator-review-packet');
 const turnTransaction = require('./agent-orchestrator/turn-transaction');
+const schedulerControl = require('./agent-orchestrator/scheduler-control');
+const turnBudget = require('./agent-orchestrator/turn-budget');
 
 const pipeline = require('./agent-orchestrator/pipeline');
 const pipelineState = require('./agent-orchestrator/pipeline-state');
@@ -249,6 +252,27 @@ function goalLeaseStoreOptions(options, providerRoot) {
       : { controlRoot: String(controlRoot) }),
     ...(providerRoot ? { providerRoot: path.resolve(providerRoot) } : {}),
   };
+}
+
+function turnBudgetPolicyFromOptions(options) {
+  return turnBudget.normalizeTurnBudgetPolicy(
+    optionValue(options, 'turn-budget-slots')
+  );
+}
+
+function assertTurnBudgetRequestMatchesAuthority(options, projection) {
+  const requested = optionValue(options, 'turn-budget-slots');
+  if (requested === undefined) return;
+  const requestedPolicy = turnBudget.normalizeTurnBudgetPolicy(requested);
+  if (requestedPolicy.enabled !== projection.enabled
+      || requestedPolicy.maxSlots !== projection.max) {
+    throw new Error(
+      `turn budget policy conflict: authority=${JSON.stringify({
+        enabled: projection.enabled,
+        maxSlots: projection.max,
+      })}, requested=${JSON.stringify(requestedPolicy)}`
+    );
+  }
 }
 
 function latestRunDir(runsDir) {
@@ -1578,16 +1602,24 @@ function recordAttemptTurnPhase(attempt, phase, payload) {
   if (!attempt.turnControl) {
     throw new Error(`turn control is missing for provider attempt ${attempt.prefix || '<unknown>'}`);
   }
-  const recorded = turnTransaction.recordTurnPhase(
-    attempt.turnControl.journalFile,
+  const previousReceipt = attempt.turnControl.receipt || null;
+  const recorded = turnTransaction.recordAuthoritativeTurnPhase(
+    attempt.turnControl.runDir,
+    // Provider-visible files never seed authority for a newly dispatched turn.
+    null,
     {
       identity: attempt.turnControl.identity,
       turnKey: attempt.turnControl.turnKey,
       phase,
       payload,
-    }
+      expectedRevision: previousReceipt ? previousReceipt.journalRevision : 0,
+      expectedJournalHash: previousReceipt ? previousReceipt.journalHash : null,
+    },
+    attempt.turnControl.storeOptions
   );
   attempt.turnControl.receipt = recorded.receipt;
+  attempt.turnControl.authorityRef = recorded.authorityRef;
+  attempt.turnControl.authorityFile = recorded.authorityFile;
   return recorded;
 }
 
@@ -1661,6 +1693,12 @@ function prepareProviderAttempt(state, runDir, options, input) {
       `provider recovery requires reconciliation before redispatch: no native ${activeRecovery.runtime} resume ref was captured`
     );
   }
+  const budgetProjection = turnBudget.assertCanRun(
+    runDir,
+    state.runId,
+    leaseStoreOptions
+  );
+  assertTurnBudgetRequestMatchesAuthority(options, budgetProjection);
   const contractDir = path.join(runDir, 'contracts');
   const prefix = `${stageName}.${stamp}`;
   const turnIdentity = {
@@ -1687,7 +1725,13 @@ function prepareProviderAttempt(state, runDir, options, input) {
     turnControl: {
       identity: turnIdentity,
       turnKey,
-      journalFile: path.join(contractDir, `${prefix}.turn-journal.json`),
+      runDir,
+      storeOptions: leaseStoreOptions,
+      receipt: null,
+    },
+    turnBudgetControl: {
+      projection: budgetProjection,
+      storeOptions: leaseStoreOptions,
     },
     lifecycle: {
       providerKey: input.providerKey,
@@ -1821,8 +1865,16 @@ function acceptProviderAttempt(state, attempt, input) {
         acceptedArtifact: path.basename(acceptedFile),
       });
       outcome.turnReceipt = durable.receipt;
-      outcome.turnJournalRef = path.relative(state.runDir, attempt.turnControl.journalFile)
-        .replace(/\\/g, '/');
+      outcome.turnJournalRef = durable.authorityRef;
+      if (attempt.turnBudgetControl.projection.enabled) {
+        const budgetSpend = turnBudget.spendSlot(state.runDir, {
+          runId: state.runId,
+          durableReceipt: durable.receipt,
+          acceptedResultHash: outcome.result.hash,
+        }, attempt.turnBudgetControl.storeOptions);
+        attempt.turnBudgetControl.projection = budgetSpend.projection;
+        outcome.turnBudget = budgetSpend.projection;
+      }
     },
     leaseControl.storeOptions
   );
@@ -3051,6 +3103,8 @@ function buildPipelineCtx() {
     optionValue,
     optionValues,
     boolOption,
+    turnBudget,
+    turnBudgetPolicyFromOptions,
     resolveWorkdir,
     resolveRunsDir,
     readRequirement,
@@ -3254,6 +3308,13 @@ function runStart(options, positionals) {
   const state = newState(workdir, runDir, runId, requirement);
   state.orchestrationOwner = executionPolicy.orchestrationOwner;
   state.executionPolicy = executionPolicy;
+  state.turnBudgetPolicy = turnBudgetPolicyFromOptions(options);
+  turnBudget.initializeTurnBudget(
+    runDir,
+    runId,
+    state.turnBudgetPolicy,
+    goalLeaseStoreOptions(options, workdir)
+  );
   writeText(path.join(runDir, 'requirement.md'), `${requirement}\n`);
   writeText(path.join(runDir, 'prompts', 'spec.md'), buildSpecPrompt(requirement, { workdir }));
   writeJson(path.join(runDir, 'commands.json'), commandPlan(options));
@@ -3327,6 +3388,14 @@ function runResume(options, positionals) {
     'provider-dispatch',
     { command: 'resume', runId: state.runId },
     () => {
+  turnBudget.ensureTurnBudgetForResume(
+    runDir,
+    state.runId,
+    Object.prototype.hasOwnProperty.call(state, 'turnBudgetPolicy')
+      ? state.turnBudgetPolicy
+      : undefined,
+    goalLeaseStoreOptions(effectiveOptions, state.workdir)
+  );
   if (state.status === 'dry-run') {
     console.log(`[INFO] ${state.runId} is a dry-run. No provider calls to resume.`);
     return;
@@ -3506,15 +3575,15 @@ function nextSafeActionForRun(state) {
   return `node scripts/agent-orchestrator.js resume --run ${state.runId}`;
 }
 
-function latestTurnReceipt(runDir) {
+function safeLegacyTurnJournalFiles(runDir) {
   const contracts = resolveRunDirectory(runDir, 'contracts');
-  if (!contracts) return null;
+  if (!contracts) return [];
 
   let entries;
   try {
     entries = fs.readdirSync(contracts.realPath, { withFileTypes: true });
   } catch (_error) {
-    return null;
+    return [];
   }
 
   const journals = entries
@@ -3537,29 +3606,55 @@ function latestTurnReceipt(runDir) {
     .sort((left, right) => (
       right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name)
     ));
-  for (const selected of journals) {
-    const ref = `contracts/${selected.name}`;
-    const journal = readRunJsonArtifact(runDir, ref);
-    if (!journal) continue;
-    try {
-      return {
-        ref,
-        receipt: turnTransaction.replayTurnJournal(journal),
-      };
-    } catch (_error) {
-      // Corrupt journals degrade to the next safe candidate instead of breaking status.
-    }
-  }
-  return null;
+  return journals.map((selected) => (
+    path.join(contracts.realPath, selected.name)
+  ));
 }
 
-function buildRunStatusProjection(runDir, state) {
+function latestTurnReceipt(runDir, storeOptions = {}) {
+  const records = turnTransaction.listAuthoritativeTurnJournals(runDir, {
+    ...storeOptions,
+    legacyFiles: safeLegacyTurnJournalFiles(runDir),
+  });
+  return records[0] || null;
+}
+
+function readGoalLeaseProjection(runDir, storeOptions, runId) {
+  const file = goalLease.goalLeasePath(runDir, storeOptions);
+  if (!fs.existsSync(file)) {
+    return {
+      schemaVersion: 'native-goal-lease-projection-v1',
+      authority: 'external-control-store',
+      runId,
+      status: 'unbound',
+      revision: 0,
+    };
+  }
+  try {
+    controlStore.assertAuthoritativeControlPath(runDir, file, storeOptions);
+    const lease = JSON.parse(fs.readFileSync(file, 'utf8'));
+    controlStore.assertAuthoritativeControlPath(runDir, file, storeOptions);
+    return goalLease.goalLeaseProjection(lease);
+  } catch (error) {
+    throw new Error(`invalid authoritative Goal lease: ${error.message}`);
+  }
+}
+
+function buildRunStatusProjection(runDir, state, options = {}) {
+  const storeOptions = goalLeaseStoreOptions(options, state.workdir);
   const reviewRef = state.files && state.files.review;
   const validationRef = state.files && state.files.validation;
   const review = readRunJsonArtifact(runDir, reviewRef) || {};
   const validation = readRunJsonArtifact(runDir, validationRef) || {};
   const queue = readRunJsonArtifact(runDir, 'queue.json') || {};
-  const latestTurn = latestTurnReceipt(runDir);
+  const latestTurn = latestTurnReceipt(runDir, storeOptions);
+  const budgetLedger = turnBudget.readTurnBudgetLedger(runDir, storeOptions);
+  const budgetProjection = turnBudget.turnBudgetProjection(
+    budgetLedger,
+    Object.prototype.hasOwnProperty.call(state, 'turnBudgetPolicy')
+      ? state.turnBudgetPolicy
+      : undefined
+  );
   const evidenceRefs = [
     ...Object.values(state.files || {}).filter((value) => typeof value === 'string'),
   ];
@@ -3606,13 +3701,24 @@ function buildRunStatusProjection(runDir, state) {
       updatedAt: state.updatedAt || null,
     },
     operatorReviewPacket: packet,
+    turnControl: latestTurn ? {
+      authority: latestTurn.source === 'authority'
+        ? 'external-control-store'
+        : 'legacy-run-artifact',
+      ref: latestTurn.ref,
+      recordedAt: latestTurn.recordedAt,
+      journalRevision: latestTurn.receipt.journalRevision,
+      journalHash: latestTurn.receipt.journalHash,
+    } : null,
+    goalLease: readGoalLeaseProjection(runDir, storeOptions, state.runId),
+    turnBudget: budgetProjection,
     turnReceipt: latestTurn ? latestTurn.receipt : null,
   };
 }
 
 function runStatus(options, positionals) {
   const { runDir, state } = loadRun(options, positionals);
-  const projection = buildRunStatusProjection(runDir, state);
+  const projection = buildRunStatusProjection(runDir, state, options);
   if (boolOption(options, 'json')) {
     console.log(JSON.stringify(projection, null, 2));
     return;
@@ -3630,6 +3736,173 @@ function runStatus(options, positionals) {
   console.log(`Next safe action: ${packet.nextSafeAction}`);
 }
 
+function requiredCliOption(options, key) {
+  const value = optionValue(options, key);
+  if (value === undefined || value === null || value === true || value === false
+      || String(value).trim() === '') {
+    throw new Error(`--${key} is required`);
+  }
+  return String(value).trim();
+}
+
+function requiredNonNegativeIntegerOption(options, key) {
+  const value = requiredCliOption(options, key);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`--${key} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
+function assertSchedulerGoalLeaseOwner(lease, state) {
+  if (!lease || lease.status === 'released') return;
+  if (lease.status !== 'active') {
+    throw new Error(`Goal lease status ${lease.status} cannot authorize scheduler control`);
+  }
+  const owner = schedulerControl.activeSchedulerOwner(state);
+  const expectedRuntime = owner === 'codex-host'
+    ? 'codex'
+    : owner === 'claude-host'
+      ? 'claude'
+      : null;
+  if (expectedRuntime && lease.ownerRuntime !== expectedRuntime) {
+    throw new Error(
+      `scheduler owner conflict: ${owner} requires a ${expectedRuntime} Goal lease`
+    );
+  }
+}
+
+function schedulerControlResponse(command, recorded) {
+  return {
+    schemaVersion: 'scheduler-control-result-v1',
+    command,
+    turnControl: {
+      authority: 'external-control-store',
+      ref: recorded.authorityRef,
+      changed: recorded.changed,
+      journalRevision: recorded.receipt.journalRevision,
+      journalHash: recorded.receipt.journalHash,
+    },
+    turnReceipt: recorded.receipt,
+  };
+}
+
+function runSchedulerControl(command, options, positionals) {
+  const { runDir, state } = loadRun(options, positionals);
+  const storeOptions = goalLeaseStoreOptions(options, state.workdir);
+  const turnKey = requiredCliOption(options, 'turn-key');
+  const schedulerOwner = requiredCliOption(options, 'scheduler-owner');
+  const schedulerRef = requiredCliOption(options, 'scheduler-ref');
+  const expectedJournalRevision = requiredNonNegativeIntegerOption(
+    options,
+    'expected-journal-revision'
+  );
+  const expectedJournalHash = requiredCliOption(options, 'expected-journal-hash');
+  const expectedGoalLeaseRevision = requiredNonNegativeIntegerOption(
+    options,
+    'expected-goal-lease-revision'
+  );
+
+  return runLock.withRunLock(
+    runDir,
+    'provider-dispatch',
+    { command, runId: state.runId },
+    () => {
+      const latestTurn = latestTurnReceipt(runDir, storeOptions);
+      if (!latestTurn) {
+        throw new Error(`${command} requires a durable turn journal`);
+      }
+      if (latestTurn.receipt.turnKey !== turnKey) {
+        throw new Error(
+          `scheduler turn conflict: latest=${latestTurn.receipt.turnKey}, requested=${turnKey}`
+        );
+      }
+
+      let phase;
+      let prepareForLease;
+      if (command === 'scheduler-apply') {
+        const projection = buildRunStatusProjection(runDir, state, options);
+        phase = 'scheduler-apply';
+        prepareForLease = (lease) => schedulerControl.prepareSchedulerApply({
+          state,
+          receipt: latestTurn.receipt,
+          turnKey,
+          hint: projection.operatorReviewPacket.schedulerHint,
+          schedulerOwner,
+          schedulerRef,
+          action: requiredCliOption(options, 'action'),
+          resetToken: optionValue(options, 'reset-token'),
+          appliedStateHash: requiredCliOption(options, 'applied-state-hash'),
+          expectedJournalRevision,
+          expectedJournalHash,
+          goalLease: lease,
+          expectedGoalLeaseRevision,
+        });
+      } else if (command === 'scheduler-ack') {
+        phase = 'scheduler-ack';
+        prepareForLease = (lease) => schedulerControl.prepareSchedulerAck({
+          state,
+          receipt: latestTurn.receipt,
+          turnKey,
+          schedulerOwner,
+          schedulerRef,
+          applyPayloadHash: requiredCliOption(options, 'apply-payload-hash'),
+          observedStateHash: requiredCliOption(options, 'observed-state-hash'),
+          expectedJournalRevision,
+          expectedJournalHash,
+          goalLease: lease,
+          expectedGoalLeaseRevision,
+        });
+      } else {
+        throw new Error(`unsupported scheduler control command ${command}`);
+      }
+
+      const recorded = goalLease.withValidatedGoalLease(
+        runDir,
+        {
+          runId: state.runId,
+          expectedRevision: expectedGoalLeaseRevision,
+        },
+        (lease) => {
+          assertSchedulerGoalLeaseOwner(lease, state);
+          const prepared = prepareForLease(lease);
+          return turnTransaction.recordAuthoritativeTurnPhase(
+            runDir,
+            latestTurn.legacyFile,
+            {
+              identity: latestTurn.receipt.identity,
+              turnKey,
+              phase,
+              payload: prepared.payload,
+              expectedRevision: prepared.expectedRevision,
+              expectedJournalHash: prepared.expectedJournalHash,
+            },
+            storeOptions
+          );
+        },
+        storeOptions
+      );
+      const response = schedulerControlResponse(command, recorded);
+      if (boolOption(options, 'json')) {
+        console.log(JSON.stringify(response, null, 2));
+      } else {
+        console.log(
+          `[OK] ${command} recorded for ${turnKey} at revision ${recorded.receipt.journalRevision}`
+        );
+      }
+      return response;
+    },
+    storeOptions
+  );
+}
+
+function applySchedulerState(options, positionals) {
+  return runSchedulerControl('scheduler-apply', options, positionals);
+}
+
+function acknowledgeSchedulerState(options, positionals) {
+  return runSchedulerControl('scheduler-ack', options, positionals);
+}
 function bindGoalLease(options, positionals) {
   const { runDir, statePath, state } = loadRun(options, positionals);
   const ownerRuntime = optionValue(options, 'runtime');
@@ -4275,6 +4548,16 @@ function runProviderIntegrationSelfTests() {
 
   let stateObj = pipeline.newPipelineState(mockWorkdir, tmpBase, 'selftest', 'a provider integration self-test requirement');
   const statePath = path.join(tmpBase, 'state.json');
+  stateObj = {
+    ...stateObj,
+    turnBudgetPolicy: turnBudget.normalizeTurnBudgetPolicy(),
+  };
+  turnBudget.initializeTurnBudget(
+    tmpBase,
+    stateObj.runId,
+    stateObj.turnBudgetPolicy,
+    { providerRoot: mockWorkdir }
+  );
   writeJson(statePath, stateObj);
   writeText(
     path.join(tmpBase, 'prompts', 'global-contract.md'),
@@ -4319,12 +4602,13 @@ function runProviderIntegrationSelfTests() {
   assertSelfTest('provider integration: status global-contract-ready', stateObj.status, 'global-contract-ready');
   assertSelfTest('provider integration: providerRuns appended', Array.isArray(stateObj.providerRuns) && stateObj.providerRuns.length === 1, true);
   const providerContractsDir = path.join(tmpBase, 'contracts');
-  const firstTurnJournalName = fs.readdirSync(providerContractsDir)
-    .find((name) => name.endsWith('.turn-journal.json'));
-  assertSelfTest('provider integration: turn journal written', Boolean(firstTurnJournalName), true);
-  const firstTurnReceipt = turnTransaction.replayTurnJournal(
-    turnTransaction.readTurnJournal(path.join(providerContractsDir, firstTurnJournalName))
-  );
+  const authoritativeTurns = turnTransaction.listAuthoritativeTurnJournals(tmpBase, {
+    providerRoot: mockWorkdir,
+    legacyFiles: [],
+  });
+  const firstTurn = authoritativeTurns[0] || null;
+  assertSelfTest('provider integration: authoritative turn journal written', Boolean(firstTurn), true);
+  const firstTurnReceipt = firstTurn.receipt;
   assertSelfTest('provider integration: durable writeback receipted',
     firstTurnReceipt.currentPhase, 'durable-writeback');
   assertSelfTest('provider integration: scheduler apply is not fabricated',
@@ -4668,6 +4952,7 @@ function buildMockCtx(workdir) {
     optionValue: (options, key) => options ? options[key] : undefined,
     optionValues: (options, key) => options && Array.isArray(options[key]) ? options[key] : [],
     boolOption: () => false,
+    turnBudget,
     resolveWorkdir: () => workdir,
     resolveRunsDir: () => workdir,
     readRequirement: () => 'mock requirement',
@@ -4786,6 +5071,8 @@ Usage:
   node scripts/agent-orchestrator.js freeze --run <runId>
   node scripts/agent-orchestrator.js resume --run <runId> --validation-command "npm test"
   node scripts/agent-orchestrator.js status --run latest [--json]
+  node scripts/agent-orchestrator.js scheduler-apply --run <runId> --turn-key <sha256> --scheduler-owner <owner> --scheduler-ref <ref> --action <action> [--reset-token <token>] --applied-state-hash <sha256> --expected-journal-revision <n> --expected-journal-hash <sha256> --expected-goal-lease-revision <n>
+  node scripts/agent-orchestrator.js scheduler-ack --run <runId> --turn-key <sha256> --scheduler-owner <owner> --scheduler-ref <ref> --apply-payload-hash <sha256> --observed-state-hash <sha256> --expected-journal-revision <n> --expected-journal-hash <sha256> --expected-goal-lease-revision <n>
   node scripts/agent-orchestrator.js goal-bind --run <runId> --runtime codex --host-ref <opaque-ref> --objective "..."
   node scripts/agent-orchestrator.js goal-release --run <runId> [--reason "..."]
   node scripts/agent-orchestrator.js doctor
@@ -4826,6 +5113,16 @@ Options:
   --skip-git-repo-check         Pass Codex --skip-git-repo-check.
   --codex-sandbox <mode>        Override Codex sandbox mode. Windows defaults to workspace-write.
   --orchestration-owner <owner> Single scheduler owner: tp | codex-host | claude-host.
+  --turn-budget-slots <n>        Optional fixed compute-turn budget, persisted per run.
+  --turn-key <sha256>            Exact TurnTransaction key for scheduler control.
+  --scheduler-owner <owner>      Must match the persisted orchestration owner.
+  --scheduler-ref <ref>          Opaque host scheduler identity.
+  --action <action>              Must match the current SchedulerHint action.
+  --reset-token <token>          Required for non-stop SchedulerHint apply.
+  --applied-state-hash <sha256>  Hash of the state written by the host scheduler.
+  --apply-payload-hash <sha256>  Exact scheduler-apply phase payload hash.
+  --observed-state-hash <sha256> Host readback hash; must match applied state.
+  --expected-goal-lease-revision <n> Goal lease CAS token for scheduler control.
   --capability-router <mode>    Capability routing: off | shadow | enforce. Defaults to shadow.
   --claude-adapter <mode>       Claude adapter: print | bare | auto. Defaults to print.
   --claude-plugin-dir <path>    Explicit plugin dir for Claude bare mode. Repeatable.
@@ -4859,6 +5156,12 @@ function main() {
       break;
     case 'status':
       runStatus(options, positionals);
+      break;
+    case 'scheduler-apply':
+      applySchedulerState(options, positionals);
+      break;
+    case 'scheduler-ack':
+      acknowledgeSchedulerState(options, positionals);
       break;
     case 'goal-bind':
       bindGoalLease(options, positionals);

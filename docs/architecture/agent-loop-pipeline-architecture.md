@@ -426,10 +426,29 @@ P1：
 - scheduler hint 是纯函数、只读建议，输出 `run-now|backoff|wait|stop`，`permission` 固定为 `none`；它不会修改 queue、推进状态或消费额度。
 - Memory recall 统一附加 `memory-recall-authority-v1`，明确 `advisoryOnly=true`、不授予新动作权限、不代表外部写入或额度消费，并要求抑制外部 sink。
 
-明确未包含：
+当时明确未包含 scheduler apply/ack、跨进程 journal lock、quota/budget、event-store、daemon 与 multi-worker hard lease；其中适合当前文件型架构的前三项已在 13.10 以最小 P2 形式补齐。
 
-- scheduler apply/ack 持久化与真正调度器；
-- 跨进程 journal lock、多 worker hard lease；
-- quota/budget control、event-store 重写和常驻恢复 daemon。
+### 13.10 P2 writer / scheduler / budget 闭环已落地
 
-这些边界与 13.5 的 single-worker 现状一致；若后续引入多 worker，必须先补 CAS/锁与 scheduler 的真实 apply/ack 契约。
+**当前状态（2026-08-05）**：继续复用现有 external control store、Goal lease、run lock 与六阶段 TurnTransaction，没有引入第二套状态机。
+
+- Turn journal 的权威副本迁到 provider workspace 之外的 `turn-journals/<turnKey>.json`。每次追加复用 run-scoped `turn-journal-update` 锁，并在锁内执行 identity/hash replay、revision + journalHash CAS、临时文件写入、file `fsync`、rename、best-effort directory `fsync` 与 readback 验真。
+- 同 phase 同 payload 的重试即使携带旧 CAS token 也幂等返回；同 phase 异 payload 永远冲突。旧 `contracts/*.turn-journal.json` 只在 authority 缺失时作为一次性迁移源，之后不再回写；`turn-journals/` gate 建立后冻结 legacy discovery，新 legacy turnKey 不再进入 read/list/migration。
+- `status --json` 在 gate 建立前只为旧 run 读取安全过滤后的 legacy 候选，gate 建立后只读 external authority；按最后 phase `recordedAt`、再按 `turnKey` 确定性选择最新 turn，不再依赖文件 mtime。
+- `--turn-budget-slots <n>` 提供可选固定 compute-turn budget。run 初始化会在 provider-visible state 保存前，把含 `runId` 与 policy 的空 ledger 写入 external authority；dispatch 前 `assertCanRun` 只读 authority，不信任 state policy。只有 validation 通过且 `durable-writeback` 已生成可自验 TurnReceipt 后，才按 `turnKey + receiptHash + acceptedResultHash` 幂等追加 spend。validation/provider failure、scheduler apply 与 ACK 均不扣槽。
+- `scheduler-apply` / `scheduler-ack` 是宿主提交接口，不是内部 timer。apply 必须绑定当前 hint、`permission=none`、orchestration owner、脱敏 Goal lease revision/identity/lease hash、journal revision/hash、reset token、scheduler ref 与 applied-state hash；ACK 继承 Goal binding，再用 apply payload hash 和宿主 readback hash 确认实际状态。
+- scheduler 命令与 provider dispatch 共用 `provider-dispatch` 锁，嵌套顺序固定为 `provider-dispatch -> goal-lease-update -> turn-journal-update`；不会与正在执行的 provider 静默并发写 journal。
+
+仍明确不做：
+
+- 不在本仓创建真正的 OS/平台 scheduler、第二个 timer 或常驻 daemon；外层 runner 继续拥有 wakeup 和实际 scheduler mutation。
+- 不引入完整 append-only event store/reducer 重写。当前 authority journal + hash/CAS 已覆盖已观察到的 writer correctness 问题。
+- 不宣称支持 multi-worker，也不添加孤立的 hard lease。当前 queue/state、worktree、shared-file policy 与 fencing token 尚未形成并发安全整体；只有出现真实并发需求时，才按 todo/slice 粒度设计硬租约。
+
+这一取舍对应 LoopX 的当前边界：custom runner 拥有实际调度，apply 后必须 readback 再 ACK；quota 在 durable writeback 后 spend；daemon 和 hard lease 都是按需演进项，而不是本地控制面前置条件。
+
+参考：
+
+- [LoopX custom runner integration](https://github.com/huangruiteng/loopx/blob/main/docs/guides/custom-agent-runner-integration.md)
+- [LoopX quota allocation](https://github.com/huangruiteng/loopx/blob/main/docs/quota-allocation.md)
+- [LoopX architecture](https://github.com/huangruiteng/loopx/blob/main/docs/architecture.md)
