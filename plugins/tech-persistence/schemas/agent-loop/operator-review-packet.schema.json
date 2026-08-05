@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/operator-review-packet.schema.json",
+  "title": "Agent Loop Operator Review Packet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "permission",
+    "decision",
+    "reason",
+    "evidenceRefs",
+    "freshness",
+    "boundary",
+    "nextSafeAction",
+    "schedulerHint"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "operator-review-packet-v1"
+    },
+    "permission": {
+      "const": "none"
+    },
+    "decision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "observedAt",
+        "source",
+        "stale"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "observedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "stale": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intent",
+        "writeAllowed",
+        "requiresApproval",
+        "scopes",
+        "reason"
+      ],
+      "properties": {
+        "intent": {
+          "enum": [
+            "read-only",
+            "write",
+            "unknown"
+          ]
+        },
+        "writeAllowed": {
+          "type": "boolean"
+        },
+        "requiresApproval": {
+          "type": "boolean"
+        },
+        "scopes": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      }
+    },
+    "nextSafeAction": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 320
+    },
+    "schedulerHint": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "permission",
+            "action",
+            "reason"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "scheduler-hint-v1"
+            },
+            "permission": {
+              "const": "none"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "action": {
+              "const": "stop"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "permission",
+            "action",
+            "reason",
+            "resetToken"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "scheduler-hint-v1"
+            },
+            "permission": {
+              "const": "none"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "action": {
+              "enum": [
+                "run-now",
+                "wait"
+              ]
+            },
+            "resetToken": {
+              "type": "string",
+              "pattern": "^reset:[a-f0-9]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "permission",
+            "action",
+            "reason",
+            "retryAfterMs",
+            "resetToken"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "scheduler-hint-v1"
+            },
+            "permission": {
+              "const": "none"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "action": {
+              "const": "backoff"
+            },
+            "retryAfterMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 86400000
+            },
+            "resetToken": {
+              "type": "string",
+              "pattern": "^reset:[a-f0-9]{64}$"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

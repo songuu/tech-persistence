@@ -409,3 +409,27 @@ classic orchestrator、pipeline 文档和 skill 文档里的 `--auto`、`--auto-
 
 - 历史 `.codex/plans` / `.claude/plans` artifact 不做批量迁移；只通过 fallback 兼容读取。
 - 后续如果 native workflow backend 落地，需要把 workflow artifact 与 `docs/plans` 的关系写入同一 resolver，而不是新增第四套 plan 目录约定。
+
+### 13.9 P0/P1 控制面最小闭环已落地
+
+**当前状态（2026-08-04）**：本轮只吸收可直接适配现有文件型 orchestrator 的能力，没有引入 event store、常驻 daemon 或多 worker 租约系统。
+
+P0：
+
+- `TurnTransaction` 用稳定 `turnKey` 和严格阶段前缀记录 `host-execute -> typed-result -> validation -> durable-writeback -> scheduler-apply -> scheduler-ack`。material result 不允许跳过 validation，validation 未通过时禁止 durable writeback；同阶段同 payload 幂等，不同 payload 冲突。
+- journal 采用 hash 校验与临时文件 + `fsync` + rename 原子替换。共享 provider acceptance 路径目前写到 `durable-writeback`；未发生真实调度时，receipt 明确保留 `nextPhase=scheduler-apply`，绝不伪造 apply/ack。
+- `status --json` 只读投影最新 TurnReceipt，并生成脱敏、有界的 Operator Review Packet；packet 只包含 decision、reason、evidence refs、freshness、boundary、next safe action 和 scheduler hint。
+
+P1：
+
+- task envelope 可选携带 typed coordination：`taskClass`、`actionKind`、`continuationPolicy`、`successorRefs`、`noFollowUp`、`claimedBy`。字段缺失时保持旧 envelope/hash 行为；存在时进入 canonical hash。`claimedBy` 只是可见性 soft owner，不是写租约。
+- scheduler hint 是纯函数、只读建议，输出 `run-now|backoff|wait|stop`，`permission` 固定为 `none`；它不会修改 queue、推进状态或消费额度。
+- Memory recall 统一附加 `memory-recall-authority-v1`，明确 `advisoryOnly=true`、不授予新动作权限、不代表外部写入或额度消费，并要求抑制外部 sink。
+
+明确未包含：
+
+- scheduler apply/ack 持久化与真正调度器；
+- 跨进程 journal lock、多 worker hard lease；
+- quota/budget control、event-store 重写和常驻恢复 daemon。
+
+这些边界与 13.5 的 single-worker 现状一致；若后续引入多 worker，必须先补 CAS/锁与 scheduler 的真实 apply/ack 契约。

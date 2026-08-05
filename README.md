@@ -296,6 +296,7 @@ node scripts\agent-orchestrator.js resume --run <runId> --review-only   # 跳过
 node scripts\agent-orchestrator.js doctor
 node scripts\agent-orchestrator.js self-test
 node scripts\agent-orchestrator.js status --run latest
+node scripts\agent-orchestrator.js status --run latest --json  # 只读 Operator Review Packet + 最新 TurnReceipt
 ```
 
 命令入口（参数与 CLI 对齐）：
@@ -310,7 +311,9 @@ node scripts\agent-orchestrator.js status --run latest
 $agent-loop <原始需求>             # Codex 入口（同名 skill）
 ```
 
-运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review、follow-up task，以及带时间戳的 provider 日志和 prompt 文件。`.agent-runs/` 是运行态目录，不进入 Git。
+运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review、follow-up task、`contracts/*.turn-journal.json`，以及带时间戳的 provider 日志和 prompt 文件。`.agent-runs/` 是运行态目录，不进入 Git。
+
+`status --json` 只读取既有 artifact，返回脱敏、有界的 Operator Review Packet 和最新 TurnReceipt。`schedulerHint.permission` 固定为 `none`，不会执行调度、写入 ACK 或授予新权限；Memory recall 同样显式标记为 advisory-only。
 
 ### Agent Loop pipeline 模式（可选 opt-in，2026-05-11 新增）
 

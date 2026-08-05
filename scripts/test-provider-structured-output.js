@@ -174,7 +174,11 @@ try {
     prepareProviderAttempt: () => ({
       profile: { runtime: 'codex' },
       capabilitySnapshot: { adapter: 'codex-exec' },
-      task: { hash: 'sha256:test-task' },
+      task: {
+        ref: 'task:pipeline-invalid-handoff:slice-001',
+        hash: 'sha256:test-task',
+        idempotencyKey: 'idempotency:pipeline-invalid-handoff:slice-001',
+      },
       route: { decisionHash: 'sha256:test-route' },
       onFailure: (failure) => {
         observedFailure = failure;

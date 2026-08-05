@@ -9,6 +9,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const executionEnvelopes = require('./agent-orchestrator/execution-envelopes');
 const goalLease = require('./agent-orchestrator/goal-lease');
+const turnTransaction = require('./agent-orchestrator/turn-transaction');
 
 const root = path.resolve(__dirname, '..');
 const cli = path.join(root, 'scripts', 'agent-orchestrator.js');
@@ -91,6 +92,52 @@ function acceptedSecretProviderScript(secret) {
     );
 }
 
+function pipelineClaudeProviderScript(validationCommands) {
+  return `
+const fs = require('fs');
+const prompt = [fs.readFileSync(0, 'utf8'), ...process.argv.slice(2)].join('\\n');
+let structuredOutput;
+let sessionId;
+if (prompt.includes('global-contract provider')) {
+  structuredOutput = {
+    version: 'global-v1',
+    goal: 'verify pipeline validation gate',
+    nonGoals: [],
+    globalAcceptance: ['validation gate is enforced'],
+    architectureConstraints: [],
+    runtimeTargets: ['claude-code', 'codex'],
+    riskLevel: 'L1',
+    blockingQuestions: []
+  };
+  sessionId = 'claude-pipeline-global';
+} else if (prompt.includes('slice-planner provider')) {
+  structuredOutput = {
+    slices: [{
+      id: 'slice-001',
+      title: 'validation gate slice',
+      dependsOn: [],
+      ownedFiles: ['pipeline-output.txt'],
+      readFiles: [],
+      risk: 'L1',
+      acceptanceCriteria: ['gate blocks unsafe durable writeback'],
+      doneCriteria: ['gate behavior is receipted'],
+      validationCommands: ${JSON.stringify(validationCommands)},
+      questions: []
+    }]
+  };
+  sessionId = 'claude-pipeline-planner';
+} else {
+  throw new Error('unexpected pipeline prompt');
+}
+process.stdout.write(JSON.stringify({
+  type: 'result',
+  subtype: 'success',
+  session_id: sessionId,
+  structured_output: structuredOutput
+}));
+`;
+}
+
 function validImplementationProviderScript() {
   return `
 const fs = require('fs');
@@ -162,6 +209,13 @@ process.exitCode = 1;
 `;
 }
 
+function failingValidationScript() {
+  return `
+process.stderr.write('intentional validation failure\\n');
+process.exitCode = 1;
+`;
+}
+
 function assertNativeRejectionDoesNotAdvance(temporaryRoot, controlRoot, pipeline) {
   const mode = pipeline ? 'pipeline' : 'classic';
   const runId = `native-reject-${mode}`;
@@ -211,6 +265,7 @@ function assertNativeRejectionDoesNotAdvance(temporaryRoot, controlRoot, pipelin
   assert.strictEqual(baseAcceptance.accepted, false);
   assert(baseAcceptance.errors.includes('native runtime result was not accepted'));
   assert.strictEqual(failureResult.status, 'failed');
+  assert.notStrictEqual(failureResult.ref, baseResult.ref);
   assert.strictEqual(failureAcceptance.accepted, false);
   assert.strictEqual(state.providerRuns[0].failure.kind, 'acceptance');
   assert.strictEqual(state.providerRuns[0].rejectedResultEnvelopeHash, baseResult.hash);
@@ -295,6 +350,7 @@ function assertPostAcceptanceFailurePreservesAcceptedArtifacts(temporaryRoot, co
     'resume', '--workdir', temporaryRoot, '--runs-dir', '.runs', '--run', runId,
     '--skip-git-repo-check', '--skip-cli-schema',
     '--spec-command', specCommand,
+    '--validation-command', 'node --version',
     '--implementation-command', implementationCommand,
     '--review-command', specCommand,
     '--capability-router', 'shadow', '--control-root', controlRoot,
@@ -326,6 +382,186 @@ function assertPostAcceptanceFailurePreservesAcceptedArtifacts(temporaryRoot, co
   assert.strictEqual(state.providerRecovery.resumeMode, 'reconcile');
   assert.strictEqual(state.providerRecovery.reconcileRequired, true);
   assert.strictEqual(state.providerRuns.at(-1).postAcceptanceFailure, true);
+}
+
+function assertClassicValidationBlocksDurableWriteback(
+  temporaryRoot,
+  controlRoot,
+  sourceStatus
+) {
+  assert(['skipped', 'failed'].includes(sourceStatus));
+  const runId = `native-${sourceStatus}-validation`;
+  const runDir = path.join(temporaryRoot, '.runs', runId);
+  const specProvider = path.join(temporaryRoot, `fake-${sourceStatus}-validation-spec.js`);
+  const implementationProvider = path.join(
+    temporaryRoot, `fake-${sourceStatus}-validation-implementation.js`
+  );
+  fs.writeFileSync(specProvider, acceptedSecretProviderScript('validation gate spec'));
+  fs.writeFileSync(implementationProvider, validImplementationProviderScript());
+  const validationArgs = [];
+  if (sourceStatus === 'failed') {
+    const validationProvider = path.join(temporaryRoot, 'classic-validation-fail.js');
+    fs.writeFileSync(validationProvider, failingValidationScript());
+    validationArgs.push(
+      '--validation-command',
+      `"${process.execPath}" "${validationProvider}"`
+    );
+  }
+  const specCommand = `${process.execPath} ${specProvider}`;
+  const implementationCommand = `${process.execPath} ${implementationProvider}`;
+  const common = [
+    '--workdir', temporaryRoot, '--runs-dir', '.runs',
+    '--skip-git-repo-check', '--skip-cli-schema',
+    '--spec-command', specCommand,
+    '--implementation-command', implementationCommand,
+    '--review-command', specCommand,
+    '--capability-router', 'shadow', '--control-root', controlRoot,
+    ...validationArgs,
+  ];
+
+  run([
+    'run', '--requirement', `block material result when validation is ${sourceStatus}`,
+    '--run-id', runId, ...common,
+  ]);
+  run(['freeze', '--run', runId, ...common]);
+  const failed = run(['resume', '--run', runId, ...common], 1);
+  assert.match(
+    failed.stderr,
+    new RegExp(`provider validation ${sourceStatus}.*requires passed validation`)
+  );
+
+  const validation = readJson(path.join(runDir, 'validation.json'));
+  assert.strictEqual(validation.status, sourceStatus);
+  if (sourceStatus === 'failed') {
+    assert.strictEqual(validation.commands[0].exitCode, 1);
+  } else {
+    assert.deepStrictEqual(validation.commands, []);
+  }
+
+  const contractsDir = path.join(runDir, 'contracts');
+  const names = fs.readdirSync(contractsDir);
+  const journalName = names.find((name) => (
+    name.startsWith('implementation.') && name.endsWith('.turn-journal.json')
+  ));
+  assert(journalName, 'implementation validation failure must retain a turn journal');
+  const receipt = turnTransaction.replayTurnJournal(
+    turnTransaction.readTurnJournal(path.join(contractsDir, journalName))
+  );
+  assert.strictEqual(receipt.validationStatus, 'failed');
+  assert.strictEqual(receipt.currentPhase, 'validation');
+  assert.strictEqual(receipt.nextPhase, 'durable-writeback');
+  assert.strictEqual(receipt.phaseRecords.at(-1).payload.sourceStatus, sourceStatus);
+  const typedResultPhase = receipt.phaseRecords.find((entry) => entry.phase === 'typed-result');
+  assert(typedResultPhase, 'validation failure receipt must retain its typed-result phase');
+  const typedResult = readJson(
+    path.join(runDir, typedResultPhase.payload.resultArtifactRef)
+  );
+  assert.strictEqual(typedResult.ref, typedResultPhase.payload.resultRef);
+  assert.strictEqual(typedResult.hash, typedResultPhase.payload.resultHash);
+  const validationFailureName = names.find((name) => (
+    name.startsWith('implementation.')
+    && name.includes('.validation-failure.result.json')
+  ));
+  assert(validationFailureName, 'validation failure must use a distinct result artifact');
+  const validationFailure = readJson(path.join(contractsDir, validationFailureName));
+  assert.notStrictEqual(validationFailure.ref, typedResult.ref);
+  assert.notStrictEqual(validationFailure.hash, typedResult.hash);
+  assert.strictEqual(
+    names.some((name) => (
+      name.includes('implementation') && name.endsWith('.accepted.json')
+    )),
+    false
+  );
+  const state = readJson(path.join(runDir, 'state.json'));
+  assert.notStrictEqual(state.status, 'implemented');
+  assert.strictEqual(state.providerRuns.at(-1).failure.kind, 'validation');
+}
+
+function assertPipelineValidationBlocksDurableWriteback(
+  temporaryRoot,
+  controlRoot,
+  sourceStatus
+) {
+  assert(['skipped', 'failed'].includes(sourceStatus));
+  const runId = `pipeline-${sourceStatus}-validation`;
+  const runDir = path.join(temporaryRoot, '.runs', runId);
+  const specProvider = path.join(
+    temporaryRoot,
+    `fake-pipeline-${sourceStatus}-claude.js`
+  );
+  const implementationProvider = path.join(
+    temporaryRoot,
+    `fake-pipeline-${sourceStatus}-implementation.js`
+  );
+  const validationCommands = [];
+  if (sourceStatus === 'failed') {
+    const validationProvider = path.join(temporaryRoot, 'pipeline-validation-fail.js');
+    fs.writeFileSync(validationProvider, failingValidationScript());
+    validationCommands.push('node pipeline-validation-fail.js');
+  }
+  fs.writeFileSync(specProvider, pipelineClaudeProviderScript(validationCommands));
+  fs.writeFileSync(implementationProvider, validImplementationProviderScript());
+
+  const specCommand = `${process.execPath} ${specProvider}`;
+  const implementationCommand = `${process.execPath} ${implementationProvider}`;
+  run([
+    'run',
+    '--requirement', `block pipeline result when validation is ${sourceStatus}`,
+    '--workdir', temporaryRoot,
+    '--runs-dir', '.runs',
+    '--run-id', runId,
+    '--pipeline',
+    '--auto',
+    '--skip-git-repo-check',
+    '--skip-cli-schema',
+    '--spec-command', specCommand,
+    '--implementation-command', implementationCommand,
+    '--review-command', specCommand,
+    '--capability-router', 'shadow',
+    '--control-root', controlRoot,
+  ]);
+
+  const sliceDir = path.join(runDir, 'slices', 'slice-001');
+  const validation = readJson(path.join(sliceDir, 'validation.json'));
+  assert.strictEqual(validation.status, sourceStatus);
+  if (sourceStatus === 'failed') {
+    assert.strictEqual(validation.commands[0].status, 1);
+  } else {
+    assert.deepStrictEqual(validation.commands, []);
+  }
+
+  const contractsDir = path.join(runDir, 'contracts');
+  const names = fs.readdirSync(contractsDir);
+  const journalName = names.find((name) => (
+    name.startsWith('slice-implementation-slice-001.')
+    && name.endsWith('.turn-journal.json')
+  ));
+  assert(journalName, 'pipeline validation failure must retain a turn journal');
+  const receipt = turnTransaction.replayTurnJournal(
+    turnTransaction.readTurnJournal(path.join(contractsDir, journalName))
+  );
+  assert.strictEqual(receipt.validationStatus, 'failed');
+  assert.strictEqual(receipt.currentPhase, 'validation');
+  assert.strictEqual(receipt.nextPhase, 'durable-writeback');
+  assert.strictEqual(receipt.phaseRecords.at(-1).payload.sourceStatus, sourceStatus);
+  assert.strictEqual(receipt.completedPhases.includes('durable-writeback'), false);
+  assert.strictEqual(
+    names.some((name) => (
+      name.includes('slice-implementation-slice-001')
+      && name.endsWith('.accepted.json')
+    )),
+    false
+  );
+  assert.strictEqual(fs.existsSync(path.join(sliceDir, 'provider-handoff.json')), false);
+
+  const state = readJson(path.join(runDir, 'state.json'));
+  assert.strictEqual(
+    state.pipeline.sliceStates['slice-001'],
+    'slice-implementation-failed'
+  );
+  assert.strictEqual(state.providerRuns.at(-1).failure.kind, 'validation');
+  const queue = readJson(path.join(runDir, 'queue.json'));
+  assert(queue.blocked.some((entry) => entry.sliceId === 'slice-001'));
 }
 
 function assertClassicInvalidHandoffPersistsPartialRecovery(temporaryRoot, controlRoot) {
@@ -447,6 +683,7 @@ function runLockfileImplementationFixture(
     '--skip-cli-schema', '--spec-command', specCommand,
     '--implementation-command', implementationCommand,
     '--review-command', reviewCommand, '--capability-router', 'shadow',
+    '--validation-command', 'git diff --check',
     '--control-root', controlRoot,
   ];
   run([
@@ -620,6 +857,10 @@ function main() {
     assertNativeRejectionDoesNotAdvance(temporaryRoot, controlRoot, false);
     assertNativeRejectionDoesNotAdvance(temporaryRoot, controlRoot, true);
     assertAcceptedCanonicalArtifactsAreRedacted(temporaryRoot, controlRoot);
+    assertClassicValidationBlocksDurableWriteback(temporaryRoot, controlRoot, 'skipped');
+    assertClassicValidationBlocksDurableWriteback(temporaryRoot, controlRoot, 'failed');
+    assertPipelineValidationBlocksDurableWriteback(temporaryRoot, controlRoot, 'skipped');
+    assertPipelineValidationBlocksDurableWriteback(temporaryRoot, controlRoot, 'failed');
     assertPostAcceptanceFailurePreservesAcceptedArtifacts(temporaryRoot, controlRoot);
     assertClassicInvalidHandoffPersistsPartialRecovery(temporaryRoot, controlRoot);
     assertOmittedLockfileContentInvalidatesHandoff(temporaryRoot, controlRoot);

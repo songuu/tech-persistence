@@ -67,9 +67,6 @@ function handleSearch(args = {}) {
     limits: { memoryTop: limit, sessionTop: 2, instinctTop: 3, budgetChars: 4000 },
   });
 
-  if (result.memory.length === 0 && result.sessions.length === 0 && result.instincts.length === 0) {
-    return ok('(no results)');
-  }
   return ok(formatRecallContext(result, { budgetChars: 4000 }));
 }
 

@@ -248,6 +248,11 @@ function collectInstinctFiles(instinctsDir, minConfidence = 0.5) {
           return null;
         }
         const { meta, body } = parseFrontmatter(content);
+        const sourceDates = ['updatedAt', 'updated', 'date'].reduce((dates, key) => {
+          const match = String(meta[key] || '').match(/^\d{4}-\d{2}-\d{2}/);
+          if (match) dates[key] = match[0];
+          return dates;
+        }, {});
         const confidence = parseFloat(meta.confidence || '0');
         if (!(confidence >= minConfidence)) return null;
         return {
@@ -257,6 +262,7 @@ function collectInstinctFiles(instinctsDir, minConfidence = 0.5) {
           domain: meta.domain || '',
           trigger: meta.trigger || meta.id || path.basename(name, '.md'),
           body: String(body || '').slice(0, 1200),
+          ...sourceDates,
         };
       })
       .filter(Boolean);
@@ -359,6 +365,10 @@ function scoreInstinct(instinct, query) {
   };
 }
 
+function finalizeRecallResult(result) {
+  return { ...result, authority: buildRecallAuthority(result) };
+}
+
 function searchMemory(options = {}) {
   const {
     prompt = '',
@@ -379,7 +389,7 @@ function searchMemory(options = {}) {
   const query = tokenizeQuery(enrichedPrompt);
 
   if (query.all.size === 0) {
-    return { memory: [], sessions: [], instincts: [], solutions: [], query, limits: finalLimits };
+    return finalizeRecallResult({ memory: [], sessions: [], instincts: [], solutions: [], query, limits: finalLimits });
   }
 
   const memoryEntries = [];
@@ -446,7 +456,7 @@ function searchMemory(options = {}) {
     .sort((a, b) => b.score.total - a.score.total)
     .slice(0, finalLimits.solutionTop);
 
-  return {
+  const result = {
     memory: scoredMemory,
     sessions: scoredSessions,
     instincts: scoredInstincts,
@@ -454,6 +464,7 @@ function searchMemory(options = {}) {
     query,
     limits: finalLimits,
   };
+  return finalizeRecallResult(result);
 }
 
 function formatRecallLine(entry) {
@@ -483,11 +494,52 @@ function formatSolutionLine(solution) {
   return `- ${solution.date} [${conf}] ${redactSensitive(solution.title)} — ${relFile}`;
 }
 
+function buildRecallAuthority(result = {}) {
+  const dates = [];
+  const addDate = (value) => {
+    const match = String(value || '').match(/\d{4}-\d{2}-\d{2}/);
+    if (match) dates.push(match[0]);
+  };
+
+  (result.memory || []).forEach((item) => addDate(item.entry && item.entry.date));
+  (result.sessions || []).forEach((item) => addDate(item.session && item.session.date));
+  (result.instincts || []).forEach((item) => {
+    const instinct = item.instinct || {};
+    addDate(instinct.updatedAt || instinct.updated || instinct.date);
+  });
+  (result.solutions || []).forEach((item) => addDate(item.solution && item.solution.date));
+
+  return {
+    schemaVersion: 'memory-recall-authority-v1',
+    advisoryOnly: true,
+    grantsNewActionAuthority: false,
+    externalWritesPerformed: false,
+    quotaSpendPerformed: false,
+    suppressExternalSinks: true,
+    sourceRevision: 'memory-v5',
+    freshestSourceDate: dates.length > 0 ? dates.sort().at(-1) : null,
+  };
+}
+
 function formatRecallContext(result, options = {}) {
   const budgetChars = options.budgetChars ?? result.limits?.budgetChars ?? DEFAULT_LIMITS.budgetChars;
   const lines = [];
+  const authority = result.authority || buildRecallAuthority(result);
   lines.push('## Relevant Tech Persistence Memory');
   lines.push('');
+  lines.push(
+    `Authority: advisory-only; grantsNewActionAuthority=${authority.grantsNewActionAuthority}; `
+    + `externalWritesPerformed=${authority.externalWritesPerformed}; `
+    + `quotaSpendPerformed=${authority.quotaSpendPerformed}; `
+    + `suppressExternalSinks=${authority.suppressExternalSinks}; `
+    + `sourceRevision=${authority.sourceRevision}; `
+    + `freshestSourceDate=${authority.freshestSourceDate || 'unknown'}.`
+  );
+  lines.push('');
+  if (!hasUsefulResults(result)) {
+    lines.push('(no results)');
+    lines.push('');
+  }
 
   if (result.memory.length > 0) {
     lines.push('### Memory v5');
@@ -534,6 +586,7 @@ function hasUsefulResults(result) {
 module.exports = {
   DEFAULT_LIMITS,
   SOLUTION_BODY_CAP,
+  buildRecallAuthority,
   collectInstinctFiles,
   collectSessionFiles,
   collectSolutionFiles,

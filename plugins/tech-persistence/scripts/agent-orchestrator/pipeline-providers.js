@@ -104,6 +104,11 @@ function acceptClaudeResult(ctx, state, attempt, record, runtimeOutput, payload,
     },
     runtimeResult: runtimeOutput,
     evidence,
+    validation: {
+      status: 'passed',
+      source: 'structured-output',
+      evidenceRef: attempt.lifecycle.stage,
+    },
     payload,
   });
   record.resultEnvelopeHash = accepted.result.hash;
@@ -460,13 +465,6 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
     }
   }
   sliceRunner.writeSliceValidation(runDir, slice.id, validation);
-  if (validation.status === 'failed') {
-    const error = new Error(
-      `slice ${slice.id} validation failed; see ${path.join(runDir, 'slices', slice.id, 'validation.json')}`
-    );
-    error.providerFailureKind = 'validation';
-    throw withProviderRecord(error, record);
-  }
 
   const effectRefs = afterChangedFiles.length > 0
     ? [ctx.hashArtifact({
@@ -496,6 +494,11 @@ function runSliceImplementationProvider(ctx, state, statePath, runDir, options, 
       agentInvocationAcceptanceHash: ctx.hashArtifact(agentInvocationAcceptance),
       baseSha,
       headSha: ctx.currentGitSha(workdir),
+    },
+    validation: {
+      status: validation.status,
+      source: `slices/${slice.id}/validation.json`,
+      evidenceRef: `slices/${slice.id}/validation.json`,
     },
     payload: handoffParsed,
   }));

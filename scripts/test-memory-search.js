@@ -14,6 +14,7 @@ const assert = require('assert');
 
 const {
   DEFAULT_LIMITS,
+  buildRecallAuthority,
   extractPathTokens,
   formatRecallContext,
   hasUsefulResults,
@@ -296,6 +297,12 @@ test('searchMemory returns empty on empty query', () => {
   assert.strictEqual(result.memory.length, 0);
   assert.strictEqual(result.sessions.length, 0);
   assert.strictEqual(result.instincts.length, 0);
+  assert.deepStrictEqual(result.authority, {
+    schemaVersion: 'memory-recall-authority-v1',
+    advisoryOnly: true, grantsNewActionAuthority: false,
+    externalWritesPerformed: false, quotaSpendPerformed: false,
+    suppressExternalSinks: true, sourceRevision: 'memory-v5', freshestSourceDate: null,
+  });
 });
 
 test('searchMemory tolerates missing dirs', () => {
@@ -343,6 +350,7 @@ test('searchMemory surfaces matching instinct from global personal dir', () => {
       confidence: 0.8,
       domain: 'architecture',
       trigger: 'editing hooks that touch homunculus directories',
+      updatedAt: '2026-08-03T12:30:00.000Z',
     },
     'Always go through runtime-paths.js, never hardcode .claude or .codex.'
   );
@@ -356,6 +364,11 @@ test('searchMemory surfaces matching instinct from global personal dir', () => {
 
   assert.ok(result.instincts.length > 0);
   assert.strictEqual(result.instincts[0].instinct.name, 'runtime-paths-boundary.md');
+  assert.strictEqual(result.instincts[0].instinct.updatedAt, '2026-08-03');
+  assert.strictEqual(result.authority.freshestSourceDate, '2026-08-03');
+  assert.strictEqual(result.memory.length, 0);
+  assert.strictEqual(result.sessions.length, 0);
+  assert.strictEqual(result.solutions.length, 0);
 });
 
 // ---------- formatRecallContext / hasUsefulResults ----------
@@ -412,6 +425,41 @@ test('formatRecallContext redacts secrets in entry line', () => {
   const output = formatRecallContext(result, { budgetChars: 2000 });
   assert.ok(!output.includes('sk-proj-xxxx'), 'secret should be redacted');
   assert.ok(output.includes('[REDACTED]'));
+});
+
+test('buildRecallAuthority keeps recalled memory advisory-only', () => {
+  const authority = buildRecallAuthority({
+    memory: [{ entry: { date: '2026-07-30' } }],
+    sessions: [{ session: { date: '2026-08-01' } }],
+    instincts: [{ instinct: { updated: '2026-07-31' } }],
+    solutions: [],
+  });
+
+  assert.deepStrictEqual(authority, {
+    schemaVersion: 'memory-recall-authority-v1',
+    advisoryOnly: true,
+    grantsNewActionAuthority: false,
+    externalWritesPerformed: false,
+    quotaSpendPerformed: false,
+    suppressExternalSinks: true,
+    sourceRevision: 'memory-v5',
+    freshestSourceDate: '2026-08-01',
+  });
+});
+
+test('formatRecallContext renders the non-authorizing boundary', () => {
+  const result = {
+    memory: [],
+    sessions: [],
+    instincts: [],
+    solutions: [],
+    limits: DEFAULT_LIMITS,
+  };
+  const output = formatRecallContext(result, { budgetChars: 2000 });
+  assert.ok(output.includes('Authority: advisory-only'));
+  assert.ok(output.includes('grantsNewActionAuthority=false'));
+  assert.ok(output.includes('(no results)'));
+  assert.ok(output.includes('sourceRevision=memory-v5'));
 });
 
 // ---------- T8 新增：Solution recall scenarios ----------

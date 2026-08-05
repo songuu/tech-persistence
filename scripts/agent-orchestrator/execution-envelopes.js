@@ -15,6 +15,15 @@ const {
 } = require('../lib/redaction');
 
 const HASH_PATTERN = /^sha256:[a-f0-9]{64}$/;
+const CONTINUATION_POLICIES = Object.freeze(['continue', 'pause', 'stop']);
+const COORDINATION_FIELDS = new Set([
+  'taskClass',
+  'actionKind',
+  'continuationPolicy',
+  'successorRefs',
+  'noFollowUp',
+  'claimedBy',
+]);
 
 function nonEmptyString(value, label) {
   if (typeof value !== 'string' || value.trim() === '') {
@@ -64,6 +73,51 @@ function normalizeRuntimeRefs(value) {
     if (typeof ref === 'string') refs[key] = ref.trim();
   }
   return refs;
+}
+
+function normalizeTaskCoordination(value) {
+  if (value === undefined) return undefined;
+  const source = canonicalObject(value, 'coordination');
+  const unsupported = Object.keys(source).find((key) => !COORDINATION_FIELDS.has(key));
+  if (unsupported) {
+    throw new Error(`coordination.${unsupported} is unsupported`);
+  }
+  const continuationPolicy = nonEmptyString(
+    source.continuationPolicy,
+    'coordination.continuationPolicy'
+  );
+  if (!CONTINUATION_POLICIES.includes(continuationPolicy)) {
+    throw new Error(
+      `coordination.continuationPolicy must be one of: ${CONTINUATION_POLICIES.join(', ')}`
+    );
+  }
+  const successorRefs = normalizeStringArray(
+    source.successorRefs,
+    'coordination.successorRefs'
+  );
+  if (typeof source.noFollowUp !== 'boolean') {
+    throw new Error('coordination.noFollowUp must be a boolean');
+  }
+  if (source.noFollowUp && successorRefs.length > 0) {
+    throw new Error(
+      'coordination.noFollowUp cannot be true when coordination.successorRefs is non-empty'
+    );
+  }
+  const coordination = {
+    taskClass: nonEmptyString(source.taskClass, 'coordination.taskClass'),
+    actionKind: nonEmptyString(source.actionKind, 'coordination.actionKind'),
+    continuationPolicy,
+    successorRefs,
+    noFollowUp: source.noFollowUp,
+  };
+  if (source.claimedBy !== undefined) {
+    // A soft owner is observable coordination metadata, never route authority.
+    coordination.claimedBy = nonEmptyString(
+      source.claimedBy,
+      'coordination.claimedBy'
+    );
+  }
+  return coordination;
 }
 
 function normalizeNativeEvidence(value) {
@@ -362,6 +416,7 @@ function createTaskEnvelope(input = {}) {
   if (!['read-only', 'write'].includes(intent)) {
     throw new Error('intent must be read-only or write');
   }
+  const coordination = normalizeTaskCoordination(input.coordination);
   const core = {
     schemaVersion: 'task-envelope-v1',
     kind: 'task',
@@ -373,6 +428,9 @@ function createTaskEnvelope(input = {}) {
       'requiredCapabilities'
     ),
     runtimeRefs: normalizeRuntimeRefs(input.runtimeRefs || {}),
+    ...(coordination === undefined
+      ? {}
+      : { coordination }),
     payload: canonicalObject(input.payload, 'payload'),
   };
   const hash = stableHash(core);

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/scheduler-hint.schema.json",
+  "title": "Agent Loop Scheduler Hint",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "permission",
+        "action",
+        "reason"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "scheduler-hint-v1"
+        },
+        "permission": {
+          "const": "none"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "action": {
+          "const": "stop"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "permission",
+        "action",
+        "reason",
+        "resetToken"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "scheduler-hint-v1"
+        },
+        "permission": {
+          "const": "none"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "action": {
+          "enum": [
+            "run-now",
+            "wait"
+          ]
+        },
+        "resetToken": {
+          "type": "string",
+          "pattern": "^reset:[a-f0-9]{64}$"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "permission",
+        "action",
+        "reason",
+        "retryAfterMs",
+        "resetToken"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "scheduler-hint-v1"
+        },
+        "permission": {
+          "const": "none"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "action": {
+          "const": "backoff"
+        },
+        "retryAfterMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 86400000
+        },
+        "resetToken": {
+          "type": "string",
+          "pattern": "^reset:[a-f0-9]{64}$"
+        }
+      }
+    }
+  ]
+}

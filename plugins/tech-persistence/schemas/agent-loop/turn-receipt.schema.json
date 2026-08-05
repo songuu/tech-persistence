@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/turn-receipt.schema.json",
+  "title": "Agent Loop Turn Receipt",
+  "description": "A replayed receipt whose phase ordering is enforced by the TurnTransaction implementation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "turnKey",
+    "identity",
+    "createdAt",
+    "status",
+    "completedPhases",
+    "currentPhase",
+    "nextPhase",
+    "journalRevision",
+    "journalHash",
+    "material",
+    "validationStatus",
+    "phaseRecords",
+    "receiptHash"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "turn-receipt-v1" },
+    "kind": { "const": "turn-receipt" },
+    "turnKey": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "identity": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": true
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "in-progress", "committed"]
+    },
+    "completedPhases": {
+      "type": "array",
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "host-execute",
+          "typed-result",
+          "validation",
+          "durable-writeback",
+          "scheduler-apply",
+          "scheduler-ack"
+        ]
+      }
+    },
+    "currentPhase": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "enum": [
+          "host-execute", "typed-result", "validation",
+          "durable-writeback", "scheduler-apply", "scheduler-ack"
+        ] }
+      ]
+    },
+    "nextPhase": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "enum": [
+          "host-execute", "typed-result", "validation",
+          "durable-writeback", "scheduler-apply", "scheduler-ack"
+        ] }
+      ]
+    },
+    "journalRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 6
+    },
+    "journalHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "material": { "type": ["boolean", "null"] },
+    "validationStatus": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "enum": ["passed", "failed", "skipped"] }
+      ]
+    },
+    "phaseRecords": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "phase", "payload", "payloadHash", "recordedAt"],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 1, "maximum": 6 },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "host-execute", "typed-result", "validation",
+              "durable-writeback", "scheduler-apply", "scheduler-ack"
+            ]
+          },
+          "payload": { "type": "object", "additionalProperties": true },
+          "payloadHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "recordedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "receiptHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}

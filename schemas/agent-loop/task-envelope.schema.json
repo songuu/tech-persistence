@@ -42,12 +42,54 @@
       "uniqueItems": true,
       "items": { "type": "string", "minLength": 1 }
     },
+    "coordination": { "$ref": "#/$defs/coordination" },
     "payload": {
       "type": "object",
       "additionalProperties": true
     }
   },
   "$defs": {
+    "coordination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taskClass",
+        "actionKind",
+        "continuationPolicy",
+        "successorRefs",
+        "noFollowUp"
+      ],
+      "properties": {
+        "taskClass": { "type": "string", "minLength": 1 },
+        "actionKind": { "type": "string", "minLength": 1 },
+        "continuationPolicy": {
+          "type": "string",
+          "enum": ["continue", "pause", "stop"]
+        },
+        "successorRefs": {
+          "type": "array",
+          "description": "Canonical task successor refs, emitted in unique sorted order.",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "noFollowUp": { "type": "boolean" },
+        "claimedBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Visibility-only soft owner; it grants no route eligibility, permission, or write authority."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "noFollowUp": { "const": true } }
+          },
+          "then": {
+            "properties": { "successorRefs": { "maxItems": 0 } }
+          }
+        }
+      ]
+    },
     "runtimeRefs": {
       "type": "object",
       "additionalProperties": {

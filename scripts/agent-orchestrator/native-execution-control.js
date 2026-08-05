@@ -222,6 +222,7 @@ function buildStageControl(input = {}) {
     intent: input.intent || (input.providerKey === 'implementation' ? 'write' : 'read-only'),
     requiredCapabilities: profile.capabilities,
     runtimeRefs: input.runtimeRefs || {},
+    coordination: input.coordination,
     payload: input.payload || {},
   });
   const providerRef = `${profile.runtime}:${input.providerKey}:${capabilitySnapshot.adapter}`;

@@ -16,6 +16,8 @@ const executionEnvelopes = require('./agent-orchestrator/execution-envelopes');
 const runLock = require('./agent-orchestrator/run-lock');
 const providerLifecycle = require('./agent-orchestrator/provider-lifecycle');
 const structuredOutput = require('./agent-orchestrator/structured-output');
+const operatorReviewPacket = require('./agent-orchestrator/operator-review-packet');
+const turnTransaction = require('./agent-orchestrator/turn-transaction');
 
 const pipeline = require('./agent-orchestrator/pipeline');
 const pipelineState = require('./agent-orchestrator/pipeline-state');
@@ -35,6 +37,7 @@ const DEFAULT_RUNS_DIR = '.agent-runs';
 const MAX_BUFFER = 64 * 1024 * 1024;
 const REVIEW_CONTEXT_MAX_BYTES = 200 * 1024;
 const INLINE_FILE_DIFF_MAX_BYTES = 96 * 1024;
+const STATUS_ARTIFACT_MAX_BYTES = 256 * 1024;
 
 const PROVIDERS = {
   spec: 'claude',
@@ -1435,6 +1438,11 @@ function runProviderPostProcess(attempt, record, context, run) {
 
 function persistProviderFailure(state, runDir, attempt, failure) {
   const postAcceptanceFailure = failure.providerAccepted === true;
+  const typedResultRecorded = Boolean(
+    attempt.turnControl
+    && attempt.turnControl.receipt
+    && attempt.turnControl.receipt.completedPhases.includes('typed-result')
+  );
   const canonicalResultFile = path.join(attempt.contractDir, `${attempt.prefix}.result.json`);
   const canonicalAcceptanceFile = path.join(
     attempt.contractDir,
@@ -1450,9 +1458,14 @@ function persistProviderFailure(state, runDir, attempt, failure) {
     : null;
   const canonicalAccepted = Boolean(canonicalAcceptance && canonicalAcceptance.accepted === true);
   const preserveCanonical = postAcceptanceFailure || canonicalArtifactsExist;
-  const failureArtifactStem = postAcceptanceFailure
-    ? `${attempt.prefix}.post-acceptance-failure`
-    : (preserveCanonical ? `${attempt.prefix}.acceptance-failure` : attempt.prefix);
+  const failureArtifactSuffix = postAcceptanceFailure
+    ? 'post-acceptance-failure'
+    : (preserveCanonical
+      ? 'acceptance-failure'
+      : (typedResultRecorded ? `${safeStageName(failure.kind)}-failure` : null));
+  const failureArtifactStem = failureArtifactSuffix
+    ? `${attempt.prefix}.${failureArtifactSuffix}`
+    : attempt.prefix;
   const afterSnapshot = captureWorktreeSnapshot(state.workdir, runDir);
   const effects = providerLifecycle.createEffectSnapshot(
     attempt.effectBaseline,
@@ -1478,8 +1491,8 @@ function persistProviderFailure(state, runDir, attempt, failure) {
   );
   const outcome = nativeExecutionControl.createAttemptResult({
     stageControl: attempt,
-    ref: postAcceptanceFailure
-      ? `result:${state.runId}:${attempt.prefix}:post-acceptance-failure`
+    ref: failureArtifactSuffix
+      ? `result:${state.runId}:${attempt.prefix}:${failureArtifactSuffix}`
       : `result:${state.runId}:${attempt.prefix}`,
     status: 'failed',
     effects: {
@@ -1561,6 +1574,23 @@ function persistProviderFailure(state, runDir, attempt, failure) {
   return { outcome, effects, providerRecovery };
 }
 
+function recordAttemptTurnPhase(attempt, phase, payload) {
+  if (!attempt.turnControl) {
+    throw new Error(`turn control is missing for provider attempt ${attempt.prefix || '<unknown>'}`);
+  }
+  const recorded = turnTransaction.recordTurnPhase(
+    attempt.turnControl.journalFile,
+    {
+      identity: attempt.turnControl.identity,
+      turnKey: attempt.turnControl.turnKey,
+      phase,
+      payload,
+    }
+  );
+  attempt.turnControl.receipt = recorded.receipt;
+  return recorded;
+}
+
 function prepareProviderAttempt(state, runDir, options, input) {
   const stageName = safeStageName(input.stage);
   const stamp = input.stamp || logStamp();
@@ -1590,6 +1620,14 @@ function prepareProviderAttempt(state, runDir, options, input) {
     taskRef: `task:${state.runId}:${stageName}:${stamp}`,
     providerKey: input.providerKey,
     intent: input.intent,
+    coordination: input.coordination || {
+      taskClass: 'provider-stage',
+      actionKind: stageName,
+      continuationPolicy: 'continue',
+      successorRefs: [],
+      noFollowUp: false,
+      claimedBy: `provider:${input.providerKey}`,
+    },
     payload: {
       promptHash: providerProfiles.hash(input.prompt || ''),
       schemaPath: input.schemaPath || null,
@@ -1625,6 +1663,15 @@ function prepareProviderAttempt(state, runDir, options, input) {
   }
   const contractDir = path.join(runDir, 'contracts');
   const prefix = `${stageName}.${stamp}`;
+  const turnIdentity = {
+    runId: state.runId,
+    stage: stageName,
+    taskRef: stageControl.task.ref,
+    taskHash: stageControl.task.hash,
+    routeHash: stageControl.route.decisionHash,
+    providerRef: stageControl.providerRef,
+  };
+  const turnKey = turnTransaction.deriveTurnKey(turnIdentity);
   writeJson(path.join(contractDir, `${prefix}.task.json`), stageControl.task);
   writeJson(path.join(contractDir, `${prefix}.route.json`), stageControl.route);
   writeJson(
@@ -1637,6 +1684,11 @@ function prepareProviderAttempt(state, runDir, options, input) {
     contractDir,
     prefix,
     effectBaseline,
+    turnControl: {
+      identity: turnIdentity,
+      turnKey,
+      journalFile: path.join(contractDir, `${prefix}.turn-journal.json`),
+    },
     lifecycle: {
       providerKey: input.providerKey,
       stage: input.stage,
@@ -1656,6 +1708,25 @@ function prepareProviderAttempt(state, runDir, options, input) {
   return attempt;
 }
 
+function normalizeTurnValidation(validation, acceptance) {
+  if (!validation || typeof validation !== 'object' || Array.isArray(validation)) {
+    throw new Error('provider turn validation is required');
+  }
+  const sourceStatus = typeof validation.status === 'string'
+    ? validation.status.trim().toLowerCase()
+    : '';
+  if (!['passed', 'failed', 'skipped'].includes(sourceStatus)) {
+    throw new Error('provider turn validation status must be passed, failed, or skipped');
+  }
+  return {
+    status: sourceStatus === 'passed' && acceptance && acceptance.accepted === true
+      ? 'passed'
+      : 'failed',
+    sourceStatus,
+    validationHash: providerProfiles.hash(validation),
+  };
+}
+
 function acceptProviderAttempt(state, attempt, input) {
   const leaseControl = attempt.goalLeaseControl || {
     expectedRevision: 0,
@@ -1672,6 +1743,39 @@ function acceptProviderAttempt(state, attempt, input) {
     evidence: input.evidence || {},
     payload: input.payload || {},
   });
+  recordAttemptTurnPhase(attempt, 'host-execute', {
+    status: input.status,
+    providerRef: attempt.providerRef,
+    runtimeRefsHash: providerProfiles.hash(input.runtimeRefs || {}),
+  });
+  const typedResultFile = path.join(
+    attempt.contractDir,
+    `${attempt.prefix}.typed-result.json`
+  );
+  writeCanonicalJson(typedResultFile, outcome.result);
+  recordAttemptTurnPhase(attempt, 'typed-result', {
+    material: true,
+    resultRef: outcome.result.ref,
+    resultArtifactRef: path.relative(state.runDir, typedResultFile).replace(/\\/g, '/'),
+    resultHash: outcome.result.hash,
+    effectsState: outcome.result.effects.state,
+  });
+  const turnValidation = normalizeTurnValidation(input.validation, outcome.acceptance);
+  const validationPhase = recordAttemptTurnPhase(attempt, 'validation', {
+    status: turnValidation.status,
+    sourceStatus: turnValidation.sourceStatus,
+    validationHash: turnValidation.validationHash,
+    acceptanceHash: providerProfiles.hash(outcome.acceptance),
+    errorsHash: providerProfiles.hash(outcome.acceptance.errors || []),
+  });
+  if (turnValidation.sourceStatus !== 'passed') {
+    const error = new Error(
+      `provider validation ${turnValidation.sourceStatus} for ${attempt.prefix}; material result requires passed validation before durable-writeback`
+    );
+    error.providerFailureKind = 'validation';
+    error.turnReceipt = validationPhase.receipt;
+    throw error;
+  }
   const taskHashSuffix = attempt.task.hash.slice('sha256:'.length, 'sha256:'.length + 16);
   const acceptedFile = path.join(
     attempt.contractDir,
@@ -1710,6 +1814,15 @@ function acceptProviderAttempt(state, attempt, input) {
         }
         outcome.duplicate = true;
       }
+      const durable = recordAttemptTurnPhase(attempt, 'durable-writeback', {
+        status: 'committed',
+        acceptedResultHash: outcome.result.hash,
+        acceptanceHash: providerProfiles.hash(outcome.acceptance),
+        acceptedArtifact: path.basename(acceptedFile),
+      });
+      outcome.turnReceipt = durable.receipt;
+      outcome.turnJournalRef = path.relative(state.runDir, attempt.turnControl.journalFile)
+        .replace(/\\/g, '/');
     },
     leaseControl.storeOptions
   );
@@ -2031,6 +2144,11 @@ function runSpecProvider(state, statePath, runDir, options) {
         stdoutHash: providerProfiles.hash(result.stdout || ''),
         schemaPath: invocation.schemaPath,
       },
+      validation: {
+        status: 'passed',
+        source: 'requirement-spec',
+        evidenceRef: 'spec.json',
+      },
       payload: spec,
     }));
     record.resultEnvelopeHash = accepted.result.hash;
@@ -2300,6 +2418,11 @@ function runImplementationProvider(state, statePath, runDir, options) {
         changedFilesHash: providerProfiles.hash(changedFiles),
         baseSha,
         headSha: currentGitSha(state.workdir),
+      },
+      validation: {
+        status: validation.status,
+        source: 'validation.json',
+        evidenceRef: 'validation.json',
       },
       payload: handoff,
     }));
@@ -2857,6 +2980,11 @@ function runReviewProvider(state, statePath, runDir, options) {
         reviewHash: providerProfiles.hash(review),
         completionGateHash: providerProfiles.hash(completionGate),
       },
+      validation: {
+        status: 'passed',
+        source: 'review-result-and-completion-gate',
+        evidenceRef: 'completion-gate.json',
+      },
       payload: review,
     }));
     record.resultEnvelopeHash = accepted.result.hash;
@@ -3233,12 +3361,273 @@ function printRunSummary(state) {
   if (state.files.review) console.log(`Review: ${path.join(state.runDir, state.files.review)}`);
 }
 
+function isContainedRealPath(rootReal, targetReal) {
+  const relativeReal = path.relative(rootReal, targetReal);
+  return relativeReal !== '..'
+    && !relativeReal.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relativeReal);
+}
+
+function resolveRunDirectory(runDir, relativePath) {
+  if (typeof relativePath !== 'string' || !relativePath.trim()) return null;
+  let resolved;
+  try {
+    resolved = providerLifecycle.resolveArtifactPath(runDir, relativePath);
+  } catch (_error) {
+    return null;
+  }
+
+  try {
+    const lexicalStat = fs.lstatSync(resolved.absolutePath);
+    if (lexicalStat.isSymbolicLink() || !lexicalStat.isDirectory()) {
+      return null;
+    }
+    const rootReal = fs.realpathSync.native(path.resolve(runDir));
+    const directoryReal = fs.realpathSync.native(resolved.absolutePath);
+    const realStat = fs.statSync(directoryReal);
+    if (!isContainedRealPath(rootReal, directoryReal)
+        || realStat.dev !== lexicalStat.dev
+        || realStat.ino !== lexicalStat.ino) {
+      return null;
+    }
+    return { absolutePath: resolved.absolutePath, realPath: directoryReal };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function readRunJsonArtifact(runDir, relativePath) {
+  if (typeof relativePath !== 'string' || !relativePath.trim()) return null;
+  let resolved;
+  try {
+    resolved = providerLifecycle.resolveArtifactPath(runDir, relativePath);
+  } catch (_error) {
+    return null;
+  }
+
+  let descriptor = null;
+  try {
+    const lexicalStat = fs.lstatSync(resolved.absolutePath);
+    if (lexicalStat.isSymbolicLink()
+        || !lexicalStat.isFile()
+        || lexicalStat.size > STATUS_ARTIFACT_MAX_BYTES) {
+      return null;
+    }
+    const rootReal = fs.realpathSync.native(path.resolve(runDir));
+    const targetReal = fs.realpathSync.native(resolved.absolutePath);
+    if (!isContainedRealPath(rootReal, targetReal)) {
+      return null;
+    }
+
+    descriptor = fs.openSync(targetReal, 'r');
+    const openedStat = fs.fstatSync(descriptor);
+    if (!openedStat.isFile()
+        || openedStat.size > STATUS_ARTIFACT_MAX_BYTES
+        || openedStat.dev !== lexicalStat.dev
+        || openedStat.ino !== lexicalStat.ino) {
+      return null;
+    }
+    const buffer = Buffer.alloc(openedStat.size + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const bytesRead = fs.readSync(
+        descriptor, buffer, offset, buffer.length - offset, offset
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    const afterStat = fs.fstatSync(descriptor);
+    if (offset !== openedStat.size
+        || afterStat.size !== openedStat.size
+        || afterStat.mtimeMs !== openedStat.mtimeMs) {
+      return null;
+    }
+    return JSON.parse(buffer.subarray(0, offset).toString('utf8'));
+  } catch (_error) {
+    return null;
+  } finally {
+    if (descriptor !== null) {
+      try {
+        fs.closeSync(descriptor);
+      } catch (_error) {
+        // Status is a fail-closed projection; descriptor cleanup must not make it fail open.
+      }
+    }
+  }
+}
+
+function operatorUserGate(state) {
+  if (state.status === 'spec-ready' && !state.specFrozenAt) {
+    return {
+      active: true,
+      status: 'open',
+      ref: `run:${state.runId}:spec-freeze`,
+      reason: 'the frozen specification requires an explicit human freeze',
+    };
+  }
+  if (state.status === 'contract-conflict') {
+    return {
+      active: true,
+      status: 'open',
+      ref: `run:${state.runId}:contract-conflict`,
+      reason: 'the contract conflict requires an explicit accept or reject decision',
+    };
+  }
+  return null;
+}
+
+function operatorEvidenceWait(state) {
+  const recovery = state.providerRecovery;
+  if (!recovery || recovery.required !== true) return null;
+  return {
+    active: true,
+    status: 'waiting',
+    ref: recovery.resultHash || recovery.providerRef || `run:${state.runId}:provider-recovery`,
+    reason: recovery.reconcileRequired === true
+      ? 'provider recovery requires reconciliation evidence'
+      : 'provider recovery is waiting for resumable runtime evidence',
+    retryAfterMs: 300_000,
+  };
+}
+
+function nextSafeActionForRun(state) {
+  if (['completed', 'abandoned', 'dry-run'].includes(state.status)) {
+    return 'inspect the recorded evidence; this terminal run has no scheduled execution';
+  }
+  if (state.status === 'spec-ready' && !state.specFrozenAt) {
+    return `node scripts/agent-orchestrator.js freeze --run ${state.runId}`;
+  }
+  if (state.status === 'contract-conflict') {
+    return `node scripts/agent-orchestrator.js resume --run ${state.runId} --resolve <accept-revision|reject-revision> --revision <id>`;
+  }
+  if (state.status === 'blocked' || state.status === 'needs-followup') {
+    return `inspect the blocker evidence, then node scripts/agent-orchestrator.js resume --run ${state.runId}`;
+  }
+  return `node scripts/agent-orchestrator.js resume --run ${state.runId}`;
+}
+
+function latestTurnReceipt(runDir) {
+  const contracts = resolveRunDirectory(runDir, 'contracts');
+  if (!contracts) return null;
+
+  let entries;
+  try {
+    entries = fs.readdirSync(contracts.realPath, { withFileTypes: true });
+  } catch (_error) {
+    return null;
+  }
+
+  const journals = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.turn-journal.json'))
+    .map((entry) => {
+      try {
+        const file = path.join(contracts.realPath, entry.name);
+        const stat = fs.lstatSync(file);
+        if (stat.isSymbolicLink()
+            || !stat.isFile()
+            || stat.size > STATUS_ARTIFACT_MAX_BYTES) {
+          return null;
+        }
+        return { name: entry.name, mtimeMs: stat.mtimeMs };
+      } catch (_error) {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => (
+      right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name)
+    ));
+  for (const selected of journals) {
+    const ref = `contracts/${selected.name}`;
+    const journal = readRunJsonArtifact(runDir, ref);
+    if (!journal) continue;
+    try {
+      return {
+        ref,
+        receipt: turnTransaction.replayTurnJournal(journal),
+      };
+    } catch (_error) {
+      // Corrupt journals degrade to the next safe candidate instead of breaking status.
+    }
+  }
+  return null;
+}
+
+function buildRunStatusProjection(runDir, state) {
+  const reviewRef = state.files && state.files.review;
+  const validationRef = state.files && state.files.validation;
+  const review = readRunJsonArtifact(runDir, reviewRef) || {};
+  const validation = readRunJsonArtifact(runDir, validationRef) || {};
+  const queue = readRunJsonArtifact(runDir, 'queue.json') || {};
+  const latestTurn = latestTurnReceipt(runDir);
+  const evidenceRefs = [
+    ...Object.values(state.files || {}).filter((value) => typeof value === 'string'),
+  ];
+  if (fs.existsSync(path.join(runDir, 'queue.json'))) evidenceRefs.push('queue.json');
+  if (latestTurn) evidenceRefs.push(latestTurn.ref);
+
+  const packet = operatorReviewPacket.buildOperatorReviewPacket({
+    run: {
+      runId: state.runId,
+      status: state.status,
+      mode: state.mode || 'classic',
+    },
+    queue,
+    userGate: operatorUserGate(state),
+    evidenceWait: operatorEvidenceWait(state),
+    decision: review.decision,
+    reason: review.summary || review.reason || (validation.status
+      ? `latest validation status is ${validation.status}`
+      : undefined),
+    evidenceRefs,
+    freshness: {
+      status: 'snapshot',
+      observedAt: state.updatedAt || null,
+      source: 'state.json and referenced run artifacts',
+      stale: null,
+    },
+    boundary: {
+      intent: 'read-only',
+      writeAllowed: false,
+      requiresApproval: false,
+      scopes: evidenceRefs,
+      reason: 'status is a read-only projection and does not grant execution authority',
+    },
+    nextSafeAction: nextSafeActionForRun(state),
+  });
+
+  return {
+    schemaVersion: 'agent-loop-status-v1',
+    run: {
+      runId: state.runId,
+      mode: state.mode || 'classic',
+      status: state.status,
+      createdAt: state.createdAt || null,
+      updatedAt: state.updatedAt || null,
+    },
+    operatorReviewPacket: packet,
+    turnReceipt: latestTurn ? latestTurn.receipt : null,
+  };
+}
+
 function runStatus(options, positionals) {
-  const { state } = loadRun(options, positionals);
+  const { runDir, state } = loadRun(options, positionals);
+  const projection = buildRunStatusProjection(runDir, state);
+  if (boolOption(options, 'json')) {
+    console.log(JSON.stringify(projection, null, 2));
+    return;
+  }
   printRunSummary(state);
   console.log(`Created: ${state.createdAt}`);
   console.log(`Updated: ${state.updatedAt}`);
   console.log(`Frozen: ${state.specFrozenAt || 'no'}`);
+  const packet = projection.operatorReviewPacket;
+  console.log(`Operator decision: ${packet.decision}`);
+  console.log(`Reason: ${packet.reason}`);
+  console.log(
+    `Scheduler hint: ${packet.schedulerHint.action} (permission=${packet.schedulerHint.permission})`
+  );
+  console.log(`Next safe action: ${packet.nextSafeAction}`);
 }
 
 function bindGoalLease(options, positionals) {
@@ -3929,6 +4318,23 @@ function runProviderIntegrationSelfTests() {
   assertSelfTest('provider integration: global contract written', fs.existsSync(path.join(tmpBase, 'global-contract.json')), true);
   assertSelfTest('provider integration: status global-contract-ready', stateObj.status, 'global-contract-ready');
   assertSelfTest('provider integration: providerRuns appended', Array.isArray(stateObj.providerRuns) && stateObj.providerRuns.length === 1, true);
+  const providerContractsDir = path.join(tmpBase, 'contracts');
+  const firstTurnJournalName = fs.readdirSync(providerContractsDir)
+    .find((name) => name.endsWith('.turn-journal.json'));
+  assertSelfTest('provider integration: turn journal written', Boolean(firstTurnJournalName), true);
+  const firstTurnReceipt = turnTransaction.replayTurnJournal(
+    turnTransaction.readTurnJournal(path.join(providerContractsDir, firstTurnJournalName))
+  );
+  assertSelfTest('provider integration: durable writeback receipted',
+    firstTurnReceipt.currentPhase, 'durable-writeback');
+  assertSelfTest('provider integration: scheduler apply is not fabricated',
+    firstTurnReceipt.nextPhase, 'scheduler-apply');
+  const firstTaskName = fs.readdirSync(providerContractsDir)
+    .find((name) => name.endsWith('.task.json'));
+  const firstTask = readJson(path.join(providerContractsDir, firstTaskName));
+  assertSelfTest('provider integration: typed coordination attached',
+    firstTask.coordination.taskClass, 'provider-stage');
+
 
   stateObj = { ...stateObj, status: 'planning-slices' };
   writeJson(statePath, stateObj);
@@ -3943,7 +4349,7 @@ function runProviderIntegrationSelfTests() {
         risk: 'L1',
         acceptanceCriteria: ['mock ok'],
         doneCriteria: ['mock done'],
-        validationCommands: [],
+        validationCommands: ['git diff --check'],
         questions: [],
       }],
     }),
@@ -4379,7 +4785,7 @@ Usage:
   node scripts/agent-orchestrator.js run --requirement "..." --preflight-only
   node scripts/agent-orchestrator.js freeze --run <runId>
   node scripts/agent-orchestrator.js resume --run <runId> --validation-command "npm test"
-  node scripts/agent-orchestrator.js status --run latest
+  node scripts/agent-orchestrator.js status --run latest [--json]
   node scripts/agent-orchestrator.js goal-bind --run <runId> --runtime codex --host-ref <opaque-ref> --objective "..."
   node scripts/agent-orchestrator.js goal-release --run <runId> [--reason "..."]
   node scripts/agent-orchestrator.js doctor
@@ -4489,5 +4895,6 @@ if (require.main === module) {
 module.exports = {
   collectGitDiff,
   listChangedFiles,
+  normalizeTurnValidation,
   worktreeFileFingerprint,
 };
