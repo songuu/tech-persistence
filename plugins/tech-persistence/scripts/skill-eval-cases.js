@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * skill-eval-cases.js — CLI for sinking real failure traces into structured eval cases.
+ * skill-eval-cases.js — CLI for sinking native user prompts into structured eval cases.
  *
- * 核心逻辑在 scripts/lib/skill-eval-cases.js（含 provenance gate + 双层脱敏）；
+ * 核心逻辑在 scripts/lib/skill-eval-cases.js（含 canonical journal authority + 脱敏）；
  * 本文件只管 argv + exit policy。
- *   add  — /skill diagnose|eval 把一条真实失败 trace（人工确认后）固化为结构化 eval case
- *   list — /skill eval 跑测试前预览 trace 沉淀的 case 集
+ *   add  — /skill diagnose|eval 把一条真实 UserPromptSubmit 固化为结构化 eval case
+ *   list — /skill eval 跑测试前预览并复验当前项目的 case 集
  *
- * 护城河：add 强制 --from-trace（provenance=trace + source_trace 快照），
- * eval case 必须来自真实使用，不接受 skill 自产（避免"自己出题给自己考"）。
+ * 护城河：add 强制 --source-event-ref 指向当前项目 canonical journal 中仍 active 的
+ * trusted native user BehaviorEvent；caller JSON snapshot 永远不具备授权能力。
  *
  * Exit policy（见 .claude/rules/hook-exit-codes.md）：add/list 是 CLI 工具，
  * 参数/边界错 exit 2（usage）；正常 exit 0；不 crash 调用方主流程。
@@ -18,6 +18,7 @@
 'use strict';
 
 const lib = require('./lib/skill-eval-cases');
+const { detectStableProjectIdentity } = require('./lib/project-identity');
 const { resolveBaseDir } = require('./lib/runtime-paths');
 
 function parseFlags(args) {
@@ -45,7 +46,7 @@ function usageError(message) {
   process.stderr.write(`[skill-eval-cases] usage error: ${message}\n`);
   process.stderr.write(
     'Usage:\n'
-      + '  node scripts/skill-eval-cases.js add --name <n> --input <s> --from-trace <json> [--expectation <s>] [--id <s>] [--tag <s>] [--base-dir <dir>]\n'
+      + '  node scripts/skill-eval-cases.js add --name <n> --input <s> --source-event-ref <event_id> [--expectation <s>] [--id <s>] [--tag <s>] [--base-dir <dir>]\n'
       + '  node scripts/skill-eval-cases.js list <name> [--base-dir <dir>]\n'
   );
   process.exit(2);
@@ -57,27 +58,28 @@ function runAdd(flags) {
   if (typeof flags.input !== 'string' || !flags.input) {
     return usageError('add requires --input (the triggering input of the case)');
   }
-  // 护城河 gate：必须携带 --from-trace（trace 快照），否则拒绝（不接受 skill 自产 case）
-  if (typeof flags['from-trace'] !== 'string' || !flags['from-trace']) {
-    return usageError('add requires --from-trace <json> (eval case 必须来自真实使用 trace)');
+  if (Object.prototype.hasOwnProperty.call(flags, 'from-trace')) {
+    return usageError('--from-trace is not accepted; caller JSON cannot authorize an eval case');
   }
-  let sourceTrace;
-  try {
-    sourceTrace = JSON.parse(flags['from-trace']);
-  } catch (err) {
-    return usageError(`--from-trace must be valid JSON: ${err.message}`);
+  if (typeof flags['source-event-ref'] !== 'string' || !flags['source-event-ref']) {
+    return usageError('add requires --source-event-ref <event_id>');
   }
   const baseDir = flags['base-dir'] || resolveBaseDir();
   const input = {
     input: flags.input,
     expectation: typeof flags.expectation === 'string' ? flags.expectation : undefined,
     id: typeof flags.id === 'string' ? flags.id : undefined,
-    provenance: 'trace',
-    source_trace: sourceTrace,
+    source_event_ref: flags['source-event-ref'],
     tags: typeof flags.tag === 'string' ? [flags.tag] : undefined,
   };
   try {
-    const { record, casesFile } = lib.addCase(name, input, { baseDir });
+    const cwd = process.cwd();
+    const project = detectStableProjectIdentity(cwd);
+    const { record, casesFile } = lib.addCase(name, input, {
+      baseDir,
+      projectId: project.id,
+      cwd,
+    });
     process.stdout.write(`[skill-eval-cases] added ${name} case "${record.id}" → ${casesFile}\n`);
     process.stdout.write(`  input: ${record.input.slice(0, 80)}\n`);
     process.exit(0);
@@ -94,10 +96,13 @@ function runList(positional, flags) {
   let records;
   try {
     records = lib.readCases(name, { baseDir });
+    const cwd = process.cwd();
+    const project = detectStableProjectIdentity(cwd);
+    lib.verifyCaseAuthorities(records, { baseDir, projectId: project.id, cwd });
   } catch (err) {
     return usageError(err.message);
   }
-  process.stdout.write(`[skill-eval-cases] ${name}: ${records.length} case(s) (provenance=trace)\n`);
+  process.stdout.write(`[skill-eval-cases] ${name}: ${records.length} case(s) (provenance=behavior_event)\n`);
   records.forEach((r, i) => {
     process.stdout.write(`  #${i + 1} ${r.id} ${r.timestamp} :: ${String(r.input).slice(0, 60)}\n`);
   });

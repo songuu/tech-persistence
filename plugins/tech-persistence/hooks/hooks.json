@@ -8,13 +8,13 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" inject-context.js",
             "async": false,
-            "timeout": 5000
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" caveman-activate.js",
             "async": false,
-            "timeout": 2000,
+            "timeout": 2,
             "statusMessage": "Loading caveman mode"
           }
         ]
@@ -28,7 +28,7 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" prompt-submit.js",
             "async": false,
-            "timeout": 1800,
+            "timeout": 5,
             "statusMessage": "Recalling relevant memory"
           }
         ]
@@ -42,14 +42,14 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" guard-handoff-path.js",
             "async": false,
-            "timeout": 1000,
+            "timeout": 2,
             "statusMessage": "Checking handoff path"
           },
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" observe.js pre",
             "async": true,
-            "timeout": 2000
+            "timeout": 2
           }
         ]
       }
@@ -62,7 +62,7 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" observe.js post",
             "async": true,
-            "timeout": 2000
+            "timeout": 2
           }
         ]
       }
@@ -75,7 +75,7 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" evaluate-session.js",
             "async": false,
-            "timeout": 10000
+            "timeout": 10
           }
         ]
       }

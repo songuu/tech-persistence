@@ -3,10 +3,21 @@
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const [, , scriptName, ...scriptArgs] = process.argv;
+const ALLOWED_SCRIPT_NAMES = new Set(["caveman-activate.js","codex-behavior-hook.js","codex-lifecycle-evidence.js","evaluate-session.js","guard-handoff-path-codex.js","guard-handoff-path.js","inject-context-codex.js","inject-context.js","observe.js","prompt-submit.js"]);
+const DIAGNOSTIC_MAX_BYTES = 128;
+const DIAGNOSTIC_CODES = new Set([
+  'SCRIPT_NOT_ALLOWED',
+  'SPAWN_FAILED',
+  'CHILD_FAILED',
+  'WRAPPER_FAILED',
+]);
 
-if (!scriptName) {
-  process.exit(0);
+function writeDiagnostic(code) {
+  const safeCode = DIAGNOSTIC_CODES.has(code) ? code : 'WRAPPER_FAILED';
+  const bytes = Buffer.from('[run-hook] ' + safeCode + '\n', 'utf8');
+  try {
+    process.stderr.write(bytes.subarray(0, DIAGNOSTIC_MAX_BYTES));
+  } catch {}
 }
 
 function inferRuntime() {
@@ -27,23 +38,35 @@ function inferRuntime() {
   return 'codex';
 }
 
-process.env.TECH_PERSISTENCE_RUNTIME = inferRuntime();
+function main() {
+  const [, , scriptName, ...scriptArgs] = process.argv;
+  if (!scriptName) return;
+  if (!ALLOWED_SCRIPT_NAMES.has(scriptName)) {
+    writeDiagnostic('SCRIPT_NOT_ALLOWED');
+    return;
+  }
 
-const scriptPath = path.join(__dirname, scriptName);
-const result = spawnSync(process.execPath, [scriptPath, ...scriptArgs], {
-  stdio: 'inherit',
-  env: process.env,
-});
-
-if (result.error) {
-  try {
-    process.stderr.write(`[run-hook] failed to launch ${scriptName}: ${result.error.message}\n`);
-  } catch {}
-  process.exit(0);
+  process.env.TECH_PERSISTENCE_RUNTIME = inferRuntime();
+  const scriptPath = path.join(__dirname, scriptName);
+  const result = spawnSync(process.execPath, [scriptPath, ...scriptArgs], {
+    stdio: ['inherit', 'pipe', 'pipe'],
+    env: process.env,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.error) {
+    writeDiagnostic('SPAWN_FAILED');
+    return;
+  }
+  if (result.signal || result.status !== 0) {
+    writeDiagnostic('CHILD_FAILED');
+    return;
+  }
+  if (result.stdout && result.stdout.length > 0) process.stdout.write(result.stdout);
 }
 
-if (typeof result.status === 'number') {
-  process.exit(result.status);
+try {
+  main();
+} catch {
+  writeDiagnostic('WRAPPER_FAILED');
 }
-
-process.exit(result.signal ? 1 : 0);
+process.exitCode = 0;

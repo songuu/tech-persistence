@@ -10,6 +10,7 @@ const {
   copyCodexAgents,
   normalizeLf,
   transform: transformForCodex,
+  utilityScripts,
 } = require(path.join(
   pluginRoot,
   'scripts',
@@ -22,6 +23,8 @@ const {
   getHookScriptNames,
 } = require('./lib/hook-registry');
 const {
+  CODEX_HOOK_MAX_TIMEOUT_SECONDS,
+  CODEX_HOOK_TIMEOUT_UNIT,
   buildCodexPluginHookConfig,
   getCodexHookScriptNames,
 } = require('./lib/codex-hook-registry');
@@ -87,7 +90,15 @@ const codexSprintGeneratedFiles = Object.freeze({
 const codexProviderContractSnippets = Object.freeze({
   caveman: Object.freeze(['This mode is opt-in', 'SessionStart never activates it']),
   'caveman-help': Object.freeze(['does not auto-activate caveman']),
-  'continuous-learning': Object.freeze(['No automatic repository-wide recall hook', 'No automatic evaluator or Memory write']),
+  'continuous-learning': Object.freeze([
+    'receipt keyed only by native `session_id` + `turn_id` + hook',
+    'never treat the assistant message as task success',
+    'TP_SELF_LEARNING_CONTROL_V1:',
+    'live candidate hash',
+    'same locked journal transaction',
+    'Exact same-turn replay',
+    'Generic Agent, MCP, or',
+  ]),
   memory: Object.freeze(['SessionStart does not inject']),
 });
 const codexForbiddenStartupClaims = Object.freeze([
@@ -104,6 +115,130 @@ function fail(message) {
 
 function ok(message) {
   console.log(`[OK] ${message}`);
+}
+
+function validateRunHookWrapper(file, label) {
+  if (!isFile(file, label)) return;
+  const content = fs.readFileSync(file, 'utf8');
+  const expectedAllowlist = Array.from(new Set([
+    ...expectedHookScripts,
+    ...expectedCodexHookScripts,
+  ])).sort();
+  const allowlistMatch = content.match(
+    /const ALLOWED_SCRIPT_NAMES = new Set\((\[[^\r\n]+\])\);/
+  );
+  let actualAllowlist = null;
+  try {
+    actualAllowlist = allowlistMatch ? JSON.parse(allowlistMatch[1]) : null;
+  } catch (_) {}
+  if (!Array.isArray(actualAllowlist)
+      || JSON.stringify([...new Set(actualAllowlist)].sort()) !== JSON.stringify(expectedAllowlist)
+      || actualAllowlist.length !== expectedAllowlist.length) {
+    fail(`${label} must declare the exact managed hook script allowlist`);
+  }
+  if (!content.includes('ALLOWED_SCRIPT_NAMES.has(scriptName)')) {
+    fail(`${label} must reject scriptName values outside the exact allowlist`);
+  }
+  const allowlistCheck = content.indexOf('ALLOWED_SCRIPT_NAMES.has(scriptName)');
+  const pathResolution = content.indexOf('path.join(__dirname, scriptName)');
+  if (allowlistCheck < 0 || pathResolution < 0 || allowlistCheck > pathResolution) {
+    fail(`${label} must validate scriptName before resolving the child path`);
+  }
+  if (!/stdio:\s*\[\s*['"]inherit['"]\s*,\s*['"]pipe['"]\s*,\s*['"]pipe['"]\s*\]/.test(content)) {
+    fail(`${label} must capture child stdout/stderr while preserving stdin`);
+  }
+  if (content.includes('result.stderr')
+      || content.includes('result.error.message')
+      || /stdio:\s*['"]inherit['"]/.test(content)) {
+    fail(`${label} must never forward child raw stderr or raw launch errors`);
+  }
+  const diagnosticBound = content.match(/const DIAGNOSTIC_MAX_BYTES = (\d+);/);
+  if (!diagnosticBound || Number(diagnosticBound[1]) < 1 || Number(diagnosticBound[1]) > 512) {
+    fail(`${label} must bound fixed wrapper diagnostics to at most 512 bytes`);
+  }
+  for (const code of ['SCRIPT_NOT_ALLOWED', 'SPAWN_FAILED', 'CHILD_FAILED', 'WRAPPER_FAILED']) {
+    if (!content.includes(`'${code}'`)) fail(`${label} missing fixed diagnostic code ${code}`);
+  }
+  if (!content.includes('process.exitCode = 0;') || content.includes('process.exit(')) {
+    fail(`${label} must fail open with exit code 0 for every wrapper failure`);
+  }
+  if (!content.includes('function inferRuntime()')) {
+    fail(`${label} must infer Claude/Codex runtime`);
+  }
+  if (!content.includes('CLAUDE_PLUGIN_ROOT')) {
+    fail(`${label} must recognize Claude Code plugin runtime`);
+  }
+  if (content.includes("process.env.TECH_PERSISTENCE_RUNTIME = 'codex';")) {
+    fail(`${label} must not hard-code Codex runtime`);
+  }
+}
+
+function validateCodexHookTimeoutConfig(config, label) {
+  if (CODEX_HOOK_TIMEOUT_UNIT !== 'seconds') {
+    fail('Codex hook timeout registry unit must be seconds');
+    return;
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)
+      || !config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks)) {
+    fail(`${label} must contain a hooks object`);
+    return;
+  }
+  let handlerCount = 0;
+  for (const [event, groups] of Object.entries(config.hooks)) {
+    if (!Array.isArray(groups)) {
+      fail(`${label} ${event} groups must be an array`);
+      continue;
+    }
+    for (const group of groups) {
+      const handlers = group && group.hooks;
+      if (!Array.isArray(handlers)) {
+        fail(`${label} ${event} handlers must be an array`);
+        continue;
+      }
+      for (const handler of handlers) {
+        handlerCount += 1;
+        if (!handler || handler.type !== 'command') {
+          fail(`${label} ${event} handler must be a command hook`);
+          continue;
+        }
+        if (!Number.isInteger(handler.timeout)
+            || handler.timeout < 1
+            || handler.timeout > CODEX_HOOK_MAX_TIMEOUT_SECONDS) {
+          fail(
+            `${label} ${event} timeout must use seconds within [1,${CODEX_HOOK_MAX_TIMEOUT_SECONDS}]`
+          );
+        }
+      }
+    }
+  }
+  if (handlerCount === 0) fail(`${label} must contain at least one hook handler`);
+  if (!process.exitCode) ok(`${label} timeouts use bounded seconds`);
+}
+
+if (process.argv[2] === '--validate-run-hook-only') {
+  if (process.argv.length !== 4) {
+    fail('usage: validate-codex-plugin.js --validate-run-hook-only <file>');
+  } else {
+    validateRunHookWrapper(path.resolve(process.argv[3]), 'run-hook fixture');
+  }
+  process.exit(process.exitCode || 0);
+}
+
+if (process.argv[2] === '--validate-codex-hooks-only') {
+  if (process.argv.length !== 4) {
+    fail('usage: validate-codex-plugin.js --validate-codex-hooks-only <file>');
+  } else {
+    try {
+      const fixture = JSON.parse(fs.readFileSync(path.resolve(process.argv[3]), 'utf8'));
+      validateCodexHookTimeoutConfig(fixture, 'Codex hook fixture');
+      if (JSON.stringify(fixture) !== JSON.stringify(buildCodexPluginHookConfig())) {
+        fail('Codex hook fixture must match the generated registry config');
+      }
+    } catch (error) {
+      fail(`Codex hook fixture is invalid: ${error.message}`);
+    }
+  }
+  process.exit(process.exitCode || 0);
 }
 
 function validateInventory(label, actual, expected) {
@@ -589,8 +724,14 @@ validateGeneratedFileParity(
 
 const mcpLibDir = path.join(pluginRoot, 'mcp', 'lib');
 if (isDirectory(mcpLibDir, 'mcp lib dir')) {
-  ['memory-tools.js', 'memory-search.js', 'memory-v5.js', 'runtime-paths.js'].forEach((dep) => {
+  validateInventory('mcp lib dir', listTopLevelJsNames(mcpLibDir), expectedHookLibs);
+  expectedHookLibs.forEach((dep) => {
     isFile(path.join(mcpLibDir, dep), `mcp lib/${dep}`);
+    validateGeneratedFileParity(
+      path.join(root, 'scripts', 'lib', dep),
+      path.join(mcpLibDir, dep),
+      `mcp lib/${dep}`
+    );
   });
 }
 validateLocalRequireClosure(
@@ -777,20 +918,8 @@ if (isDirectory(hooksLibDir, 'hook script lib dir')) {
   });
 }
 isFile(path.join(pluginRoot, 'hooks', 'run-hook.cmd'), 'hook script run-hook.cmd');
-isFile(path.join(pluginRoot, 'hooks', 'run-hook.js'), 'hook script run-hook.js');
 const runHookPath = path.join(pluginRoot, 'hooks', 'run-hook.js');
-if (fs.existsSync(runHookPath)) {
-  const content = fs.readFileSync(runHookPath, 'utf-8');
-  if (!content.includes('function inferRuntime()')) {
-    fail('hook script run-hook.js must infer Claude/Codex runtime');
-  }
-  if (!content.includes('CLAUDE_PLUGIN_ROOT')) {
-    fail('hook script run-hook.js must recognize Claude Code plugin runtime');
-  }
-  if (content.includes("process.env.TECH_PERSISTENCE_RUNTIME = 'codex';")) {
-    fail('hook script run-hook.js must not hard-code Codex runtime');
-  }
-}
+validateRunHookWrapper(runHookPath, 'hook script run-hook.js');
 validateLocalRequireClosure(
   expectedHookScripts.map((script) => path.join(pluginRoot, 'hooks', script)),
   'hook scripts'
@@ -800,6 +929,7 @@ const codexHooksDir = path.join(pluginRoot, 'codex-hooks');
 const codexHooksPath = path.join(codexHooksDir, 'hooks.json');
 if (isFile(codexHooksPath, 'codex-hooks/hooks.json')) {
   const actual = readJson(codexHooksPath);
+  if (actual) validateCodexHookTimeoutConfig(actual, 'codex-hooks/hooks.json');
   if (actual && JSON.stringify(actual) !== JSON.stringify(buildCodexPluginHookConfig())) {
     fail('codex-hooks/hooks.json must be generated from codex-hook-registry.js');
   } else if (actual) {
@@ -824,7 +954,10 @@ if (isDirectory(codexHooksLibDir, 'codex hook lib dir')) {
   ));
 }
 isFile(path.join(codexHooksDir, 'run-hook.cmd'), 'codex hook run-hook.cmd');
-isFile(path.join(codexHooksDir, 'run-hook.js'), 'codex hook run-hook.js');
+validateRunHookWrapper(
+  path.join(codexHooksDir, 'run-hook.js'),
+  'codex hook run-hook.js'
+);
 validateLocalRequireClosure(
   expectedCodexHookScripts.map((script) => path.join(codexHooksDir, script)),
   'codex hook scripts'
@@ -864,19 +997,29 @@ validateDirectoryParity(
   path.join(pluginRoot, 'scripts', 'agent-orchestrator'),
   'agent orchestrator runtime modules'
 );
-const sourceSchemaDir = path.join(root, 'schemas', 'agent-loop');
-const pluginSchemaDir = path.join(pluginRoot, 'schemas', 'agent-loop');
-const expectedSchemaNames = listTopLevelJsonNames(sourceSchemaDir);
-validateInventory(
-  'agent-loop schemas',
-  listTopLevelJsonNames(pluginSchemaDir),
-  expectedSchemaNames
+validateDirectoryParity(
+  path.join(root, 'schemas'),
+  path.join(pluginRoot, 'schemas'),
+  'schemas projection'
 );
-expectedSchemaNames.forEach((schema) => validateGeneratedFileParity(
-  path.join(sourceSchemaDir, schema),
-  path.join(pluginSchemaDir, schema),
-  `agent-loop schema ${schema}`
-));
+for (const namespace of ['agent-loop', 'self-learning']) {
+  const sourceSchemaDir = path.join(root, 'schemas', namespace);
+  const pluginSchemaDir = path.join(pluginRoot, 'schemas', namespace);
+  const expectedSchemaNames = listTopLevelJsonNames(sourceSchemaDir);
+  validateInventory(
+    `${namespace} schemas`,
+    listTopLevelJsonNames(pluginSchemaDir),
+    expectedSchemaNames
+  );
+  expectedSchemaNames.forEach((schema) => {
+    const source = path.join(sourceSchemaDir, schema);
+    const target = path.join(pluginSchemaDir, schema);
+    isFile(target, `${namespace} schema ${schema}`);
+    readJson(source);
+    readJson(target);
+    validateGeneratedFileParity(source, target, `${namespace} schema ${schema}`);
+  });
+}
 isFile(
   path.join(pluginRoot, 'scripts', 'sync-solution-index.js'),
   'solution-index utility sync-solution-index.js'
@@ -886,23 +1029,33 @@ validateGeneratedFileParity(
   path.join(pluginRoot, 'scripts', 'update-codex-marketplace.js'),
   'shared text CAS utility update-codex-marketplace.js'
 );
+utilityScripts.forEach((script) => {
+  isFile(path.join(pluginRoot, 'scripts', script), `utility ${script}`);
+  validateGeneratedFileParity(
+    path.join(root, 'scripts', script),
+    path.join(pluginRoot, 'scripts', script),
+    `utility ${script}`
+  );
+});
+const utilityLibDir = path.join(pluginRoot, 'scripts', 'lib');
+if (isDirectory(utilityLibDir, 'utility script lib dir')) {
+  validateInventory(
+    'utility script lib dir',
+    listTopLevelJsNames(utilityLibDir),
+    expectedCodexHookLibs
+  );
+  expectedCodexHookLibs.forEach((script) => validateGeneratedFileParity(
+    path.join(root, 'scripts', 'lib', script),
+    path.join(utilityLibDir, script),
+    `utility script lib/${script}`
+  ));
+}
 // utility 脚本（agent-orchestrator / skill-eval-* / skill-traces）通过 require('./lib/*')
 // 解析 plugin scripts/lib，与 hook 脚本同样需要闭包校验；否则新增 ./lib 依赖会静默回归
 // （A3 给 agent-orchestrator 引入首个 ./lib 依赖时实证：plugin 副本 Cannot find module）。
 validateLocalRequireClosure(
-  [
-    'agent-orchestrator.js',
-    'native-runtime-canary.js',
-    'skill-eval-results.js',
-    'skill-traces.js',
-    'skill-eval-cases.js',
-    // 以下 3 个当前零 ./lib 依赖（只 require 内建 fs/path），纳入闭包列表是为 future-proof：
-    // 任一将来新增 require('./lib/*') 时护栏自动覆盖，不必记得回来补列表（今天它们 trivially 通过）。
-    'configure-shared-homunculus.js',
-    'sync-solution-index.js',
-    'update-codex-marketplace.js',
-    'import-claude-homunculus.js',
-  ].map((script) => path.join(pluginRoot, 'scripts', script)),
+  [...utilityScripts, 'import-claude-homunculus.js']
+    .map((script) => path.join(pluginRoot, 'scripts', script)),
   'utility scripts'
 );
 [
@@ -921,6 +1074,21 @@ validateLocalRequireClosure(
   isFile(
     path.join(pluginRoot, 'schemas', 'agent-loop', schema),
     `agent-loop schema ${schema}`
+  );
+});
+[
+  'approval-receipt.schema.json',
+  'behavior-episode.schema.json',
+  'behavior-event.schema.json',
+  'candidate-evaluation.schema.json',
+  'evidence-ref.schema.json',
+  'journal-record.schema.json',
+  'learning-candidate.schema.json',
+  'tombstone.schema.json',
+].forEach((schema) => {
+  isFile(
+    path.join(pluginRoot, 'schemas', 'self-learning', schema),
+    `self-learning schema ${schema}`
   );
 });
 isFile(

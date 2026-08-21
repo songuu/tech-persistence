@@ -32,6 +32,20 @@
     "cluster_threshold": 3,
     "min_confidence_for_evolve": 0.5
   },
+  "self_learning": {
+    "enabled": true,
+    "mode": "shadow",
+    "writer_enabled": true,
+    "reader_enabled": true,
+    "legacy_writer_enabled": true,
+    "legacy_reader_enabled": true,
+    "promotion": "manual",
+    "minimum_distinct_episodes": 2,
+    "minimum_truth_score": 0.75,
+    "minimum_value_score": 0.6,
+    "retention_days": 90,
+    "legacy_inputs": "needs-review"
+  },
   "patterns_to_detect": [
     "user_corrections",
     "error_resolutions",

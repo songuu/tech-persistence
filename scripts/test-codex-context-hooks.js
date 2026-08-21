@@ -265,23 +265,26 @@ test('active sprint envelope remains closed when the budget truncates metadata',
   });
 });
 
-test('Codex registry uses lean scripts once and skips resume matcher', () => {
+test('Codex registry uses current release native hooks without the legacy observation loop', () => {
   const config = buildCodexPluginHookConfig();
   const startup = config.hooks.SessionStart.find((entry) => entry.matcher === SESSION_START_MATCHER);
   assert(startup);
-  assert(!SESSION_START_MATCHER.split('|').includes('resume'));
+  assert(SESSION_START_MATCHER.split('|').includes('resume'));
   assert.strictEqual(startup.hooks.filter((hook) => hook.command.includes('inject-context-codex.js')).length, 1);
-  assert.strictEqual(config.hooks.UserPromptSubmit, undefined, 'synchronous full-memory recall must stay off the prompt hot path');
-  assert.strictEqual(config.hooks.PreToolUse[0].matcher, WRITE_TOOL_MATCHER);
-  assert(!config.hooks.PreToolUse[0].hooks[0].command.includes('run-hook.js'), 'Codex hooks must not double-spawn through a wrapper');
-  assert(config.hooks.PreToolUse[0].hooks[0].command.includes('/codex-hooks/guard-handoff-path-codex.js'));
+  assert(config.hooks.UserPromptSubmit[0].hooks[0].command.includes('/codex-hooks/codex-behavior-hook.js'));
+  const handoffGuard = config.hooks.PreToolUse.find((entry) => entry.matcher === WRITE_TOOL_MATCHER);
+  const toolCapture = config.hooks.PreToolUse.find((entry) => entry.matcher === '*');
+  assert(handoffGuard.hooks[0].command.includes('/codex-hooks/guard-handoff-path-codex.js'));
+  assert(toolCapture.hooks[0].command.includes('/codex-hooks/codex-behavior-hook.js'));
+  assert(config.hooks.PostToolUse[0].hooks[0].command.includes('/codex-hooks/codex-behavior-hook.js'));
+  assert(config.hooks.Stop[0].hooks[0].command.includes('/codex-hooks/codex-behavior-hook.js'));
+  assert(!handoffGuard.hooks[0].command.includes('run-hook.js'), 'Codex hooks must not double-spawn through a wrapper');
   assert(!JSON.stringify(config).includes('caveman-activate.js'), 'caveman must be explicit, not a startup injection');
   assert(!JSON.stringify(config).includes('inject-context.js\"'));
   assert(!JSON.stringify(config).includes('prompt-submit.js\"'));
-  assert(!JSON.stringify(config).includes('observe.js'), 'unsupported async observation hooks must not be projected');
-  assert(!JSON.stringify(config).includes('evaluate-session.js'), 'legacy Stop evaluation has no Codex observations and must stay off the hot path');
-  assert.strictEqual(config.hooks.Stop, undefined, 'Codex must not run a synchronous legacy Stop scan');
-  assert(!JSON.stringify(config).includes('"async":true'), 'Codex 0.145 skips async command hooks');
+  assert(!JSON.stringify(config).includes('observe.js'), 'legacy observation writer must not be projected');
+  assert(!JSON.stringify(config).includes('evaluate-session.js'), 'legacy Stop evaluator must not be projected');
+  assert(!JSON.stringify(config).includes('"async":true'), 'Codex capture must finish before lifecycle advance');
   assert.deepStrictEqual(getCodexHookScriptNames().filter((name) => name === 'inject-context-codex.js'), ['inject-context-codex.js']);
 });
 

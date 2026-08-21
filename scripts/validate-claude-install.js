@@ -131,15 +131,27 @@ function validateSkills(dir, expected, label) {
   ok(`${label} has required skills`);
 }
 
-function collectHookCommands(settings, hookName) {
+function collectHookHandlers(settings, hookName) {
   const entries = settings?.hooks?.[hookName];
   if (!Array.isArray(entries)) return [];
   return entries.flatMap((entry) => {
     const hooks = Array.isArray(entry.hooks) ? entry.hooks : [];
-    return hooks
-      .map((hook) => hook && hook.command)
-      .filter((command) => typeof command === 'string');
+    return hooks.filter((hook) => hook && typeof hook.command === 'string');
   });
+}
+
+function inspectSettingsHookIssues(settings) {
+  const issues = [];
+  for (const expected of getHookSettingsExpectations(HOOK_TARGETS.CLAUDE_CLASSIC)) {
+    const matchingHooks = collectHookHandlers(settings, expected.event)
+      .filter((hook) => expected.scriptPattern.test(hook.command));
+    if (matchingHooks.length === 0) {
+      issues.push({ code: 'missing-hook', expected });
+    } else if (matchingHooks.every((hook) => hook.timeout !== expected.timeout)) {
+      issues.push({ code: 'wrong-timeout', expected });
+    }
+  }
+  return issues;
 }
 
 function validateSettingsHooks(file, label) {
@@ -147,11 +159,17 @@ function validateSettingsHooks(file, label) {
   const settings = readJson(file, label);
   if (!settings) return;
 
-  for (const expected of getHookSettingsExpectations(HOOK_TARGETS.CLAUDE_CLASSIC)) {
-    const commands = collectHookCommands(settings, expected.event);
-    if (!commands.some((command) => expected.scriptPattern.test(command))) {
+  const issues = inspectSettingsHookIssues(settings);
+  for (const issue of issues) {
+    const { expected } = issue;
+    if (issue.code === 'missing-hook') {
       fail(`${label} missing ${expected.event} hook command matching ${expected.scriptPattern}`);
     } else {
+      fail(`${label} ${expected.event} hook timeout must be ${expected.timeout} seconds`);
+    }
+  }
+  for (const expected of getHookSettingsExpectations(HOOK_TARGETS.CLAUDE_CLASSIC)) {
+    if (!issues.some((issue) => issue.expected.id === expected.id)) {
       ok(`${label} has ${expected.event} hook`);
     }
   }
@@ -220,23 +238,29 @@ function validateProjectInstall() {
   isDirectory(path.join(projectClaudeRoot, 'plans'), '.claude/plans');
 }
 
-const allowedArgs = new Set(['--help', '--user', '--project']);
-const unknownArgs = [...args].filter((arg) => !allowedArgs.has(arg));
-if (unknownArgs.length > 0) {
-  fail(`unknown arguments: ${unknownArgs.join(', ')}`);
+function main() {
+  const allowedArgs = new Set(['--help', '--user', '--project']);
+  const unknownArgs = [...args].filter((arg) => !allowedArgs.has(arg));
+  if (unknownArgs.length > 0) fail(`unknown arguments: ${unknownArgs.join(', ')}`);
+
+  if (args.has('--help')) {
+    console.log('Usage: node scripts/validate-claude-install.js [--user] [--project]');
+    return;
+  }
+
+  const validateUser = args.size === 0 || args.has('--user');
+  const validateProject = args.size === 0 || args.has('--project');
+  if (validateUser) validateUserInstall();
+  if (validateProject) validateProjectInstall();
+  validateSharedHomunculusConfig();
+
+  if (hasFailure) {
+    process.exitCode = 1;
+    return;
+  }
+  console.log('\n[OK] Claude Code install validation passed');
 }
 
-if (args.has('--help')) {
-  console.log('Usage: node scripts/validate-claude-install.js [--user] [--project]');
-  process.exit(0);
-}
+if (require.main === module) main();
 
-const validateUser = args.size === 0 || args.has('--user');
-const validateProject = args.size === 0 || args.has('--project');
-
-if (validateUser) validateUserInstall();
-if (validateProject) validateProjectInstall();
-validateSharedHomunculusConfig();
-
-if (hasFailure) process.exit(1);
-console.log('\n[OK] Claude Code install validation passed');
+module.exports = { inspectSettingsHookIssues };

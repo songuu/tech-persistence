@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/self-learning/approval-receipt.schema.json",
+  "title": "Self Learning Approval Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "receipt_id", "receipt_hash", "candidate_id", "candidate_hash", "evaluation_hash", "approval_event_ref", "publisher", "approved_at", "authority_semantics"],
+  "properties": {
+    "schema_version": { "const": "self-learning-approval-receipt-v1" },
+    "receipt_id": { "type": "string", "pattern": "^approval-[a-f0-9]{32}$" },
+    "receipt_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "candidate_id": { "type": "string", "pattern": "^lc-[a-f0-9]{32}$" },
+    "candidate_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "evaluation_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "approval_event_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "event_hash"],
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "event_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "authority_ref"],
+      "properties": {
+        "kind": { "const": "user" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "authority_ref": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "approved_at": { "type": "string", "format": "date-time" },
+    "authority_semantics": { "const": "auditable-local-protocol" }
+  }
+}

@@ -167,10 +167,10 @@
 > Generated from `docs/solutions/*.md`; do not edit this block manually.
 > Refresh with `node scripts/sync-solution-index.js --all`.
 
+- [2026-08-21] [self-learning/behavior-event/learning-candidate] 用户行为驱动 Agent 自学习框架 P0：可信证据、候选生命周期与发布门禁 — 目标不是让 Agent 把每次用户输入直接记成永久规则，而是建立一个可审计的学习闭环：观察用户行为、 操作、纠正、批准和任务结果，形成候选经验；只有经过证据、反例、评测、shadow 和人工批准的内容， 才允许影响后续 Agent 执行。 → `docs/solutions/2026-08-21-user-behavior-self-learning-p0.md`
+- [2026-08-20] [sibling-eval/skill-evolution/cognitive-skill-engine] mattpocock/skills + Cognitive Skill Engine v2.2 对当前 Skill 自进化架构的借鉴评估 — mattpocock/skills + CSE v2.2 对当前 Skill 自进化架构的借鉴评估 → `docs/solutions/2026-08-20-mattpocock-skills-cse-self-evolution-eval.md`
 - [2026-07-01] [sibling-eval/external-reference/superpowers] obra/superpowers + garrytan/gstack 2026-06 更新评估 — 可借鉴项收敛到 token、安全、决策可见性、eval 隔离 — 用户请求：研究 obra/superpowers 和 garrytan/gstack 最近一个月更新了哪些内容，以及哪些值得直接借鉴到当前 tech-persistence 架构里。 → `docs/solutions/2026-07-01-superpowers-gstack-june-2026-eval.md`
 - [2026-06-17] [sibling-eval/goal-mode/claude-code] Sibling-eval：Claude /goal × Codex /goal 原生命令 vs TP /sprint --goal（收窄到原生 goal 原语） — 用户问"结合 Claude Code 自带的 /goal 和 Codex 自带的 /goal，TP 当前架构的 /sprint --goal 需要改进哪里"。作用域严格收窄到 两个 runtime 各自的原生 /goal 命令本身 ，排除 Claude Dynamic Workflows / /loop / cron / Routines / fan-out（那些不是 /goal）。对比对象是 TP /sprint --goal（纯… → `docs/solutions/2026-06-17-native-goal-sibling-eval.md`
 - [2026-06-15] [sibling-eval/external-reference/moai-adk] Sibling-eval：MoAI-ADK (modu-ai) vs tech-persistence — Sibling-eval：MoAI-ADK (modu-ai) vs tech-persistence → `docs/solutions/2026-06-15-moai-adk-eval.md`
-- [2026-06-15] [sibling-eval/external-reference/bmad] Sibling-eval：BMAD-METHOD + SuperClaude_Framework vs tech-persistence — Sibling-eval：BMAD-METHOD + SuperClaude Framework vs tech-persistence → `docs/solutions/2026-06-15-bmad-superclaude-eval.md`
-- [2026-06-09] [sibling-eval/external-reference/identity-question-first] phuryn/pm-skills PRD 技能/命令评估 — 0 直接借鉴（目标用户错配）+ 2 收敛进化 + 1 不实施 follow-up — 用户请求："--auto 对比下 https://github.dev/phuryn/pm-skills，主要是里面的 PRD 相关的技能和命令"。 → `docs/solutions/2026-06-09-pm-skills-eval.md`
 
 <!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->

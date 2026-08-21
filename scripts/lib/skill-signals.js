@@ -9,6 +9,22 @@ const SIGNALS_DIR_NAME = 'skill-signals';
 // Skill 名校验：只接受 `[a-z][a-z0-9-]{0,63}`，防止路径逃逸到 signalsDir 外
 const SKILL_NAME_RE = /^[a-z][a-z0-9-]{0,63}$/;
 
+function writeSignalDiagnostic(reason, error = null) {
+  const safeReason = String(reason || 'runtime-failed')
+    .replace(/[^a-z0-9-]/gi, '-')
+    .slice(0, 96);
+  const code = error && typeof error.code === 'string'
+    ? error.code.replace(/[^a-z0-9_-]/gi, '').slice(0, 64)
+    : error && typeof error.name === 'string'
+      ? error.name.replace(/[^a-z0-9_-]/gi, '').slice(0, 64)
+      : null;
+  try {
+    process.stderr.write(
+      `[skill-signals] ${safeReason}${code ? ` (${code})` : ''}\n`.slice(0, 256)
+    );
+  } catch {}
+}
+
 // ─── Stage A: 从 session observations 派生 skill 信号 ───
 //
 // 提取 Codex 端 tool:"Skill" 工具调用，按 skill 名分桶 +
@@ -65,8 +81,8 @@ function aggregateSkillSignals(observations, opts = {}) {
       fs.appendFileSync(signalPath, JSON.stringify(record) + '\n');
       written += 1;
       skills.push(skill);
-    } catch (err) {
-      process.stderr.write(`[skill-signals] append failed for ${skill}: ${err.message}\n`);
+    } catch (error) {
+      writeSignalDiagnostic('append-failed', error);
     }
   }
   return { written, skills };
@@ -107,8 +123,8 @@ function summarizeSkillSignals(opts = {}) {
           // 跳过损坏行（保留静默 — 单行损坏不应阻塞整文件聚合）
         }
       }
-    } catch (err) {
-      process.stderr.write(`[skill-signals] read failed for ${file}: ${err.message}\n`);
+    } catch (error) {
+      writeSignalDiagnostic('read-failed', error);
       continue;
     }
     let level = 'observe';
@@ -126,4 +142,5 @@ module.exports = {
   SIGNALS_DIR_NAME,
   aggregateSkillSignals,
   summarizeSkillSignals,
+  writeSignalDiagnostic,
 };

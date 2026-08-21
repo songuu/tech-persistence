@@ -6,7 +6,7 @@ It includes:
 
 - Frozen Claude-compatible command, skill, and legacy hook sources; they are not the active Codex runtime projection.
 - Codex-specific skills for the six core phases plus provider-boundary overrides for memory, continuous learning, and caveman.
-- Lightweight Codex hooks: bounded active-sprint pointer metadata on SessionStart and an exact write-tool handoff guard on PreToolUse.
+- Native governed Codex hooks: bounded SessionStart context, exact PreToolUse handoff guard, and synchronous UserPromptSubmit/PreToolUse/PostToolUse/Stop behavior receipts using integer-second timeouts.
 - Agent Loop v7 assets: the v6 external orchestrator, JSON schemas, `$agent-loop` wrapper, and the Caveman compression skill family.
 - Caveman skills for terse output, commit messages, review comments, help, and memory-file compression.
 - Obsidian-compatible knowledge storage under `~/.codex/homunculus`, or a shared `homunculusHome` configured in `~/.tech-persistence/config.json`.
@@ -66,4 +66,12 @@ node scripts/configure-shared-homunculus.js --path ~/Documents/TechPersistence
 
 Use that directory as your Obsidian vault. `--import-claude` is still available for one-time migration, but the shared config is the recommended ongoing sync mode.
 
-When no shared directory is configured, the two runtimes keep separate default write locations. Claude legacy SessionStart may merge the compatible Memory stores under its frozen hook contract. Codex SessionStart does not scan or inject Memory; Codex reads shared or local knowledge on demand through skills/MCP and persists verified learning explicitly through Compound.
+When no shared directory is configured, the two runtimes keep separate default write locations. Claude legacy SessionStart may merge the compatible Memory stores under its frozen hook contract. Codex SessionStart does not scan or inject Memory; Codex reads shared or local knowledge on demand through skills/MCP. Current native Codex UserPromptSubmit/PreToolUse/PostToolUse/Stop hooks append governed behavior receipts, but never auto-promote or edit shared runtime assets.
+
+Explicit native user controls use a fixed prefix followed by exact canonical JSON, for example:
+
+```text
+TP_SELF_LEARNING_CONTROL_V1:{"accepted":true,"action":"approve","candidate_hash":"sha256:<64 lowercase hex>","candidate_id":"lc-<32 lowercase hex>"}
+```
+
+The full UTF-8 prompt is bounded to 4096 bytes. Approval requires the live `shadow` candidate and its current candidate hash, checked in the same journal transaction/lock that appends the receipt. Receipt authority binds only native `session_id`, `turn_id`, and the `UserPromptSubmit` hook; prompt/control semantics are protected content, never identity. An exact same-turn replay is a no-op, while any same-turn summary, action, approval, or ordinary/control classification change conflicts without appending a second event. Ordinary prose stays `user.prompt`, invalid prefixed controls fail closed with code-only diagnostics, and generic Agent/MCP/CLI input cannot mint this native user authority. Capturing the approval event does not itself run `approve` or `promote`.

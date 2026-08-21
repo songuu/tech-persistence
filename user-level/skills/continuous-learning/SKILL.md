@@ -1,150 +1,89 @@
 ---
-description: "基于 Hook 的持续自学习系统：观察会话 → Memory v5 → 本能 → 进化为知识"
-version: "5.0"
+description: "基于统一 authority journal 的可信持续学习：行为证据 → Episode → Candidate → TV/shadow → 人工 promotion"
+version: "6.0"
 ---
 
 # 持续自学习技能
 
-融合 ECC Continuous Learning v2 的本能架构 + Claude Code auto memory 的 `MEMORY.md` 索引方式 + Claude-Mem 的语义观察压缩。
+本 skill 学习用户的显式反馈、纠正、操作结果和经验证工作流，用于优化后续 Agent。新知识的唯一写入链路是
+`scripts/self-learning.js` / `tp_learning_*` 背后的 append-only journal；不得把观察直接写成 Memory、instinct、
+rules、AGENTS.md、CLAUDE.md、skill 或 command。
 
-## 系统架构
+## 权威链路
 
-```
-会话活动
-  ↓ PreToolUse / PostToolUse Hook (100% 触发)
-观察日志 (observations.jsonl)
-  ↓ Stop Hook 模式检测
-Memory v5 (memory/MEMORY.md + topic files)
-  ↓ 置信度门控
-本能 (instincts/*.md, 置信度 0.3-0.9)
-  ↓ 验证/衰减/聚类
-进化产物 (evolved/ skills/commands/agents)
-  ↓ 人工确认
-永久知识 (rules/ + CLAUDE.md)
-```
-
-## Hook 配置
-
-系统使用 4 个 Hook 实现 100% 可靠的观察：
-
-| Hook | 脚本 | 作用 |
-|------|------|------|
-| SessionStart | inject-context.js | 注入 Memory v5 索引 + 近期摘要 + 高置信本能 |
-| PreToolUse | observe.js pre | 规范化并脱敏即将执行的工具 |
-| PostToolUse | observe.js post | 捕获工具结果、命令状态、文件路径 |
-| Stop | evaluate-session.js | 模式检测 + Memory v5 写入 + 本能创建 + 摘要 |
-
-## Memory v5
-
-- `memory/MEMORY.md` 是启动索引，目标 `< 200 行 / 25KB`
-- `memory/{topic}.md` 保存调试、测试、工具链、工作流等细节
-- 只有通过未来价值、去重、脱敏和置信度门控的模式才写入
-- SessionStart 默认只注入 `MEMORY.md`，保持上下文轻量
-
-## 本能 (Instinct) 生命周期
-
-### 1. 创建
-当检测到以下模式时自动创建，初始置信度 0.3：
-- 用户纠正了 Claude 的行为
-- 解决了一个错误（特别是花时间的）
-- 某个工具/工作流被反复使用
-- 做出了明确的技术偏好选择
-
-### 2. 增强
-本能被再次观察到时，置信度 +0.1（上限 0.95）
-
-### 3. 衰减
-14 天未被观察到的本能，置信度 -0.05/14天
-
-### 4. 应用
-| 置信度 | 行为 |
-|--------|------|
-| >= 0.7 | SessionStart 时自动注入，无需手动触发 |
-| 0.5-0.69 | 相关场景出现时建议 |
-| 0.3-0.49 | 仅在被问到时提及 |
-| < 0.3 | 候选删除 |
-
-### 5. 进化
-3+ 个同域本能 → 可通过 /evolve 聚类为 skill/command/agent
-
-### 6. 毕业
-进化产物经人工审核后 → 写入 .claude/rules/ 成为永久知识
-
-## 项目隔离
-
-系统自动检测项目身份（优先级）：
-1. `CLAUDE_PROJECT_DIR` 环境变量
-2. `git remote get-url origin` → SHA256 hash 前 12 位
-3. `git rev-parse --show-toplevel` → 路径 hash
-4. 当前工作目录 hash（兜底）
-
-同一 git 仓库在不同机器上会得到相同的项目 ID（使用 remote URL hash）。
-
-## 目录结构
-
-```
-~/.claude/homunculus/
-├── projects.json                  # 项目注册表
-├── instincts/
-│   ├── personal/                  # 全局本能
-│   │   └── always-validate-input.md
-│   └── inherited/                 # 导入的本能
-│       └── team-coding-standards.md
-├── evolved/                       # 全局进化产物
-│   ├── skills/
-│   ├── commands/
-│   └── agents/
-└── projects/
-    └── {project-hash}/
-        ├── observations.jsonl     # 原始观察日志
-        ├── observations.archive/  # 归档的旧观察
-        ├── memory/                # Memory v5 自动记忆
-        │   ├── MEMORY.md          # 启动索引
-        │   ├── debugging.md
-        │   └── toolchain.md
-        ├── instincts/             # 项目本能
-        │   └── prefer-vitest.md
-        ├── sessions/              # 会话摘要
-        │   └── 2025-06-15-xxx.md
-        └── evolved/               # 项目进化产物
-            ├── skills/
-            ├── commands/
-            └── agents/
+```text
+BehaviorEvent
+  -> BehaviorEpisode
+  -> EvidenceRef
+  -> LearningCandidate
+  -> independent TV evaluation
+  -> shadow
+  -> explicit user.approval + receipt
+  -> promoted (reader eligible; runtime_written=false)
 ```
 
-## 配置项
+- 单次工具调用只是 usage，不是质量或偏好证据。
+- 至少两个不同 Episode；unknown outcome、仅弱信号、未解决反例或 TV 未达阈值不能前进。
+- 自动流程最多到 `shadow`。`approve`、`promote` 和实际发布必须由独立人工 gate 完成。
+- `promoted` 只允许受 scope 约束的 reader 使用，不会修改 runtime 文件。
 
-在 `~/.claude/homunculus/config.json` 中可调整：
+## Runtime 采集
+
+| Runtime 入口 | 可信行为 |
+|---|---|
+| Claude `UserPromptSubmit` | 有原生 source id、session id、occurred_at 时记录显式 prompt Event |
+| Claude `PreToolUse` / `PostToolUse` | 有原生 tool use id 与时间时记录 request/result Event |
+| Claude `Stop` | 从已记录 Event 关闭 Episode；不直接写 Memory/instinct |
+| Codex standalone | 仅通过显式 CLI/MCP 或真实 lifecycle evidence；不虚构 Claude hook |
+| managed agent-loop | task/result/acceptance envelope hash 可形成 verified EvidenceRef |
+
+缺稳定身份、时间、task 或最终处置时必须 skip、unassigned、unknown 或 needs-review，不能用当前时间或文本
+hash 伪造原生事件身份。
+
+## Legacy 兼容边界
+
+- `observations.jsonl`、历史 Memory 和 instinct 只作为明确标记的 legacy 兼容输入/读取层，不是新 SSOT。
+- `legacy_writer_enabled` 控制 Claude observation 双写；关闭后不再追加，但不删除历史数据。
+- `legacy_reader_enabled` 控制 prompt recall、SessionStart 的旧 Memory/session/instinct 读取；关闭后不读取但不删除。
+- `legacy_inputs=needs-review` 只接受保持 `legacy_unverified + weak + unknown` 的旧证据；`off` 拒绝其进入
+  Candidate proposal。
+
+## 配置
+
+`self_learning` 只接受以下字段；未知字段或非法类型必须 fail closed：
 
 ```json
 {
-  "observation": {
-    "enabled": true,
-    "max_file_size_mb": 10,
-    "archive_after_days": 7
-  },
-  "instincts": {
-    "min_confidence": 0.3,
-    "auto_approve_threshold": 0.7,
-    "confidence_decay_rate": 0.05,
-    "confidence_boost": 0.1
-  },
-  "context_injection": {
-    "max_sessions": 3,
-    "max_instincts_project": 10,
-    "max_instincts_global": 5,
-    "min_confidence_inject": 0.5
-  },
-  "memory_v5": {
-    "enabled": true,
-    "index_max_lines": 200,
-    "index_max_bytes": 25600,
-    "max_index_entries": 40,
-    "max_topic_entries": 80,
-    "min_memory_confidence": 0.45
-  },
-  "evolution": {
-    "cluster_threshold": 3
-  }
+  "enabled": true,
+  "mode": "shadow",
+  "writer_enabled": true,
+  "reader_enabled": true,
+  "promotion": "manual",
+  "minimum_distinct_episodes": 2,
+  "minimum_truth_score": 0.75,
+  "minimum_value_score": 0.6,
+  "retention_days": 90,
+  "legacy_inputs": "needs-review",
+  "legacy_writer_enabled": true,
+  "legacy_reader_enabled": true
 }
 ```
+
+`enabled`、`writer_enabled`、`reader_enabled` 和 `mode=off` 控制新 authority 链；两个 legacy 开关独立控制
+兼容路径。配置错误时新旧入口都 fail closed。
+
+## Scope、读取与保留
+
+- Reader 只返回 `promoted` 且 scope 精确匹配当前 project/session/task/personal/global/team identity 的 Candidate。
+- SessionStart 必须传当前 session identity 并对 service 输出再次检查 status、scope 和 expiry。
+- `retention` 缺省使用配置天数；到期 Candidate 追加可审计 `expired` transition。
+- Event/Evidence/Episode 到期仅追加 hash-bound tombstone；P0 不物理擦除历史 journal。
+
+## 操作规则
+
+1. 先用 `record` / `close` / `evidence` 建立可读回的证据。
+2. 用 `propose` 创建 Candidate；service 注入配置阈值快照，输入不能降低阈值。
+3. 有独立 evaluator 和完整证据才可 `evaluate`；自动模式最多再进入 `shadow`。
+4. 用 `inspect` / `metrics` 区分事实、推断、未知、反例与 outcome 指标。
+5. 用 `govern` 执行 reject、expire、scope-correct 或 tombstone。
+6. `verify-store` 必须同时验证 journal hash chain 与 Event/Evidence/Episode/Candidate domain identity。

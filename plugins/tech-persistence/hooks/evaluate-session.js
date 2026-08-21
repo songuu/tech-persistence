@@ -10,9 +10,9 @@
  * 在每次会话结束 (Stop) 时执行：
  *   1. 读取本次会话的所有观察
  *   2. 检测可重复的模式
- *   3. 创建/更新原子本能 (instinct)
- *   4. 生成会话摘要
- *   5. 健康检查 + 提示
+ *   3. 默认关闭 BehaviorEpisode，并将弱模式保留为 needs-review 候选输入
+ *   4. self_learning.enabled=false 时完全停写，不回退旧 instinct / Memory 写入
+ *   5. 生成会话摘要 + 健康检查
  */
 
 const fs = require('fs');
@@ -23,6 +23,7 @@ const {
   resolveProjectRulesDir,
   resolveSessionId,
 } = require('./lib/runtime-paths');
+const { normalizeTimestamp } = require('./lib/self-learning-canonical');
 const {
   collectMemoryEntries,
   DEFAULT_MEMORY_CONFIG,
@@ -39,6 +40,11 @@ const {
   yamlEscape,
 } = require('./lib/memory-v5');
 const { aggregateSkillSignals } = require('./lib/skill-signals');
+const { detectStableProjectIdentity } = require('./lib/project-identity');
+const {
+  executeLearningAction,
+  loadSelfLearningPolicy,
+} = require('./lib/self-learning-service');
 const {
   readInjectedManifest,
   buildRecallUsageMetric,
@@ -68,10 +74,33 @@ const CONFIG = {
   ]
 };
 
+const MAX_STOP_INPUT_BYTES = 64 * 1024;
+const MAX_OBSERVATION_READ_BYTES = 2 * 1024 * 1024;
+const MAX_RUNTIME_DIAGNOSTIC_CHARS = 256;
+
+function resolveLearningBaseDir(explicit = null) {
+  const managed = explicit || process.env.TP_SELF_LEARNING_BASE_DIR;
+  if (!managed) return resolveBaseDir();
+  if (typeof managed !== 'string' || !path.isAbsolute(managed)) {
+    const error = new Error('managed self-learning base directory must be absolute');
+    error.code = 'SELF_LEARNING_BASE_DIR_INVALID';
+    throw error;
+  }
+  return path.resolve(managed);
+}
+
+/**
+ * 新自学习链路默认开启。显式 self_learning.enabled=false 是完整关闭态；
+ * legacy 内容只兼容读取，不能重新成为写入 SSOT。
+ */
+function loadSelfLearningConfig(baseDir) {
+  return loadSelfLearningPolicy(baseDir);
+}
+
 // ─── 路径解析 ───
-function getPaths(project) {
-  const hDir = resolveBaseDir();
-  const localInstructionsFile = resolveProjectInstructionFile();
+function getPaths(project, options = {}) {
+  const hDir = options.baseDir || resolveBaseDir();
+  const localInstructionsFile = resolveProjectInstructionFile(options.cwd || process.cwd());
   return {
     baseDir: hDir,
     // 项目级
@@ -84,29 +113,223 @@ function getPaths(project) {
     globalInstincts: path.join(hDir, 'instincts', 'personal'),
     registry: path.join(hDir, 'projects.json'),
     // 本地项目
-    localRules: resolveProjectRulesDir(),
+    localRules: resolveProjectRulesDir(options.cwd || process.cwd()),
     localInstructionsFile,
     localInstructionsLabel: path.basename(localInstructionsFile),
   };
 }
 
 // ─── 读取本次会话的观察 ───
-function readSessionObservations(obsPath) {
+function readObservationTail(obsPath, maximumBytes = MAX_OBSERVATION_READ_BYTES) {
+  const stat = fs.statSync(obsPath);
+  const bytes = Math.min(stat.size, maximumBytes);
+  if (bytes === 0) return '';
+  const buffer = Buffer.allocUnsafe(bytes);
+  const descriptor = fs.openSync(obsPath, 'r');
+  try {
+    fs.readSync(descriptor, buffer, 0, bytes, stat.size - bytes);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  let text = buffer.toString('utf8');
+  if (stat.size > bytes) {
+    const firstLineEnd = text.indexOf('\n');
+    text = firstLineEnd === -1 ? '' : text.slice(firstLineEnd + 1);
+  }
+  return text;
+}
+
+function readSessionObservations(obsPath, sessionId) {
+  if (typeof sessionId !== 'string' || sessionId.trim() === '') return [];
   if (!fs.existsSync(obsPath)) return [];
-  const lines = fs.readFileSync(obsPath, 'utf-8').trim().split('\n').filter(Boolean);
-  const sessionId = resolveSessionId({ fallback: false });
+  const lines = readObservationTail(obsPath).trim().split('\n').filter(Boolean);
 
   return lines
     .map(line => { try { return JSON.parse(line); } catch { return null; } })
     .filter(Boolean)
-    .filter(obs => {
-      // 如果有 session_id，只取当前会话的
-      if (sessionId && obs.session_id) return obs.session_id === sessionId;
-      // 否则取最近 2 小时内的
-      const age = Date.now() - new Date(obs.timestamp).getTime();
-      return age < 2 * 60 * 60 * 1000;
-    })
+    .filter(obs => obs.session_id === sessionId)
     .slice(-CONFIG.max_observations_per_session);
+}
+
+function readStopInputBounded(maximumBytes = MAX_STOP_INPUT_BYTES) {
+  const chunks = [];
+  const buffer = Buffer.allocUnsafe(4096);
+  let total = 0;
+  while (true) {
+    const read = fs.readSync(0, buffer, 0, buffer.length, null);
+    if (read === 0) break;
+    total += read;
+    if (total > maximumBytes) return { oversized: true, text: '' };
+    chunks.push(Buffer.from(buffer.subarray(0, read)));
+  }
+  return { oversized: false, text: Buffer.concat(chunks).toString('utf8') };
+}
+
+function runtimeIdentity(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || value.length > 256 || /[\u0000-\u001f\u007f]/.test(value)) {
+    return null;
+  }
+  return value;
+}
+
+function uniqueRuntimeValues(values) {
+  return [...new Set(values.map(runtimeIdentity).filter(Boolean))];
+}
+
+function resolveManagedProjectAuthority(payload, cwd, env = process.env) {
+  const trustedCwd = path.resolve(cwd || process.cwd());
+  const trustedProject = detectStableProjectIdentity(trustedCwd);
+  const managedProjectId = runtimeIdentity(env.TP_SELF_LEARNING_PROJECT_ID);
+  if (env.TP_SELF_LEARNING_PROJECT_ID && !managedProjectId) {
+    const error = new Error('managed project identity is invalid');
+    error.code = 'SELF_LEARNING_PROJECT_MISMATCH';
+    throw error;
+  }
+  const projectId = managedProjectId || trustedProject.id;
+  if (managedProjectId && managedProjectId !== trustedProject.id) {
+    const error = new Error('managed project identity does not match trusted cwd');
+    error.code = 'SELF_LEARNING_PROJECT_MISMATCH';
+    throw error;
+  }
+  const payloadProjectValues = uniqueRuntimeValues([
+    payload && payload.project_id,
+    payload && payload.projectId,
+  ]);
+  const suppliedPayloadProject = payload && (
+    payload.project_id !== undefined || payload.projectId !== undefined
+  );
+  if ((suppliedPayloadProject && payloadProjectValues.length === 0)
+      || payloadProjectValues.length > 1
+      || (payloadProjectValues[0] && payloadProjectValues[0] !== projectId)) {
+    const error = new Error('payload project identity mismatch');
+    error.code = 'SELF_LEARNING_PROJECT_MISMATCH';
+    throw error;
+  }
+  if (payload && payload.cwd !== undefined) {
+    if (typeof payload.cwd !== 'string'
+        || detectStableProjectIdentity(payload.cwd).id !== projectId) {
+      const error = new Error('payload cwd project identity mismatch');
+      error.code = 'SELF_LEARNING_PROJECT_MISMATCH';
+      throw error;
+    }
+  }
+  return { projectId, trustedCwd };
+}
+
+function explicitSessionEnvironmentValues(env) {
+  const runtime = String(env.TECH_PERSISTENCE_RUNTIME || '').toLowerCase();
+  if (runtime === 'claude') return [env.CLAUDE_SESSION_ID];
+  if (runtime === 'codex') return [env.CODEX_SESSION_ID];
+  return [env.CODEX_SESSION_ID, env.CLAUDE_SESSION_ID];
+}
+
+function parseStopInvocation(raw, env = process.env) {
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return { status: 'skipped', reason: 'missing-stop-payload' };
+  }
+  if (Buffer.byteLength(raw, 'utf8') > MAX_STOP_INPUT_BYTES) {
+    return { status: 'needs-review', reason: 'stop-payload-too-large' };
+  }
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return { status: 'needs-review', reason: 'invalid-stop-payload' };
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { status: 'needs-review', reason: 'invalid-stop-payload' };
+  }
+  if (payload.hook_event_name && payload.hook_event_name !== 'Stop') {
+    return { status: 'skipped', reason: 'unsupported-hook-event' };
+  }
+
+  const payloadSessions = uniqueRuntimeValues([payload.session_id, payload.sessionId]);
+  if (payloadSessions.length > 1) {
+    return { status: 'needs-review', reason: 'session-identity-mismatch' };
+  }
+  if ((payload.session_id !== undefined || payload.sessionId !== undefined)
+      && payloadSessions.length === 0) {
+    return { status: 'needs-review', reason: 'invalid-session-identity' };
+  }
+  const explicitSessionValues = explicitSessionEnvironmentValues(env);
+  const envSessions = uniqueRuntimeValues(explicitSessionValues);
+  if (explicitSessionValues.some(Boolean)
+      && envSessions.length === 0) {
+    return { status: 'needs-review', reason: 'invalid-session-identity' };
+  }
+  const payloadSession = payloadSessions[0] || null;
+  if ((payloadSession && envSessions.some((value) => value !== payloadSession))
+      || (!payloadSession && envSessions.length > 1)) {
+    return { status: 'needs-review', reason: 'session-identity-mismatch' };
+  }
+  const sessionId = payloadSession || envSessions[0] || null;
+  if (!sessionId) {
+    return { status: 'needs-review', reason: 'missing-stable-session-id' };
+  }
+
+  const payloadTasks = uniqueRuntimeValues([
+    payload.task_ref,
+    payload.task_id,
+    payload.taskRef,
+    payload.taskId,
+  ]);
+  if (payloadTasks.length > 1) {
+    return { status: 'needs-review', reason: 'task-identity-mismatch' };
+  }
+  const suppliedTask = payload.task_ref !== undefined || payload.task_id !== undefined
+    || payload.taskRef !== undefined || payload.taskId !== undefined;
+  if (suppliedTask && payloadTasks.length === 0) {
+    return { status: 'needs-review', reason: 'invalid-task-identity' };
+  }
+  const envTask = runtimeIdentity(env.TP_SELF_LEARNING_TASK_REF);
+  if (env.TP_SELF_LEARNING_TASK_REF && !envTask) {
+    return { status: 'needs-review', reason: 'invalid-task-identity' };
+  }
+  if (payloadTasks[0] && envTask && payloadTasks[0] !== envTask) {
+    return { status: 'needs-review', reason: 'task-identity-mismatch' };
+  }
+  const taskRef = payloadTasks[0] || envTask || null;
+
+  const timeValues = uniqueRuntimeValues([payload.occurred_at, payload.timestamp]);
+  if (timeValues.length > 1) {
+    return { status: 'needs-review', reason: 'occurred-at-mismatch' };
+  }
+  if ((payload.occurred_at !== undefined || payload.timestamp !== undefined)
+      && timeValues.length === 0) {
+    return { status: 'needs-review', reason: 'invalid-occurred-at' };
+  }
+  let occurredAt = timeValues[0]
+    || runtimeIdentity(env.TP_SELF_LEARNING_OCCURRED_AT)
+    || new Date().toISOString();
+  try {
+    occurredAt = normalizeTimestamp(occurredAt, 'Stop occurred_at');
+  } catch {
+    return { status: 'needs-review', reason: 'invalid-occurred-at' };
+  }
+  return {
+    status: 'ready',
+    sessionId,
+    taskRef,
+    occurredAt,
+    payload,
+  };
+}
+
+function writeRuntimeDiagnostic(component, reason, error = null) {
+  const safeComponent = String(component || 'runtime').replace(/[^a-z0-9-]/gi, '').slice(0, 48)
+    || 'runtime';
+  const safeReason = String(reason || 'runtime-error').replace(/[^a-z0-9-]/gi, '-').slice(0, 96)
+    || 'runtime-error';
+  const code = error && typeof error.code === 'string'
+    ? error.code.replace(/[^A-Z0-9_-]/gi, '').slice(0, 64)
+    : error && typeof error.name === 'string'
+      ? error.name.replace(/[^A-Z0-9_-]/gi, '').slice(0, 64)
+      : null;
+  const suffix = code ? ` (${code})` : '';
+  const line = `[${safeComponent}] ${safeReason}${suffix}\n`
+    .slice(0, MAX_RUNTIME_DIAGNOSTIC_CHARS);
+  try { process.stderr.write(line); } catch {}
 }
 
 // ─── 模式检测 ───
@@ -810,48 +1033,229 @@ ${[...editedFiles].map(f => `- ${f}`).join('\n') || '- (无文件修改记录)'}
   return { file: `docs/plans/.handoff/${handoffFile}`, tasksDone, tasksTotal };
 }
 
-// ─── 主流程 ───
-function main() {
-  const project = detectProjectIdentity();
-  const paths = getPaths(project);
-  CONFIG.memory = loadMemoryConfig(paths.baseDir);
+function emptyMemoryResults() {
+  return { created: 0, updated: 0, skipped: 0, indexed: 0 };
+}
 
-  // 确保目录存在
-  [paths.projectDir, paths.projectInstincts, paths.projectMemory, paths.projectSessions, paths.globalInstincts]
-    .forEach(dir => fs.mkdirSync(dir, { recursive: true }));
-
-  // 更新注册表
-  updateProjectRegistry(paths, project);
-
-  // 1. 读取观察
-  const observations = readSessionObservations(paths.projectObs);
-  if (observations.length < 3) {
-    console.log('💡 会话较短，跳过自动学习分析');
-    return;
+function closeSelfLearningEpisode(paths, options = {}) {
+  const sessionId = Object.prototype.hasOwnProperty.call(options, 'sessionId')
+    ? options.sessionId
+    : resolveSessionId({ fallback: false });
+  if (!sessionId) {
+    return {
+      status: 'needs-review',
+      persisted: false,
+      reason: 'missing-stable-session-id',
+    };
+  }
+  const taskRef = Object.prototype.hasOwnProperty.call(options, 'taskRef')
+    ? options.taskRef
+    : null;
+  if (!taskRef) {
+    return {
+      status: 'needs-review',
+      persisted: false,
+      reason: 'session-unassigned',
+    };
   }
 
-  // 2. 检测模式
-  const patterns = detectPatterns(observations);
+  const executeAction = options.executeLearningAction || executeLearningAction;
+  try {
+    const response = executeAction('close', {
+      base_dir: paths.baseDir,
+      ...(options.projectId ? { project_id: options.projectId } : {}),
+      cwd: options.cwd || process.cwd(),
+      input: {
+        session_id: sessionId,
+        task_ref: taskRef,
+        created_at: options.occurredAt || new Date().toISOString(),
+        actor: {
+          kind: 'system',
+          id: 'evaluate-session-stop',
+          runtime: 'claude',
+          authority_ref: null,
+        },
+      },
+    });
+    return {
+      status: response.result.episode.status,
+      persisted: true,
+      episode_id: response.result.episode.episode_id,
+      revision: response.result.episode.revision,
+    };
+  } catch (error) {
+    return {
+      status: 'needs-review',
+      persisted: false,
+      reason: /no BehaviorEvent records/i.test(error && error.message || '')
+        ? 'no-authoritative-events'
+        : 'episode-close-failed',
+      ...(error && typeof error.code === 'string' ? { error_code: error.code } : {}),
+    };
+  }
+}
 
-  // 3. 创建/更新本能
-  const instinctResults = [];
-  patterns.forEach(pattern => {
-    const targetDir = pattern.domain === 'workflow'
-      ? paths.globalInstincts
-      : paths.projectInstincts;
-    pattern.scope = pattern.domain === 'workflow' ? 'global' : 'project';
-    const result = createOrUpdateInstinct(targetDir, pattern);
-    instinctResults.push(result);
-  });
+/**
+ * Stop 学习写边界：默认只闭合权威 Episode。detectPatterns 的输出来自 legacy
+ * observation，属于弱信号，不能直接改变运行时规则或 durable Memory。
+ */
+function applyStopLearningPolicy(paths, patterns, project, selfLearningConfig, options = {}) {
+  if (!selfLearningConfig.enabled || selfLearningConfig.mode === 'off') {
+    return {
+      mode: 'disabled',
+      instinctResults: [],
+      memoryResults: emptyMemoryResults(),
+      projectDecayed: [],
+      globalDecayed: [],
+      episode: {
+        status: 'disabled',
+        persisted: false,
+        reason: 'self-learning-disabled',
+      },
+      candidateInputs: null,
+    };
+  }
 
-  // 4. 写入 Codex Memory v5 索引和 topic 文件
-  const memoryResults = CONFIG.memory.enabled
-    ? writeMemoryNotes(paths.projectMemory, patterns, project)
-    : { created: 0, updated: 0, skipped: 0, indexed: 0 };
+  const episode = selfLearningConfig.writer_enabled === false
+    ? {
+      status: 'needs-review',
+      persisted: false,
+      reason: 'self-learning-writer-disabled',
+    }
+    : closeSelfLearningEpisode(paths, options);
+  return {
+    mode: 'self-learning',
+    instinctResults: [],
+    memoryResults: emptyMemoryResults(),
+    projectDecayed: [],
+    globalDecayed: [],
+    episode,
+    candidateInputs: {
+      count: patterns.length,
+      status: patterns.length > 0 ? 'needs-review' : 'none',
+      persisted: false,
+      reason: 'legacy-derived weak signals require authoritative evidence and evaluation',
+    },
+  };
+}
 
-  // 5. 置信度衰减
-  const projectDecayed = decayInstincts(paths.projectInstincts);
-  const globalDecayed = decayInstincts(paths.globalInstincts);
+// ─── 主流程 ───
+function main(options = {}) {
+  let rawInput;
+  try {
+    if (options.input === undefined) {
+      const bounded = readStopInputBounded();
+      if (bounded.oversized) {
+        writeRuntimeDiagnostic('evaluate-session', 'stop-payload-too-large');
+        return { status: 'needs-review', reason: 'stop-payload-too-large' };
+      }
+      rawInput = bounded.text;
+    } else {
+      rawInput = String(options.input);
+    }
+  } catch (error) {
+    writeRuntimeDiagnostic('evaluate-session', 'stop-input-read-failed', error);
+    return { status: 'needs-review', reason: 'stop-input-read-failed' };
+  }
+
+  const invocation = parseStopInvocation(rawInput, options.env || process.env);
+  if (invocation.status === 'skipped') return invocation;
+  if (invocation.status !== 'ready') {
+    writeRuntimeDiagnostic('evaluate-session', invocation.reason);
+    return invocation;
+  }
+
+  let paths;
+  let project;
+  let selfLearningConfig;
+  let learningProjectId;
+  try {
+    const cwd = options.cwd || process.cwd();
+    const authority = resolveManagedProjectAuthority(
+      invocation.payload,
+      cwd,
+      options.env || process.env
+    );
+    learningProjectId = authority.projectId;
+    const baseDir = resolveLearningBaseDir(options.baseDir);
+    selfLearningConfig = loadSelfLearningConfig(baseDir);
+    if (!selfLearningConfig.enabled || selfLearningConfig.mode === 'off') {
+      return { status: 'skipped', reason: 'self-learning-disabled' };
+    }
+    project = detectProjectIdentity(cwd);
+    paths = getPaths(project, { baseDir, cwd });
+    CONFIG.memory = loadMemoryConfig(paths.baseDir);
+  } catch (error) {
+    const configError = error && error.code === 'SELF_LEARNING_CONFIG_INVALID';
+    const projectError = error && error.code === 'SELF_LEARNING_PROJECT_MISMATCH';
+    writeRuntimeDiagnostic(
+      'evaluate-session',
+      configError
+        ? 'invalid-policy'
+        : projectError
+          ? 'project-identity-mismatch'
+          : 'runtime-identity-failed',
+      error
+    );
+    return {
+      status: 'needs-review',
+      reason: configError
+        ? 'invalid-policy'
+        : projectError
+          ? 'project-identity-mismatch'
+          : 'runtime-identity-failed',
+    };
+  }
+
+  let observations;
+  try {
+    observations = readSessionObservations(paths.projectObs, invocation.sessionId);
+  } catch (error) {
+    writeRuntimeDiagnostic('evaluate-session', 'observation-store-read-failed', error);
+    return { status: 'needs-review', reason: 'observation-store-read-failed' };
+  }
+
+  const patterns = observations.length < 3 ? [] : detectPatterns(observations);
+  const learning = applyStopLearningPolicy(
+    paths,
+    patterns,
+    project,
+    selfLearningConfig,
+    {
+      sessionId: invocation.sessionId,
+      taskRef: invocation.taskRef,
+      occurredAt: invocation.occurredAt,
+      cwd: options.cwd || process.cwd(),
+      projectId: learningProjectId,
+    }
+  );
+  if (!learning.episode.persisted
+      && !['no-authoritative-events', 'self-learning-writer-disabled'].includes(learning.episode.reason)) {
+    writeRuntimeDiagnostic(
+      'evaluate-session',
+      learning.episode.reason,
+      learning.episode.error_code ? { code: learning.episode.error_code } : null
+    );
+  }
+  if (observations.length < 3) {
+    return { status: 'skipped', reason: 'insufficient-observations', learning };
+  }
+  if (selfLearningConfig.legacy_writer_enabled !== true) {
+    return { status: 'completed', learning, observations: observations.length };
+  }
+
+  // Legacy compatibility side effects start only after strict policy and Stop
+  // identity validation. Invalid policy/identity cannot create directories.
+  [paths.projectDir, paths.projectSessions]
+    .forEach(dir => fs.mkdirSync(dir, { recursive: true }));
+  updateProjectRegistry(paths, project);
+
+  const {
+    instinctResults,
+    memoryResults,
+    projectDecayed,
+    globalDecayed,
+  } = learning;
 
   // 6. 生成会话摘要
   const summary = generateSessionSummary(observations, patterns, instinctResults, memoryResults, project);
@@ -874,10 +1278,10 @@ function main() {
     skillSignals = aggregateSkillSignals(observations, {
       project,
       baseDir: paths.baseDir,
-      sessionId: resolveSessionId({ fallback: true }),
+      sessionId: invocation.sessionId,
     });
-  } catch (err) {
-    process.stderr.write(`[skill-signals] aggregation failed: ${err.message}\n`);
+  } catch (error) {
+    writeRuntimeDiagnostic('skill-signals', 'aggregation-failed', error);
   }
 
   // 8.6. demand-side 召回使用率信号（measure-before-enforce，见 ADR-013/021）。
@@ -886,24 +1290,31 @@ function main() {
   let recallUsage = null;
   try {
     const telemetryDir = path.join(paths.baseDir, 'telemetry');
-    const sessionId = resolveSessionId({ fallback: false }) || '';
+    const sessionId = invocation.sessionId;
     const manifest = readInjectedManifest(telemetryDir, sessionId);
     recallUsage = buildRecallUsageMetric({
       project,
       sessionId,
       manifest,
       observations,
-      timestamp: new Date().toISOString(),
+      timestamp: invocation.occurredAt,
     });
     recordRecallUsage(telemetryDir, recallUsage);
-  } catch (err) {
-    process.stderr.write(`[recall-usage] demand-side metric failed: ${err.message}\n`);
+  } catch (error) {
+    writeRuntimeDiagnostic('recall-usage', 'metric-failed', error);
   }
 
   // 9. 输出报告
   console.log('');
   console.log(`📊 会话自学习报告 [${project.name}]`);
   console.log(`   观察: ${observations.length} | 模式: ${patterns.length} | 本能: +${instinctResults.filter(r => r.action === 'created').length} ↑${instinctResults.filter(r => r.action === 'updated').length} | Memory v5: +${memoryResults.created} ↑${memoryResults.updated}`);
+
+  if (learning.mode === 'self-learning') {
+    const episode = learning.episode.persisted
+      ? `${learning.episode.status} (${learning.episode.episode_id}:r${learning.episode.revision})`
+      : `${learning.episode.status} (${learning.episode.reason})`;
+    console.log(`   🧭 治理链: Episode ${episode} | 弱候选输入 ${learning.candidateInputs.count} (${learning.candidateInputs.status}, 未写入运行时)`);
+  }
 
   if (instinctResults.length > 0) {
     console.log('   本能变更:');
@@ -956,18 +1367,35 @@ function main() {
   console.log('');
   console.log('   💡 运行 /compound 提取深度经验 | /instinct-status 查看所有本能');
   console.log('');
+  return {
+    status: 'completed',
+    learning,
+    observations: observations.length,
+    patterns: patterns.length,
+  };
 }
 
 if (require.main === module) {
-  try { main(); } catch (err) {
-    // Hook 错误不应中断 Claude Code 主流程
-    // console.error('evaluate-session error:', err.message);
-    process.exit(0);
+  try {
+    main();
+  } catch (error) {
+    // Stop hooks must never block the host runtime. Values from the exception
+    // are deliberately excluded because they can contain paths or payload data.
+    writeRuntimeDiagnostic('evaluate-session', 'runtime-failed', error);
   }
+  process.exitCode = 0;
 }
 
 module.exports = {
+  applyStopLearningPolicy,
   autoCheckpoint,
+  closeSelfLearningEpisode,
+  loadSelfLearningConfig,
+  parseStopInvocation,
+  readSessionObservations,
+  readStopInputBounded,
+  resolveManagedProjectAuthority,
   shouldAutoCheckpoint,
+  writeRuntimeDiagnostic,
   main,
 };

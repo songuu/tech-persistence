@@ -34,6 +34,7 @@ const expectedCommands = [
   'prototype.md',
   'review.md',
   'review-learnings.md',
+  'self-learning.md',
   'session-summary.md',
   'skill.md',
   'skill-diagnose.md',
@@ -69,6 +70,7 @@ const utilityScripts = [
   'skill-eval-results.js',
   'skill-traces.js',
   'skill-eval-cases.js',
+  'self-learning.js',
 ];
 
 const replacements = [
@@ -102,10 +104,21 @@ const runHookJs = `#!/usr/bin/env node
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const [, , scriptName, ...scriptArgs] = process.argv;
+const ALLOWED_SCRIPT_NAMES = new Set(["caveman-activate.js","codex-behavior-hook.js","codex-lifecycle-evidence.js","evaluate-session.js","guard-handoff-path-codex.js","guard-handoff-path.js","inject-context-codex.js","inject-context.js","observe.js","prompt-submit.js"]);
+const DIAGNOSTIC_MAX_BYTES = 128;
+const DIAGNOSTIC_CODES = new Set([
+  'SCRIPT_NOT_ALLOWED',
+  'SPAWN_FAILED',
+  'CHILD_FAILED',
+  'WRAPPER_FAILED',
+]);
 
-if (!scriptName) {
-  process.exit(0);
+function writeDiagnostic(code) {
+  const safeCode = DIAGNOSTIC_CODES.has(code) ? code : 'WRAPPER_FAILED';
+  const bytes = Buffer.from('[run-hook] ' + safeCode + '\\n', 'utf8');
+  try {
+    process.stderr.write(bytes.subarray(0, DIAGNOSTIC_MAX_BYTES));
+  } catch {}
 }
 
 function inferRuntime() {
@@ -126,26 +139,38 @@ function inferRuntime() {
   return 'codex';
 }
 
-process.env.TECH_PERSISTENCE_RUNTIME = inferRuntime();
+function main() {
+  const [, , scriptName, ...scriptArgs] = process.argv;
+  if (!scriptName) return;
+  if (!ALLOWED_SCRIPT_NAMES.has(scriptName)) {
+    writeDiagnostic('SCRIPT_NOT_ALLOWED');
+    return;
+  }
 
-const scriptPath = path.join(__dirname, scriptName);
-const result = spawnSync(process.execPath, [scriptPath, ...scriptArgs], {
-  stdio: 'inherit',
-  env: process.env,
-});
-
-if (result.error) {
-  try {
-    process.stderr.write(\`[run-hook] failed to launch \${scriptName}: \${result.error.message}\\n\`);
-  } catch {}
-  process.exit(0);
+  process.env.TECH_PERSISTENCE_RUNTIME = inferRuntime();
+  const scriptPath = path.join(__dirname, scriptName);
+  const result = spawnSync(process.execPath, [scriptPath, ...scriptArgs], {
+    stdio: ['inherit', 'pipe', 'pipe'],
+    env: process.env,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.error) {
+    writeDiagnostic('SPAWN_FAILED');
+    return;
+  }
+  if (result.signal || result.status !== 0) {
+    writeDiagnostic('CHILD_FAILED');
+    return;
+  }
+  if (result.stdout && result.stdout.length > 0) process.stdout.write(result.stdout);
 }
 
-if (typeof result.status === 'number') {
-  process.exit(result.status);
+try {
+  main();
+} catch {
+  writeDiagnostic('WRAPPER_FAILED');
 }
-
-process.exit(result.signal ? 1 : 0);
+process.exitCode = 0;
 `;
 
 const runHookCmd = [
@@ -3521,15 +3546,15 @@ function copyMcpRuntime() {
   return 1 + libCount;
 }
 
-function copyUtilityScripts() {
+function copyUtilityScripts(targetPluginRoot = pluginRoot) {
   utilityScripts.forEach((name) => {
     copyTextFile(
       path.join(repoRoot, 'scripts', name),
-      path.join(pluginRoot, 'scripts', name),
+      path.join(targetPluginRoot, 'scripts', name),
       false
     );
   });
-  copyAgentOrchestratorSubmodules();
+  copyAgentOrchestratorSubmodules(targetPluginRoot);
   // utility 脚本里的 require('./lib/*') 相对脚本自身解析到 plugin scripts/lib，
   // 必须独立于 hooks/lib、mcp/lib 单独落一份——否则 plugin 副本运行时
   // Cannot find module './lib/...'（A3 给 agent-orchestrator 首次引入 ./lib 依赖后实证回归）。
@@ -3537,16 +3562,16 @@ function copyUtilityScripts() {
   // closure contains both runtime families. This is tooling, not a Claude hook
   // projection.
   const utilityLibCount = copyHookLibs(
-    path.join(pluginRoot, 'scripts'),
+    path.join(targetPluginRoot, 'scripts'),
     { includeCodexOnly: true }
   );
   return utilityScripts.length + 1 + utilityLibCount;
 }
 
-function copyAgentOrchestratorSubmodules() {
+function copyAgentOrchestratorSubmodules(targetPluginRoot = pluginRoot) {
   const sourceDir = path.join(repoRoot, 'scripts', 'agent-orchestrator');
   if (!fs.existsSync(sourceDir)) return;
-  const targetDir = path.join(pluginRoot, 'scripts', 'agent-orchestrator');
+  const targetDir = path.join(targetPluginRoot, 'scripts', 'agent-orchestrator');
   emptyDir(targetDir);
   fs.readdirSync(sourceDir)
     .filter((name) => name.endsWith('.js'))
@@ -3560,17 +3585,12 @@ function copyAgentOrchestratorSubmodules() {
     });
 }
 
-function copySchemas() {
-  const sourceDir = path.join(repoRoot, 'schemas', 'agent-loop');
-  const targetDir = path.join(pluginRoot, 'schemas', 'agent-loop');
+function copySchemas(targetPluginRoot = pluginRoot) {
+  const sourceDir = path.join(repoRoot, 'schemas');
+  const targetDir = path.join(targetPluginRoot, 'schemas');
   emptyDir(targetDir);
-  fs.readdirSync(sourceDir)
-    .filter((name) => name.endsWith('.json'))
-    .sort()
-    .forEach((name) => {
-      copyTextFile(path.join(sourceDir, name), path.join(targetDir, name), false);
-    });
-  return fs.readdirSync(targetDir).filter((name) => name.endsWith('.json')).length;
+  copyDirectoryRecursive(sourceDir, targetDir, { transformText: false });
+  return listTreeFiles(targetDir).filter((name) => name.endsWith('.json')).length;
 }
 
 function main() {
@@ -3600,7 +3620,7 @@ function main() {
 
     const projectionDirectories = [
       'commands', 'skills', 'agents', 'codex-skills', 'codex-agents', 'hooks', 'codex-hooks', 'mcp', 'codex-homunculus-template',
-      'scripts/lib', 'scripts/agent-orchestrator', 'schemas/agent-loop',
+      'scripts/lib', 'scripts/agent-orchestrator', 'schemas',
     ];
     // OFFLINE SOURCE-PROJECTION CONTRACT: this repository tree is never an
     // active runtime root. Installers must publish a fully staged cache tree
@@ -3670,6 +3690,7 @@ module.exports = {
   replacements,
   expectedCommands,
   expectedSkills,
+  utilityScripts,
   RECOVERY_DIRECTORY_NAME,
   SOURCE_PROJECTION_CONTRACT,
   acquireBuildLock,
@@ -3682,6 +3703,8 @@ module.exports = {
   copyCodexSkills,
   copyCodexAgents,
   copyCodexHooks,
+  copyUtilityScripts,
+  copySchemas,
   syncCodexSkill,
   assertSafePublishTarget,
   publishFileAtomically,

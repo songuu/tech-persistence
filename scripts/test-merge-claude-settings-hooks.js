@@ -16,7 +16,21 @@
  */
 
 const assert = require('assert');
-const { buildClaudeClassicHookSpecs } = require('./lib/hook-registry');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync } = require('child_process');
+const {
+  HOOK_TARGETS,
+  buildClaudeClassicHookSpecs,
+  buildPluginHookConfig,
+  getHookScriptNames,
+  getHookSettingsExpectations,
+} = require('./lib/hook-registry');
+const { inspectSettingsHookIssues } = require('./validate-claude-install');
+const {
+  PROMPT_RECEIPT_LOCK_RETRY_TIMEOUT_MS,
+} = require('./lib/self-learning-store');
 
 let passed = 0;
 let failed = 0;
@@ -104,6 +118,14 @@ test('W4 windows-shell hook commands use POSIX null-redirect if any null-redirec
   }
 });
 
+test('W5 classic hooks keep fail-open fallback while preserving bounded stderr diagnostics', () => {
+  const commands = getAllHookCommands('windows');
+  for (const { hookName, command } of commands) {
+    assert.match(command, /\|\|\s*true\s*$/, `${hookName}: missing fail-open fallback`);
+    assert(!command.includes('2>/dev/null'), `${hookName}: stderr diagnostics are swallowed`);
+  }
+});
+
 // ============================================================
 // shell=posix: 同样规则（既然两边都跑 bash，行为应一致）
 // ============================================================
@@ -119,16 +141,138 @@ test('P1 posix-shell hook commands also free of cmd-style syntax', () => {
 });
 
 // ============================================================
-// Sanity: 至少覆盖 4 经典 hook（SessionStart/PreToolUse/PostToolUse/Stop）
+// Sanity: 精确覆盖 5 个自学习经典 hook（含 UserPromptSubmit 记忆召回）
 // ============================================================
 
-test('S1 buildClaudeClassicHookSpecs returns the 4 classic hooks', () => {
+test('S1 buildClaudeClassicHookSpecs returns the 5 required classic hooks', () => {
   const specs = buildClaudeClassicHookSpecs({ hookRoot: '/x', shell: 'posix' });
   const names = Object.keys(specs).sort();
-  // 至少包含这 4 个；若 registry 扩展了更多 hook 也允许
-  const required = ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop'];
-  for (const r of required) {
-    assert(names.includes(r), `missing classic hook: ${r} (got: ${names.join(', ')})`);
+  const required = ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit'];
+  assert.deepStrictEqual(names, required);
+  assert.match(specs.UserPromptSubmit.hook.command, /prompt-submit\.js/);
+});
+
+test('S1a hook registry uses Claude timeout seconds with bounded lifecycle budgets', () => {
+  const classic = buildClaudeClassicHookSpecs({ hookRoot: '/x', shell: 'posix' });
+  assert.deepStrictEqual(
+    Object.fromEntries(Object.entries(classic).map(([event, spec]) => [event, spec.hook.timeout])),
+    {
+      SessionStart: 5,
+      UserPromptSubmit: 5,
+      PreToolUse: 2,
+      PostToolUse: 2,
+      Stop: 10,
+    }
+  );
+
+  const plugin = buildPluginHookConfig();
+  const timeouts = Object.values(plugin.hooks)
+    .flatMap((entries) => entries.flatMap((entry) => entry.hooks.map((hook) => hook.timeout)));
+  assert(timeouts.length > 0);
+  assert(timeouts.every((timeout) => [2, 5, 10].includes(timeout)), JSON.stringify(timeouts));
+  assert(
+    PROMPT_RECEIPT_LOCK_RETRY_TIMEOUT_MS < classic.UserPromptSubmit.hook.timeout * 1000,
+    'prompt receipt lock retry must finish before the host timeout'
+  );
+});
+
+test('S1b installer and install validator consume the same five-hook classic authority', () => {
+  const expectations = getHookSettingsExpectations(HOOK_TARGETS.CLAUDE_CLASSIC);
+  assert.deepStrictEqual(
+    expectations.map((entry) => entry.event).sort(),
+    ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']
+  );
+  assert(getHookScriptNames(HOOK_TARGETS.CLAUDE_CLASSIC).includes('prompt-submit.js'));
+
+  const installer = fs.readFileSync(path.join(__dirname, '..', 'install.sh'), 'utf8');
+  assert.match(installer, /getHookScriptNames\(r\.HOOK_TARGETS\.CLAUDE_CLASSIC\)/);
+  const validator = fs.readFileSync(path.join(__dirname, 'validate-claude-install.js'), 'utf8');
+  assert.match(validator, /getHookSettingsExpectations\(HOOK_TARGETS\.CLAUDE_CLASSIC\)/);
+  assert.match(validator, /getHookScriptNames\(HOOK_TARGETS\.CLAUDE_CLASSIC\)/);
+});
+
+test('S1c install validator rejects matching commands with legacy millisecond timeouts', () => {
+  const expectations = getHookSettingsExpectations(HOOK_TARGETS.CLAUDE_CLASSIC);
+  assert(expectations.every((entry) => Number.isInteger(entry.timeout)));
+  assert.deepStrictEqual(
+    Object.fromEntries(expectations.map((entry) => [entry.event, entry.timeout])),
+    { SessionStart: 5, UserPromptSubmit: 5, PreToolUse: 2, PostToolUse: 2, Stop: 10 }
+  );
+  const settings = buildClaudeClassicHookSpecs({ hookRoot: '/installed/hooks', shell: 'posix' });
+  const hooks = Object.fromEntries(Object.entries(settings).map(([event, spec]) => [event, [{
+    matcher: spec.matcher,
+    hooks: [spec.hook],
+  }]]));
+  assert.deepStrictEqual(inspectSettingsHookIssues({ hooks }), []);
+  hooks.UserPromptSubmit[0].hooks[0].timeout = 1800;
+  assert.deepStrictEqual(
+    inspectSettingsHookIssues({ hooks }).map((issue) => ({
+      code: issue.code,
+      event: issue.expected.event,
+      timeout: issue.expected.timeout,
+    })),
+    [{ code: 'wrong-timeout', event: 'UserPromptSubmit', timeout: 5 }]
+  );
+});
+
+test('S2 merge CLI diagnostics never echo attacker-controlled error values', () => {
+  const secret = 'merge-diagnostic-secret-92387';
+  const result = spawnSync(process.execPath, [
+    path.join(__dirname, 'merge-claude-settings-hooks.js'),
+    `--unknown-${secret}`,
+  ], { encoding: 'utf8', windowsHide: true });
+  assert.strictEqual(result.status, 1);
+  assert(result.stderr.length > 0 && result.stderr.length <= 512);
+  assert(!result.stderr.includes(secret), result.stderr);
+});
+
+test('S3 merge upgrades installed managed hooks that previously swallowed stderr', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-merge-classic-hooks-'));
+  const settingsPath = path.join(root, 'settings.json');
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify({
+      hooks: {
+        SessionStart: [{
+          matcher: '*',
+          hooks: [{
+            type: 'command',
+            command: 'node "/installed/hooks/inject-context.js" 2>/dev/null || true',
+            timeout: 5000,
+          }],
+        }],
+      },
+    }));
+    const result = spawnSync(process.execPath, [
+      path.join(__dirname, 'merge-claude-settings-hooks.js'),
+      settingsPath,
+      '--hook-root',
+      '/installed/hooks',
+      '--shell',
+      'posix',
+    ], { encoding: 'utf8', windowsHide: true });
+    assert.strictEqual(result.status, 0, result.error && result.error.message || result.stderr);
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    assert.deepStrictEqual(
+      Object.keys(settings.hooks).sort(),
+      ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']
+    );
+    const commands = Object.values(settings.hooks).flatMap((entries) => (
+      entries.flatMap((entry) => entry.hooks.map((hook) => hook.command))
+    ));
+    assert(commands.every((command) => !command.includes('2>/dev/null')));
+    assert(commands.every((command) => /\|\|\s*true\s*$/.test(command)));
+    const installedTimeouts = Object.fromEntries(Object.entries(settings.hooks).map(
+      ([event, entries]) => [event, entries.flatMap((entry) => entry.hooks)[0].timeout]
+    ));
+    assert.deepStrictEqual(installedTimeouts, {
+      SessionStart: 5,
+      UserPromptSubmit: 5,
+      PreToolUse: 2,
+      PostToolUse: 2,
+      Stop: 10,
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

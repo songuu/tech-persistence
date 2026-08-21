@@ -19,13 +19,13 @@ const LOGICAL_HOOKS = Object.freeze([
       [HOOK_TARGETS.CLAUDE_CLASSIC]: {
         event: 'SessionStart',
         matcher: '*',
-        timeout: 5000,
+        timeout: 5,
         scriptPattern: /inject-context\.js/,
       },
       [HOOK_TARGETS.PLUGIN_RUNTIME]: {
         event: 'SessionStart',
         matcher: PLUGIN_SESSION_START_MATCHER,
-        timeout: 5000,
+        timeout: 5,
         async: false,
       },
     },
@@ -39,7 +39,7 @@ const LOGICAL_HOOKS = Object.freeze([
       [HOOK_TARGETS.PLUGIN_RUNTIME]: {
         event: 'SessionStart',
         matcher: PLUGIN_SESSION_START_MATCHER,
-        timeout: 2000,
+        timeout: 2,
         async: false,
         statusMessage: 'Loading caveman mode',
       },
@@ -51,10 +51,16 @@ const LOGICAL_HOOKS = Object.freeze([
     script: 'prompt-submit.js',
     args: [],
     targets: {
+      [HOOK_TARGETS.CLAUDE_CLASSIC]: {
+        event: 'UserPromptSubmit',
+        matcher: '*',
+        timeout: 5,
+        scriptPattern: /prompt-submit\.js/,
+      },
       [HOOK_TARGETS.PLUGIN_RUNTIME]: {
         event: 'UserPromptSubmit',
         matcher: '*',
-        timeout: 1800,
+        timeout: 5,
         async: false,
         statusMessage: 'Recalling relevant memory',
       },
@@ -69,7 +75,7 @@ const LOGICAL_HOOKS = Object.freeze([
       [HOOK_TARGETS.PLUGIN_RUNTIME]: {
         event: 'PreToolUse',
         matcher: '*',
-        timeout: 1000,
+        timeout: 2,
         async: false,
         statusMessage: 'Checking handoff path',
       },
@@ -84,13 +90,13 @@ const LOGICAL_HOOKS = Object.freeze([
       [HOOK_TARGETS.CLAUDE_CLASSIC]: {
         event: 'PreToolUse',
         matcher: '*',
-        timeout: 2000,
+        timeout: 2,
         scriptPattern: /observe\.js\b.*\bpre\b/,
       },
       [HOOK_TARGETS.PLUGIN_RUNTIME]: {
         event: 'PreToolUse',
         matcher: '*',
-        timeout: 2000,
+        timeout: 2,
         async: true,
       },
     },
@@ -104,13 +110,13 @@ const LOGICAL_HOOKS = Object.freeze([
       [HOOK_TARGETS.CLAUDE_CLASSIC]: {
         event: 'PostToolUse',
         matcher: '*',
-        timeout: 2000,
+        timeout: 2,
         scriptPattern: /observe\.js\b.*\bpost\b/,
       },
       [HOOK_TARGETS.PLUGIN_RUNTIME]: {
         event: 'PostToolUse',
         matcher: '*',
-        timeout: 2000,
+        timeout: 2,
         async: true,
       },
     },
@@ -124,13 +130,13 @@ const LOGICAL_HOOKS = Object.freeze([
       [HOOK_TARGETS.CLAUDE_CLASSIC]: {
         event: 'Stop',
         matcher: '*',
-        timeout: 10000,
+        timeout: 10,
         scriptPattern: /evaluate-session\.js/,
       },
       [HOOK_TARGETS.PLUGIN_RUNTIME]: {
         event: 'Stop',
         matcher: '*',
-        timeout: 10000,
+        timeout: 10,
         async: false,
       },
     },
@@ -173,6 +179,7 @@ function getHookSettingsExpectations(target) {
     event: targetSpec.event,
     matcher: targetSpec.matcher,
     script: hook.script,
+    timeout: targetSpec.timeout,
     scriptPattern: targetSpec.scriptPattern || patternForScriptAndArgs(hook.script, hook.args),
   }));
 }
@@ -192,9 +199,10 @@ function buildClaudeClassicCommand(hookRoot, script, args, shell) {
   const scriptPath = `${hookRoot.replace(/\\/g, '/')}/${script}`;
   const commandPath = shell === 'windows' ? quoteForWindows(scriptPath) : quoteForPosix(scriptPath);
   const argSuffix = args && args.length > 0 ? ` ${args.join(' ')}` : '';
-  // Claude Code on Windows executes hook commands via Git Bash (MSYS2), so
-  // POSIX stderr suppression is the least surprising cross-shell fallback.
-  return `node ${commandPath}${argSuffix} 2>/dev/null || true`;
+  // Claude Code on Windows executes hook commands via Git Bash (MSYS2).
+  // Keep the host fail-open, while preserving the hook's bounded, code-only
+  // stderr diagnostic so store/config failures remain observable.
+  return `node ${commandPath}${argSuffix} || true`;
 }
 
 function patternForScriptAndArgs(script, args) {

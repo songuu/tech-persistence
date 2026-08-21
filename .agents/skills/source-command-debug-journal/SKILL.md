@@ -1,6 +1,6 @@
 ---
 name: "source-command-debug-journal"
-description: "记录调试过程并自动生成调试本能"
+description: "把已验证调试过程记录为 EvidenceRef 并提出受治理的学习候选"
 ---
 
 # source-command-debug-journal
@@ -11,7 +11,7 @@ Use this skill when the user asks to run the migrated source command `debug-jour
 
 # /debug-journal — 调试日志
 
-解决棘手 bug 后使用。记录完整调试过程 + 自动提取调试本能。
+解决棘手 bug 后使用。保留可追溯的调试事实、反例和验证结果；不得自动生成旧 instinct 或改写 rules。
 
 ## 记录格式
 ```markdown
@@ -24,6 +24,16 @@ Use this skill when the user asks to run the migrated source command `debug-jour
   - 预防：如何避免再次发生
 ```
 
-写入 `.Codex/rules/debugging-gotchas.md`。
-CRITICAL bug 同时在 AGENTS.md 的"已知陷阱"加一行。
-自动创建 debugging 域本能（CRITICAL→置信度 0.7，HIGH→0.5，MEDIUM→0.3）。
+## Authority 写入
+
+1. 将可读回的测试、日志、补丁或结果 envelope 建为 EvidenceRef；记录 digest、scope、captured_at 与最终处置。
+2. 将“根因/预防”分别按 fact 或 inference 提出 `anti_pattern` / `strategy` LearningCandidate。
+3. 自动流程最多 `propose -> evaluate -> shadow`；没有独立验证时保持 needs-review。
+4. 报告 candidate id/hash、EvidenceRef、反例与未知项。
+
+## 禁止旁路
+
+- 不自动写 `.Codex/rules/debugging-gotchas.md`、AGENTS.md、CLAUDE.md 或其他 rules。
+- 不创建或增强 debugging instinct，不写旧 Memory。
+- CRITICAL/HIGH/MEDIUM 只表示审查优先级，不映射为置信度或发布权限。
+- 用户之后显式要求发布知识时，仍需 candidate evaluation、approval receipt 与目标发布流程的人工 `go`。

@@ -264,13 +264,20 @@ function assertNativeContracts() {
   assert.match(readSkill('caveman'), /This mode is opt-in/);
   assert.match(readSkill('caveman'), /SessionStart never activates it/);
   assert.match(readSkill('caveman-help'), /does not auto-activate caveman/);
-  assert.match(readSkill('continuous-learning'), /No automatic repository-wide recall hook/);
-  assert.match(readSkill('continuous-learning'), /No automatic evaluator or Memory write/);
+  assert.match(readSkill('continuous-learning'), /receipt keyed only by native `session_id` \+ `turn_id` \+ hook/);
+  assert.match(readSkill('continuous-learning'), /never treat the assistant message as task success/);
+  assert.match(readSkill('continuous-learning'), /Hook timeouts[\s\S]*integer seconds/);
+  assert.match(readSkill('continuous-learning'), /TP_SELF_LEARNING_CONTROL_V1:/);
+  assert.match(readSkill('continuous-learning'), /live candidate hash/);
+  assert.match(readSkill('continuous-learning'), /same locked journal transaction/);
+  assert.match(readSkill('continuous-learning'), /Exact same-turn replay/);
+  assert.match(readSkill('continuous-learning'), /Generic Agent, MCP, or[\s\S]*CLI input cannot mint this authority/);
+  assert.doesNotMatch(readSkill('continuous-learning'), /semantic digest/);
   assert.match(readSkill('memory'), /SessionStart does not inject/);
   const expectedTails = Object.freeze({
     caveman: 'selected style.',
     'caveman-help': 'learning rules.',
-    'continuous-learning': 'active in Codex.',
+    'continuous-learning': 'automatic promotion.',
     memory: 'projected as Codex behavior.',
   });
   for (const [name, tail] of Object.entries(expectedTails)) {

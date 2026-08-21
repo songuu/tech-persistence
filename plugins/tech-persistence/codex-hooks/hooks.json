@@ -2,13 +2,13 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|clear|compact",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/inject-context-codex.js\"",
             "async": false,
-            "timeout": 3000
+            "timeout": 5
           }
         ]
       }
@@ -21,8 +21,56 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/guard-handoff-path-codex.js\"",
             "async": false,
-            "timeout": 1000,
+            "timeout": 2,
             "statusMessage": "Checking handoff path"
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-behavior-hook.js\"",
+            "async": false,
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-behavior-hook.js\"",
+            "async": false,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-behavior-hook.js\"",
+            "async": false,
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-behavior-hook.js\"",
+            "async": false,
+            "timeout": 5
           }
         ]
       }

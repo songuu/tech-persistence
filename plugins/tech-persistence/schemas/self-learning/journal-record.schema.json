@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/self-learning/journal-record.schema.json",
+  "title": "Self Learning Journal Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sequence", "record_type", "record_id", "entity_id", "actor", "occurred_at", "payload_hash", "previous_hash", "record_hash", "payload"],
+  "properties": {
+    "schema_version": { "const": "self-learning-journal-record-v1" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "record_type": { "type": "string", "enum": ["behavior_event", "evidence_ref", "behavior_episode", "learning_candidate", "candidate_transition", "candidate_evaluation", "approval_receipt", "tombstone"] },
+    "record_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" },
+    "entity_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "runtime", "authority_ref"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["user", "agent", "hook", "system", "operator", "legacy"] },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" },
+        "runtime": { "type": ["string", "null"] },
+        "authority_ref": { "type": ["string", "null"] }
+      }
+    },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "payload_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "previous_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "record_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "payload": { "type": "object" }
+  }
+}

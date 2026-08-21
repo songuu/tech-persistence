@@ -120,7 +120,7 @@ flowchart TD
 
 ## 知识生命周期
 
-下图描述 Claude legacy hooks 的自动捕获/注入链。Codex 共享相同存储格式，但默认通过 skill/MCP 按需读取，并在显式 Compound phase 中写入验证后的知识。
+下图描述 Claude legacy hooks 的自动捕获/注入链。Codex 共享相同存储格式，并由当前原生 hooks 自动采集受治理的 prompt/tool/Stop 行为事件；知识读取仍按需进行，候选审批、promotion 与验证后的知识沉淀仍经过显式 Compound/治理 gate。
 
 ```mermaid
 flowchart TD
@@ -492,14 +492,29 @@ Skill 优化:       /skill diagnose → /skill-improve → /skill-eval → /skil
 
 环境变量 `TECH_PERSISTENCE_DISABLE_PROMPT_RECALL=1` 可关闭 UserPromptSubmit recall（兜底）。
 
-### Codex lightweight hooks
+### Codex native governed hooks
 
 | Hook | 脚本 | 作用 |
 |------|------|------|
 | SessionStart | inject-context-codex.js | 只注入有界 active-sprint 指针元数据，不打开计划、不扫描 Memory |
-| PreToolUse | guard-handoff-path-codex.js | 仅对精确写工具集合检查误写到顶层的 handoff 路径 |
+| UserPromptSubmit | codex-behavior-hook.js | 以原生 `session_id` + `turn_id` + hook 名建立唯一 receipt，幂等记录脱敏后的 `user.prompt`；仅解析下述 exact control envelope |
+| PreToolUse | guard-handoff-path-codex.js + codex-behavior-hook.js | 精确写工具执行 handoff guard；所有工具以原生 `tool_use_id` 记录 `tool.request` |
+| PostToolUse | codex-behavior-hook.js | 记录 `tool.result`/`tool_response`；内层结果结构未由平台统一定义时保持 `unknown`，包括 Bash 非零退出 |
+| Stop | codex-behavior-hook.js | 只记录 lifecycle；仅有受管 `task_ref` 时关闭 Episode，不把 assistant message 当作任务成功或用户接受 |
+| SubagentStart / SubagentStop / PostCompact / SessionEnd | codex-lifecycle-evidence.js | 在显式 managed identity 下追加 run-local immutable lifecycle evidence |
 
-Codex 不注册 UserPromptSubmit、PostToolUse 或 Stop hook；知识读取按需进行，验证后的学习沉淀由显式 Compound phase 完成。
+本机 Codex 0.147.0 与当前 [Codex hooks release contract](https://developers.openai.com/codex/hooks) 均将上述 hooks 标为 stable。hook `timeout` 使用整数秒，本项目统一限制为 1～5 秒；事件只使用官方 `session_id`、`transcript_path`、`cwd`、`model`、`turn_id`、`tool_use_id`、`tool_response` 等字段，不用 payload 时间戳或 Claude alias 伪造 receipt。
+
+需要把用户 prompt 解释为显式 feedback/correction/approval 时，必须从 prompt 首字节开始使用固定前缀，后接逐字 canonical JSON（整条 UTF-8 不超过 4096 bytes；无空白、换行、额外 key 或重复 key）：
+
+```text
+TP_SELF_LEARNING_CONTROL_V1:{"accepted":true,"action":"approve","candidate_hash":"sha256:<64 lowercase hex>","candidate_id":"lc-<32 lowercase hex>"}
+TP_SELF_LEARNING_CONTROL_V1:{"accepted":true,"action":"feedback","summary":"Prefer the focused test."}
+TP_SELF_LEARNING_CONTROL_V1:{"action":"correct","summary":"Run the validator before reporting completion."}
+TP_SELF_LEARNING_CONTROL_V1:{"action":"remember","body":"Persist only this exact paragraph."}
+```
+
+approval 只在项目 journal 中 `shadow` 候选的 current candidate hash 与 `candidate_id` 同时精确匹配时生成 accepted `user.approval`，且 live-shadow 校验与 receipt append 在同一 journal transaction/lock 内完成。receipt 的 `source_event_id`/`authority_ref` 只绑定原生 `session_id`、`turn_id` 与 `UserPromptSubmit` hook；prompt/control semantic 只是受保护内容，不参与 identity。相同 turn 的逐字同语义 replay 为 no-op，任何 summary、action、approval 内容或普通/control 分类变化都触发 identity conflict，不能追加第二条。普通 prompt 仍是 `user.prompt`，无效 control fail closed 且 stderr 只输出有界错误码。自然语言、Agent 输出、generic MCP/CLI JSON 都不能生成该 native user authority。hook 不自动执行 `approve`/`promote`，也不写 skill、rule 或共享 runtime。
 
 ---
 
@@ -511,7 +526,7 @@ Plugin 安装后自动注册 `tech-persistence-memory` MCP server，暴露：
 |------|------|
 | `tp_memory_search` | 按 query / files / sprint tags 召回 Memory v5 / sessions / instincts |
 | `tp_memory_recent` | 列出当前项目最近的 session 摘要 |
-| `tp_memory_save` | 手动写一条 durable note 到当前项目 topic 文件 |
+| `tp_memory_save` | 仅凭同项目、未撤销的 canonical `remember` control，逐字写一条 durable note |
 | `tp_memory_file_history` | 查某文件路径或 basename 在 memory 中的引用记录 |
 | `tp_memory_project_profile` | 当前项目 memory 概览（按 topic 计数 / top confidence / 最新日期） |
 

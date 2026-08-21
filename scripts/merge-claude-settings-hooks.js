@@ -9,6 +9,17 @@ function usage() {
   console.error('Usage: node scripts/merge-claude-settings-hooks.js <settings.json> [--hook-root <path>] [--shell windows|posix]');
 }
 
+function writeFailureDiagnostic(error) {
+  const code = error && typeof error.code === 'string'
+    ? error.code.replace(/[^a-z0-9_-]/gi, '').slice(0, 64)
+    : error && typeof error.name === 'string'
+      ? error.name.replace(/[^a-z0-9_-]/gi, '').slice(0, 64)
+      : null;
+  process.stderr.write(
+    `[FAIL] merge-settings-failed${code ? ` (${code})` : ''}\n`.slice(0, 256)
+  );
+}
+
 function parseArgs() {
   const options = {
     settingsPath: null,
@@ -43,24 +54,27 @@ function readSettings(settingsPath) {
   return JSON.parse(content);
 }
 
-function hookCommands(entries) {
-  if (!Array.isArray(entries)) return [];
-  return entries.flatMap((entry) => {
-    const hooks = Array.isArray(entry.hooks) ? entry.hooks : [];
-    return hooks
-      .map((hook) => hook && hook.command)
-      .filter((command) => typeof command === 'string');
-  });
-}
-
 function mergeHook(settings, hookName, spec) {
   settings.hooks = settings.hooks && typeof settings.hooks === 'object' && !Array.isArray(settings.hooks)
     ? settings.hooks
     : {};
   const entries = Array.isArray(settings.hooks[hookName]) ? settings.hooks[hookName] : [];
-  if (hookCommands(entries).some((command) => spec.scriptPattern.test(command))) {
+  let matched = false;
+  let changed = false;
+  for (const entry of entries) {
+    if (!Array.isArray(entry && entry.hooks)) continue;
+    entry.hooks = entry.hooks.map((hook) => {
+      const command = hook && hook.command;
+      if (typeof command !== 'string' || !spec.scriptPattern.test(command)) return hook;
+      matched = true;
+      const replacement = { ...spec.hook };
+      if (JSON.stringify(hook) !== JSON.stringify(replacement)) changed = true;
+      return replacement;
+    });
+  }
+  if (matched) {
     settings.hooks[hookName] = entries;
-    return false;
+    return changed;
   }
 
   entries.push({
@@ -100,6 +114,6 @@ try {
   main();
 } catch (error) {
   usage();
-  console.error(`[FAIL] ${error.message}`);
+  writeFailureDiagnostic(error);
   process.exit(1);
 }

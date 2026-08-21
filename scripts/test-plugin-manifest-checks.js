@@ -84,10 +84,21 @@ test('reject: non-object manifest is rejected', () => {
 });
 
 // ── (c) extraction regression: real tool names ──
-test('extract: real memory-tools.js yields the known tp_memory_* tools', () => {
+test('extract: real memory-tools.js yields memory and self-learning tools', () => {
   const source = fs.readFileSync(MEMORY_TOOLS_SRC, 'utf-8');
   const names = extractMcpToolNames(source);
-  ['tp_memory_search', 'tp_memory_recent', 'tp_memory_save', 'tp_memory_file_history', 'tp_memory_project_profile']
+  [
+    'tp_memory_search',
+    'tp_memory_recent',
+    'tp_memory_save',
+    'tp_memory_file_history',
+    'tp_memory_project_profile',
+    'tp_learning_record',
+    'tp_learning_close',
+    'tp_learning_propose',
+    'tp_learning_inspect',
+    'tp_learning_govern',
+  ]
     .forEach((expected) => {
       assert.ok(names.includes(expected), `missing tool ${expected}; got ${names.join(', ')}`);
     });

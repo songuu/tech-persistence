@@ -16,8 +16,18 @@ const {
   EVIDENCE_DIR_NAME,
   MAX_FIELD_CHARS,
   MAX_INPUT_BYTES,
+  captureManagedLifecycle,
+  deriveLifecycleSourceEventId,
+  projectLifecycleBehavior,
+  recordLifecycleBehavior,
   recordLifecycleEvidence,
 } = require('./codex-lifecycle-evidence');
+const { detectStableProjectIdentity } = require('./lib/project-identity');
+const {
+  LIFECYCLE_RECEIPT_LOCK_RETRY_TIMEOUT_MS,
+  readJournal,
+  resolveStoreDir,
+} = require('./lib/self-learning-store');
 
 let passed = 0;
 function test(name, fn) {
@@ -72,7 +82,7 @@ function readOnlyRole(pathname, expectedName) {
   assert.match(source, /plugin root policy owns hooks, MCP, and permissions/i);
 }
 
-test('Codex registry adds only the four evidence-only lifecycle events', () => {
+test('Codex registry keeps the four evidence-only lifecycle events alongside governed behavior hooks', () => {
   assert.deepStrictEqual(
     [...LIFECYCLE_EVIDENCE_EVENTS],
     ['SubagentStart', 'SubagentStop', 'PostCompact', 'SessionEnd']
@@ -86,6 +96,10 @@ test('Codex registry adds only the four evidence-only lifecycle events', () => {
   );
   assert(lifecycleHooks.every((hook) => hook.async === false));
   assert(lifecycleHooks.every((hook) => hook.timeout <= 3));
+  assert(
+    LIFECYCLE_RECEIPT_LOCK_RETRY_TIMEOUT_MS < Math.min(...lifecycleHooks.map((hook) => hook.timeout)) * 1000,
+    'lifecycle receipt lock wait must fit inside the host hook timeout'
+  );
   assert.strictEqual(
     getCodexHookScriptNames().filter((name) => name === 'codex-lifecycle-evidence.js').length,
     1
@@ -188,6 +202,79 @@ test('replayed lifecycle event is idempotent and does not append a second file',
   });
 });
 
+test('tampered duplicate evidence artifact cannot change journal occurrence or source identity', () => {
+  withRunDir(({ root, runDir }) => {
+    const workspace = path.join(root, 'workspace');
+    const baseDir = path.join(root, 'homunculus');
+    fs.mkdirSync(workspace, { recursive: true });
+    const project = detectStableProjectIdentity(workspace);
+    const payload = hookPayload('SubagentStart', {
+      cwd: workspace,
+      agent_id: 'agent-authority-1',
+      agent_type: 'worker',
+    });
+    const authority = {
+      baseDir,
+      projectId: project.id,
+      cwd: workspace,
+      taskRef: 'task-native-authority-001',
+      sourceEventBase: 'managed-run:authority-001',
+    };
+    const receipt = recordLifecycleEvidence(payload, {
+      runDir,
+      recordedAt: '2026-08-20T06:03:00.000Z',
+    });
+    const first = projectLifecycleBehavior(payload, receipt, authority);
+    assert.strictEqual(first.status, 'recorded');
+
+    fs.writeFileSync(receipt.file, JSON.stringify({
+      idempotencyKey: 'f'.repeat(64),
+      recordedAt: '2099-01-01T00:00:00.000Z',
+      event: 'SessionEnd',
+    }));
+    const duplicateArtifact = recordLifecycleEvidence(payload, { runDir });
+    const replay = projectLifecycleBehavior(payload, duplicateArtifact, authority);
+    assert.strictEqual(replay.status, 'duplicate');
+
+    const records = readJournal(resolveStoreDir(baseDir, project.id)).records;
+    assert.strictEqual(records.length, 1);
+    assert.strictEqual(records[0].payload.occurred_at, '2026-08-20T06:03:00.000Z');
+    assert.strictEqual(
+      records[0].payload.source_event_id,
+      deriveLifecycleSourceEventId(payload, authority)
+    );
+  });
+});
+
+test('tampered first-receipt artifact fails closed before any journal append', () => {
+  withRunDir(({ root, runDir }) => {
+    const workspace = path.join(root, 'workspace');
+    const baseDir = path.join(root, 'homunculus');
+    fs.mkdirSync(workspace, { recursive: true });
+    const project = detectStableProjectIdentity(workspace);
+    const payload = hookPayload('SessionEnd', { cwd: workspace, reason: 'other' });
+    const receipt = recordLifecycleEvidence(payload, { runDir });
+    fs.writeFileSync(receipt.file, JSON.stringify({
+      idempotencyKey: '0'.repeat(64),
+      recordedAt: '2099-01-01T00:00:00.000Z',
+    }));
+    const duplicate = recordLifecycleEvidence(payload, { runDir });
+    assert.strictEqual(duplicate.status, 'duplicate');
+    const result = projectLifecycleBehavior(payload, duplicate, {
+      baseDir,
+      projectId: project.id,
+      cwd: workspace,
+      taskRef: 'task-native-authority-002',
+      sourceEventBase: 'managed-run:authority-002',
+    });
+    assert.deepStrictEqual(result, {
+      status: 'error',
+      reason: 'untrusted-evidence-receipt',
+    });
+    assert.strictEqual(readJournal(resolveStoreDir(baseDir, project.id)).records.length, 0);
+  });
+});
+
 test('unsupported or oversized payloads fail open without writing evidence', () => {
   withRunDir(({ runDir }) => {
     assert.deepStrictEqual(
@@ -204,6 +291,143 @@ test('unsupported or oversized payloads fail open without writing evidence', () 
       { status: 'noop', reason: 'payload-too-large' }
     );
     assert.deepStrictEqual(evidenceFiles(runDir), []);
+  });
+});
+
+test('Codex lifecycle projects BehaviorEvent only with complete explicit identity', () => {
+  withRunDir(({ root }) => {
+    const baseDir = path.join(root, 'homunculus');
+    const workspace = path.join(root, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    const project = detectStableProjectIdentity(workspace);
+    const payload = hookPayload('SubagentStart', {
+      cwd: workspace,
+      agent_id: 'agent-1',
+      agent_type: 'explorer',
+    });
+    const missing = recordLifecycleBehavior(payload, { baseDir });
+    assert.deepStrictEqual(missing, {
+      status: 'skipped',
+      reason: 'missing-explicit-learning-identity',
+    });
+    assert.strictEqual(fs.existsSync(path.join(baseDir, 'projects')), false);
+
+    const context = {
+      baseDir,
+      projectId: project.id,
+      cwd: workspace,
+      taskRef: 'task-native-001',
+      sourceEventBase: 'managed-run:run-001',
+      occurredAt: '2026-08-20T06:04:00.000Z',
+      evidenceIdempotencyKey: 'a'.repeat(64),
+    };
+    const first = recordLifecycleBehavior(payload, context);
+    const replay = recordLifecycleBehavior(payload, context);
+    assert.strictEqual(first.status, 'recorded');
+    assert.strictEqual(replay.status, 'duplicate');
+    const journal = readJournal(resolveStoreDir(baseDir, context.projectId));
+    assert.strictEqual(journal.records.length, 1);
+    const event = journal.records[0].payload;
+    assert.strictEqual(event.runtime, 'codex');
+    assert.strictEqual(event.source, 'codex_cli');
+    assert.strictEqual(event.event_type, 'system.lifecycle');
+    assert.strictEqual(event.session_id, payload.session_id);
+    assert.strictEqual(event.task_ref, context.taskRef);
+    assert.strictEqual(event.details.hook_event_name, 'SubagentStart');
+    assert.strictEqual(event.source_event_id, deriveLifecycleSourceEventId(payload, context));
+
+    const otherHook = hookPayload('PostCompact', { cwd: workspace, trigger: 'manual' });
+    const otherContext = {
+      ...context,
+      occurredAt: '2026-08-20T06:04:01.000Z',
+      evidenceIdempotencyKey: 'b'.repeat(64),
+    };
+    const other = recordLifecycleBehavior(otherHook, otherContext);
+    assert.strictEqual(other.status, 'recorded');
+    assert.notStrictEqual(other.event_id, first.event_id);
+    assert.strictEqual(readJournal(resolveStoreDir(baseDir, context.projectId)).records.length, 2);
+
+    fs.mkdirSync(baseDir, { recursive: true });
+    fs.writeFileSync(path.join(baseDir, 'config.json'), JSON.stringify({
+      self_learning: {
+        enabled: true,
+        writer_enabled: false,
+        reader_enabled: true,
+        mode: 'shadow',
+      },
+    }));
+    const disabled = recordLifecycleBehavior(payload, {
+      ...context,
+      sourceEventBase: 'managed-run:run-disabled-001',
+      evidenceIdempotencyKey: 'c'.repeat(64),
+    });
+    assert.deepStrictEqual(disabled, { status: 'skipped', reason: 'writer-disabled' });
+    assert.strictEqual(readJournal(resolveStoreDir(baseDir, context.projectId)).records.length, 2);
+  });
+});
+
+test('Codex lifecycle explicit session mismatch is skipped instead of misattributed', () => {
+  withRunDir(({ root }) => {
+    const workspace = path.join(root, 'workspace');
+    fs.mkdirSync(workspace, { recursive: true });
+    const project = detectStableProjectIdentity(workspace);
+    const result = recordLifecycleBehavior(hookPayload('PostCompact', { cwd: workspace }), {
+      baseDir: path.join(root, 'homunculus'),
+      projectId: project.id,
+      cwd: workspace,
+      sessionId: 'different-session',
+      taskRef: 'task-native-001',
+      sourceEventBase: 'managed-run:run-002',
+      occurredAt: '2026-08-20T06:04:01.000Z',
+    });
+    assert.deepStrictEqual(result, { status: 'skipped', reason: 'session-identity-mismatch' });
+  });
+});
+
+test('managed lifecycle identity is verified before any run evidence or journal write', () => {
+  withRunDir(({ root, runsRoot, runDir }) => {
+    const workspace = path.join(root, 'workspace');
+    const otherWorkspace = path.join(root, 'other-workspace');
+    const baseDir = path.join(root, 'homunculus');
+    fs.mkdirSync(workspace, { recursive: true });
+    fs.mkdirSync(otherWorkspace, { recursive: true });
+    const project = detectStableProjectIdentity(workspace);
+    const authority = {
+      runDir,
+      runsDir: runsRoot,
+      baseDir,
+      projectId: project.id,
+      cwd: workspace,
+      sessionId: 'managed-session',
+      taskRef: 'task-native-preflight-001',
+      sourceEventBase: 'managed-run:preflight-001',
+    };
+
+    const sessionMismatch = captureManagedLifecycle(
+      hookPayload('PostCompact', { cwd: workspace, session_id: 'payload-session' }),
+      authority
+    );
+    assert.deepStrictEqual(sessionMismatch, {
+      status: 'skipped',
+      reason: 'session-identity-mismatch',
+      evidence: { status: 'skipped', reason: 'session-identity-mismatch' },
+      behavior: { status: 'skipped', reason: 'session-identity-mismatch' },
+    });
+    assert.deepStrictEqual(evidenceFiles(runDir), []);
+    assert.strictEqual(readJournal(resolveStoreDir(baseDir, project.id)).records.length, 0);
+
+    const projectMismatch = captureManagedLifecycle(
+      hookPayload('PostCompact', { cwd: otherWorkspace, session_id: 'managed-session' }),
+      authority
+    );
+    assert.deepStrictEqual(projectMismatch, {
+      status: 'error',
+      reason: 'project-identity-mismatch',
+      evidence: { status: 'skipped', reason: 'project-identity-mismatch' },
+      behavior: { status: 'error', reason: 'project-identity-mismatch' },
+    });
+    assert.deepStrictEqual(evidenceFiles(runDir), []);
+    assert.strictEqual(readJournal(resolveStoreDir(baseDir, project.id)).records.length, 0);
   });
 });
 

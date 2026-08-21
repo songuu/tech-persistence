@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/self-learning/tombstone.schema.json",
+  "title": "Self Learning Tombstone Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "target_id", "target_hash", "reason", "replacement_id"],
+  "properties": {
+    "schema_version": { "const": "self-learning-tombstone-v1" },
+    "target_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" },
+    "target_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "replacement_id": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" }
+  }
+}

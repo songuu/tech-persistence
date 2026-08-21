@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/self-learning/learning-candidate.schema.json",
+  "title": "Self Learning Candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "candidate_id", "candidate_hash", "project_id", "kind", "statement", "target", "scope", "proposer", "owner", "evidence_refs", "counterexamples", "confidence", "policy", "status", "revision", "previous_candidate_hash", "evaluation", "approval", "promotion", "retention", "authority", "governance_history", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": { "const": "self-learning-candidate-v1" },
+    "candidate_id": { "type": "string", "pattern": "^lc-[a-f0-9]{32}$" },
+    "candidate_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "kind": { "type": "string", "enum": ["preference", "environment_fact", "strategy", "workflow", "boundary", "anti_pattern"] },
+    "statement": { "$ref": "#/$defs/statement" },
+    "target": { "$ref": "#/$defs/target" },
+    "scope": { "$ref": "#/$defs/candidateScope" },
+    "proposer": { "$ref": "#/$defs/actor" },
+    "owner": { "$ref": "#/$defs/actor" },
+    "evidence_refs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/evidenceRef" } },
+    "counterexamples": { "type": "array", "items": { "$ref": "#/$defs/counterexample" } },
+    "confidence": { "$ref": "#/$defs/confidence" },
+    "policy": { "$ref": "#/$defs/policy" },
+    "status": { "type": "string", "enum": ["proposed", "evaluated", "shadow", "approved", "promoted", "needs-review", "rejected", "expired", "tombstoned"] },
+    "revision": { "type": "integer", "minimum": 1 },
+    "previous_candidate_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "evaluation": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/evaluation" }] },
+    "approval": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/approvalState" }] },
+    "promotion": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/promotion" }] },
+    "retention": { "$ref": "#/$defs/retention" },
+    "authority": { "$ref": "#/$defs/authority" },
+    "governance_history": { "type": "array", "items": { "$ref": "#/$defs/governanceEntry" } },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "authority_ref"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["user", "agent", "system", "tool"] },
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "authority_ref": { "type": ["string", "null"], "maxLength": 512 }
+      }
+    },
+    "statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "fact_status"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "fact_status": { "type": "string", "enum": ["fact", "inference", "unknown"] }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "source_path", "source_hash"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "source_path": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!/)(?!.*//)(?!\\.\\.?($|/))(?!.*\\/\\.\\.?($|/))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$" },
+        "source_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "candidateScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "id"],
+      "properties": {
+        "level": { "type": "string", "enum": ["session", "task", "project", "personal", "global", "team"] },
+        "id": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "evidenceScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "id"],
+      "properties": {
+        "level": { "type": "string", "enum": ["session", "task", "project", "global", "team"] },
+        "id": { "type": ["string", "null"] }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "evidence_id", "source_type", "source_ref", "immutable_ref", "digest", "uri", "final_disposition", "captured_at", "scope", "redaction_status", "assurance", "signal_strength", "fact_status"],
+      "properties": {
+        "schema_version": { "const": "self-learning-evidence-ref-v1" },
+        "evidence_id": { "type": "string", "pattern": "^evidence:[a-f0-9]{64}$" },
+        "source_type": { "type": "string", "enum": ["behavior_event", "behavior_episode", "trace", "document", "task_envelope", "result_envelope", "acceptance_receipt", "user_confirmation", "test", "log", "external", "legacy_observation"] },
+        "source_ref": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "immutable_ref": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "uri": { "type": ["string", "null"], "maxLength": 4096 },
+        "final_disposition": { "type": "string", "enum": ["accepted", "rejected", "reverted", "superseded", "unknown"] },
+        "captured_at": { "type": "string", "format": "date-time" },
+        "scope": { "$ref": "#/$defs/evidenceScope" },
+        "redaction_status": { "type": "string", "enum": ["passed", "rejected"] },
+        "assurance": { "type": "string", "enum": ["verified", "explicit", "observed", "legacy_unverified"] },
+        "signal_strength": { "type": "string", "enum": ["explicit", "weak", "inferred"] },
+        "fact_status": { "type": "string", "enum": ["fact", "inference", "unknown"] }
+      }
+    },
+    "counterexample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_ref", "disposition"],
+      "properties": {
+        "evidence_ref": { "$ref": "#/$defs/evidenceRef" },
+        "disposition": { "type": "string", "enum": ["unresolved", "resolved", "supports-rejection"] }
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "basis"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "basis": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_distinct_episodes", "minimum_truth_score", "minimum_value_score"],
+      "properties": {
+        "minimum_distinct_episodes": { "type": "integer", "minimum": 2 },
+        "minimum_truth_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "minimum_value_score": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eligible", "reasons", "sample_count", "minimum_distinct_episodes"],
+      "properties": {
+        "eligible": { "type": "boolean" },
+        "reasons": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "sample_count": { "type": "integer", "minimum": 0 },
+        "minimum_distinct_episodes": { "type": "integer", "minimum": 2 }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "evaluation_id", "evaluation_hash", "candidate_id", "candidate_hash", "rubric_version", "truth_score", "value_score", "assessor", "evidence_ref_ids", "evidence_relations", "evidence_set_hash", "baseline_hash", "case_set_hash", "subject_artifact_hash", "case_results_hash", "case_count", "passed_count", "pass_rate", "evaluator_hash", "seed", "counterexamples_reviewed", "assessed_at", "eligibility", "decision"],
+      "properties": {
+        "schema_version": { "const": "self-learning-candidate-evaluation-v1" },
+        "evaluation_id": { "type": "string", "pattern": "^eval-[a-f0-9]{32}$" },
+        "evaluation_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "candidate_id": { "type": "string", "pattern": "^lc-[a-f0-9]{32}$" },
+        "candidate_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "rubric_version": { "const": "tv-v1" },
+        "truth_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "value_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "assessor": { "$ref": "#/$defs/actor" },
+        "evidence_ref_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^evidence:[a-f0-9]{64}$" } },
+        "evidence_relations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["evidence_ref_id", "episode_id", "candidate_id", "candidate_hash", "relation"],
+            "properties": {
+              "evidence_ref_id": { "type": "string", "pattern": "^evidence:[a-f0-9]{64}$" },
+              "episode_id": { "type": "string", "pattern": "^behavior-episode:[a-f0-9]{64}$" },
+              "candidate_id": { "type": "string", "pattern": "^lc-[a-f0-9]{32}$" },
+              "candidate_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+              "relation": { "type": "string", "enum": ["supports", "refutes"] }
+            }
+          }
+        },
+        "evidence_set_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "baseline_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "case_set_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "subject_artifact_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "case_results_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "case_count": { "type": "integer", "minimum": 1 },
+        "passed_count": { "type": "integer", "minimum": 0 },
+        "pass_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evaluator_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "seed": { "type": ["string", "null"] },
+        "counterexamples_reviewed": { "type": "boolean" },
+        "assessed_at": { "type": "string", "format": "date-time" },
+        "eligibility": { "$ref": "#/$defs/eligibility" },
+        "decision": { "type": "string", "enum": ["pass", "needs-review"] }
+      }
+    },
+    "approvalEventRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "event_hash"],
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "event_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "approvalState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt_id", "receipt_hash", "candidate_hash", "approval_event_ref", "approved_at"],
+      "properties": {
+        "receipt_id": { "type": "string", "pattern": "^approval-[a-f0-9]{32}$" },
+        "receipt_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "candidate_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "approval_event_ref": { "$ref": "#/$defs/approvalEventRef" },
+        "approved_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval_receipt_id", "approval_receipt_hash", "publisher", "promoted_at", "runtime_written", "semantics"],
+      "properties": {
+        "approval_receipt_id": { "type": "string", "pattern": "^approval-[a-f0-9]{32}$" },
+        "approval_receipt_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "publisher": { "$ref": "#/$defs/actor" },
+        "promoted_at": { "type": "string", "format": "date-time" },
+        "runtime_written": { "const": false },
+        "semantics": { "const": "eligible-for-reader-not-runtime-published" }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expires_at", "tombstoned"],
+      "properties": {
+        "expires_at": { "type": ["string", "null"], "format": "date-time" },
+        "tombstoned": { "type": "boolean" }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["collector_ref", "proposer_ref", "evaluator_ref", "publisher_ref"],
+      "properties": {
+        "collector_ref": { "type": ["string", "null"], "maxLength": 512 },
+        "proposer_ref": { "type": ["string", "null"], "maxLength": 512 },
+        "evaluator_ref": { "type": ["string", "null"], "maxLength": 512 },
+        "publisher_ref": { "type": ["string", "null"], "maxLength": 512 }
+      }
+    },
+    "governanceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "actor", "reason", "occurred_at"],
+      "properties": {
+        "action": { "type": "string", "enum": ["proposed", "evaluated", "shadow", "approved", "promoted", "needs-review", "rejected", "expired", "tombstoned", "scope-corrected"] },
+        "actor": { "$ref": "#/$defs/actor" },
+        "reason": { "type": ["string", "null"] },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

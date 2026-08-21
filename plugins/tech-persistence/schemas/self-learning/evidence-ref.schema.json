@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/self-learning/evidence-ref.schema.json",
+  "title": "Self Learning Evidence Reference",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "evidence_id", "source_type", "source_ref", "immutable_ref", "digest", "uri", "final_disposition", "captured_at", "scope", "redaction_status", "assurance", "signal_strength", "fact_status"],
+  "properties": {
+    "schema_version": { "const": "self-learning-evidence-ref-v1" },
+    "evidence_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" },
+    "source_type": { "type": "string", "enum": ["behavior_event", "behavior_episode", "trace", "document", "task_envelope", "result_envelope", "acceptance_receipt", "user_confirmation", "test", "log", "external", "legacy_observation"] },
+    "source_ref": { "type": "string", "minLength": 1 },
+    "immutable_ref": { "type": "string", "minLength": 1 },
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "uri": { "type": ["string", "null"] },
+    "final_disposition": { "type": "string", "enum": ["accepted", "rejected", "reverted", "superseded", "unknown"] },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "id"],
+      "properties": {
+        "level": { "type": "string", "enum": ["session", "task", "project", "global", "team"] },
+        "id": { "type": ["string", "null"] }
+      }
+    },
+    "redaction_status": { "type": "string", "enum": ["passed", "rejected"] },
+    "assurance": { "type": "string", "enum": ["verified", "explicit", "observed", "legacy_unverified"] },
+    "signal_strength": { "type": "string", "enum": ["explicit", "weak", "inferred"] },
+    "fact_status": { "type": "string", "enum": ["fact", "inference", "unknown"] }
+  }
+}

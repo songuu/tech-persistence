@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/self-learning/behavior-event.schema.json",
+  "title": "Self Learning Behavior Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "source_event_id", "idempotency_key", "project_id", "session_id", "task_ref", "turn_ref", "parent_event_id", "actor", "runtime", "source", "source_assurance", "scope", "event_type", "signal_strength", "fact_status", "status", "final_disposition", "details", "input_digest", "output_digest", "evidence_refs", "occurred_at"],
+  "properties": {
+    "schema_version": { "const": "self-learning-behavior-event-v1" },
+    "event_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" },
+    "source_event_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" },
+    "idempotency_key": { "type": "string", "pattern": "^idem:[a-f0-9]{64}$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "task_ref": { "type": ["string", "null"] },
+    "turn_ref": { "type": ["string", "null"] },
+    "parent_event_id": { "type": ["string", "null"] },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "role"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["user", "agent", "tool", "runtime", "system"] },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" },
+        "role": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" }
+      }
+    },
+    "runtime": { "type": "string", "enum": ["claude", "codex", "unknown"] },
+    "source": { "type": "string", "enum": ["claude_hook", "codex_cli", "codex_mcp", "agent_loop", "legacy_unverified"] },
+    "source_assurance": { "type": "string", "enum": ["verified", "explicit", "observed", "legacy_unverified"] },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "id"],
+      "properties": {
+        "level": { "type": "string", "enum": ["session", "task", "project", "global", "team"] },
+        "id": { "type": ["string", "null"] }
+      }
+    },
+    "event_type": { "type": "string", "enum": ["user.prompt", "user.feedback", "user.correction", "user.approval", "tool.request", "tool.result", "task.result", "system.lifecycle"] },
+    "signal_strength": { "type": "string", "enum": ["explicit", "weak", "inferred"] },
+    "fact_status": { "type": "string", "enum": ["fact", "inference", "unknown"] },
+    "status": { "type": "string", "enum": ["observed", "succeeded", "failed", "blocked", "unknown"] },
+    "final_disposition": { "type": "string", "enum": ["accepted", "rejected", "reverted", "superseded", "unknown"] },
+    "details": { "type": "object" },
+    "input_digest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "output_digest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "evidence_refs": { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$" }, "uniqueItems": true },
+    "occurred_at": { "type": "string", "format": "date-time" }
+  }
+}

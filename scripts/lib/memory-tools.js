@@ -25,6 +25,32 @@ const {
 } = require('./memory-v5');
 const { resolveCompatReadDirs, resolveBaseDir } = require('./runtime-paths');
 const { searchMemory, formatRecallContext } = require('./memory-search');
+const {
+  assertActionEnabled,
+  executeLearningAction,
+  resolveLearningContext,
+} = require('./self-learning-service');
+const {
+  checkPublishGuard,
+  recordAuthoritativeResult,
+  stageCandidateArtifact,
+  verifyStagedArtifactForEvaluation,
+} = require('./skill-eval-results');
+const { detectStableProjectIdentity, findGitRoot } = require('./project-identity');
+const { readJournal, resolveStoreDir } = require('./self-learning-store');
+const {
+  isTrustedUserAuthorityEvent,
+  journalActorForEvent,
+  normalizeBehaviorEvent,
+} = require('./behavior-events');
+const {
+  canonicalStringify,
+  redactCanonicalValue,
+  stableHash,
+} = require('./self-learning-canonical');
+
+const MCP_LOCAL_ADMIN_OPERATIONS = new Set(['approve', 'promote', 'govern', 'retention']);
+const SELF_LEARNING_CONTROL_PREFIX = 'TP_SELF_LEARNING_CONTROL_V1:';
 
 function ok(text) {
   return { content: [{ type: 'text', text: String(text || '') }] };
@@ -35,6 +61,17 @@ function errorResult(message) {
     content: [{ type: 'text', text: `[error] ${message}` }],
     isError: true,
   };
+}
+
+function rejectUnknownArgs(args, allowed, label) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return errorResult(`${label} arguments must be an object`);
+  }
+  const allowedSet = new Set(allowed);
+  const unknown = Object.keys(args).filter((key) => !allowedSet.has(key));
+  return unknown.length > 0
+    ? errorResult(`${label} has unknown argument(s): ${unknown.join(', ')}`)
+    : null;
 }
 
 function getProjectContext() {
@@ -110,8 +147,27 @@ function handleRecent(args = {}) {
 }
 
 function handleSave(args = {}) {
-  const body = String(args.body || args.content || '').trim();
-  if (!body) return errorResult('missing body');
+  const invalidArgs = rejectUnknownArgs(
+    args,
+    ['body', 'topic', 'confidence', 'user_confirmation_ref'],
+    'tp_memory_save'
+  );
+  if (invalidArgs) return invalidArgs;
+  const body = String(args.body || '');
+  if (!body.trim()) return errorResult('missing body');
+  const safeBody = redactCanonicalValue(body);
+  if (typeof safeBody !== 'string' || /[\r\n]/.test(safeBody) || safeBody.length > 4000) {
+    return errorResult('body must be one bounded verbatim paragraph after redaction');
+  }
+  const confirmationRef = typeof args.user_confirmation_ref === 'string'
+    ? args.user_confirmation_ref.trim()
+    : '';
+  if (!confirmationRef) {
+    return errorResult(
+      'missing user_confirmation_ref; tp_memory_save accepts only user-confirmed verbatim notes'
+    );
+  }
+  if (confirmationRef.length > 512) return errorResult('user_confirmation_ref exceeds 512 characters');
 
   const topic = String(args.topic || 'general')
     .trim()
@@ -120,19 +176,72 @@ function handleSave(args = {}) {
     .slice(0, 40) || 'general';
   const confidence = Math.max(0.3, Math.min(0.95, Number(args.confidence) || 0.7));
   const date = new Date().toISOString().split('T')[0];
-  const id = hashText(`${topic}:${body}:${date}`, 12);
+  const id = hashText(`${topic}:${safeBody}:${date}`, 12);
 
-  const { project } = getProjectContext();
   const baseDir = resolveBaseDir();
+  const project = detectStableProjectIdentity(process.cwd());
+  let journal;
+  try {
+    journal = readJournal(resolveStoreDir(baseDir, project.id));
+  } catch (error) {
+    return errorResult(`cannot verify user confirmation journal: ${error.message}`);
+  }
+  const tombstoned = new Set(journal.records
+    .filter((record) => record.record_type === 'tombstone')
+    .map((record) => record.entity_id));
+  const confirmationRecord = [...journal.records].reverse().find((record) => (
+    record.record_type === 'behavior_event'
+      && record.entity_id === confirmationRef
+      && !tombstoned.has(record.entity_id)
+  ));
+  if (!confirmationRecord) return errorResult('user_confirmation_ref is not active in the canonical project journal');
+  let confirmationEvent;
+  try {
+    confirmationEvent = normalizeBehaviorEvent(confirmationRecord.payload);
+  } catch (error) {
+    return errorResult(`user confirmation event is invalid: ${error.message}`);
+  }
+  const rememberSemantic = { action: 'remember', body: safeBody };
+  const expectedCodexDigest = stableHash(redactCanonicalValue(rememberSemantic));
+  const expectedClaudeDigest = stableHash(redactCanonicalValue(
+    `${SELF_LEARNING_CONTROL_PREFIX}${canonicalStringify(rememberSemantic)}`
+  ));
+  const expectedJournalActor = journalActorForEvent(confirmationEvent);
+  const exactRememberControl = (confirmationEvent.source === 'codex_cli'
+      && confirmationEvent.final_disposition === 'accepted'
+      && canonicalStringify(confirmationEvent.details) === canonicalStringify(rememberSemantic)
+      && confirmationEvent.input_digest === expectedCodexDigest)
+    || (confirmationEvent.source === 'claude_hook'
+      && confirmationEvent.input_digest === expectedClaudeDigest);
+  if (confirmationEvent.project_id !== project.id
+      || confirmationRecord.record_id !== confirmationEvent.event_id
+      || confirmationRecord.entity_id !== confirmationEvent.event_id
+      || confirmationEvent.actor.kind !== 'user'
+      || confirmationRecord.actor.kind !== expectedJournalActor.kind
+      || confirmationRecord.actor.id !== expectedJournalActor.id
+      || confirmationRecord.actor.runtime !== expectedJournalActor.runtime
+      || confirmationRecord.actor.authority_ref !== expectedJournalActor.authority_ref
+      || !expectedJournalActor.authority_ref
+      || !isTrustedUserAuthorityEvent(confirmationEvent, 'memory')
+      || !exactRememberControl) {
+    return errorResult(
+      'user_confirmation_ref is not a trusted same-project remember control bound to this verbatim body'
+    );
+  }
   const memoryDir = path.join(baseDir, 'projects', project.id, 'memory');
   fs.mkdirSync(memoryDir, { recursive: true });
 
   const file = path.join(memoryDir, `${topic}.md`);
   const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : `# ${topicTitle(topic)}\n\n`;
-  const entry = `<!-- memory:v5:${id} -->\n- ${date} [${confidence.toFixed(2)}] ${redactSensitive(body)}\n\n`;
+  const confirmationHash = hashText(`user-confirmation:${confirmationRef}`, 16);
+  const entry = `<!-- memory:v5:${id} -->\n- ${date} [${confidence.toFixed(2)}] ${safeBody}\n`
+    + `<!-- user-confirmation:${confirmationHash} -->\n\n`;
   fs.writeFileSync(file, existing + entry);
 
-  return ok(`saved memory:v5:${id} → ${path.relative(baseDir, file)}`);
+  return ok(
+    `saved user-confirmed verbatim memory:v5:${id}`
+      + ` confirmation:${confirmationHash} → ${path.relative(baseDir, file)}`
+  );
 }
 
 function handleFileHistory(args = {}) {
@@ -205,6 +314,145 @@ function handleProjectProfile() {
   return ok(body);
 }
 
+function learningEnvelope(args, action) {
+  const result = executeLearningAction(action, {
+    candidate_id: args.candidate_id,
+    input: args.input || {},
+  }, { entrypoint: 'mcp' });
+  return ok(JSON.stringify(result, null, 2));
+}
+
+function handleLearningRecord(args = {}) {
+  const invalidArgs = rejectUnknownArgs(args, ['kind', 'input'], 'tp_learning_record');
+  if (invalidArgs) return invalidArgs;
+  const kind = args.kind || 'event';
+  if (kind !== 'event') return errorResult('tp_learning_record accepts event only; EvidenceRef is local-authority only');
+  if (!args.input || typeof args.input !== 'object' || Array.isArray(args.input)) {
+    return errorResult('input object is required');
+  }
+  return learningEnvelope(args, 'record');
+}
+
+function handleLearningClose(args = {}) {
+  const invalidArgs = rejectUnknownArgs(args, ['input'], 'tp_learning_close');
+  if (invalidArgs) return invalidArgs;
+  if (!args.input || typeof args.input !== 'object' || Array.isArray(args.input)) {
+    return errorResult('input object is required');
+  }
+  return learningEnvelope(args, 'close');
+}
+
+function handleLearningPropose(args = {}) {
+  const invalidArgs = rejectUnknownArgs(args, ['input'], 'tp_learning_propose');
+  if (invalidArgs) return invalidArgs;
+  if (!args.input || typeof args.input !== 'object' || Array.isArray(args.input)) {
+    return errorResult('input object is required');
+  }
+  return learningEnvelope(args, 'propose');
+}
+
+function handleLearningInspect(args = {}) {
+  const invalidArgs = rejectUnknownArgs(args, ['view', 'candidate_id'], 'tp_learning_inspect');
+  if (invalidArgs) return invalidArgs;
+  const view = args.view || 'inspect';
+  if (!['inspect', 'context', 'metrics', 'verify-store'].includes(view)) {
+    return errorResult('view must be inspect, context, metrics, or verify-store');
+  }
+  return learningEnvelope(args, view);
+}
+
+function handleLearningGovern(args = {}) {
+  const invalidArgs = rejectUnknownArgs(
+    args,
+    ['operation', 'candidate_id', 'input'],
+    'tp_learning_govern'
+  );
+  if (invalidArgs) return invalidArgs;
+  const operation = args.operation;
+  if (![
+    'artifact-stage', 'evaluate', 'shadow', 'approve', 'promote', 'result-record',
+    'govern', 'retention', 'publish-guard',
+  ].includes(operation)) {
+    return errorResult(
+      'operation must be artifact-stage, evaluate, shadow, approve, promote, result-record, govern, retention, or publish-guard'
+    );
+  }
+  if (!args.input || typeof args.input !== 'object' || Array.isArray(args.input)) {
+    return errorResult('input object is required');
+  }
+  if (MCP_LOCAL_ADMIN_OPERATIONS.has(operation)) {
+    return errorResult(`${operation} is unavailable through MCP; use the trusted local admin CLI`);
+  }
+  if (operation === 'publish-guard') {
+    if (args.candidate_id !== undefined) {
+      return errorResult('publish-guard does not accept caller-selected candidate_id');
+    }
+    const invalidInput = rejectUnknownArgs(args.input, ['name', 'tolerance'], 'publish-guard input');
+    if (invalidInput) return invalidInput;
+    const name = args.input.name;
+    if (typeof name !== 'string' || !name.trim()) {
+      return errorResult('publish-guard requires input.name');
+    }
+    const baseDir = path.resolve(resolveBaseDir());
+    const projectId = detectStableProjectIdentity(process.cwd()).id;
+    const repoRoot = findGitRoot(process.cwd());
+    const result = checkPublishGuard(name.trim(), {
+      baseDir,
+      projectId,
+      repoRoot,
+      tolerance: args.input.tolerance,
+    });
+    const envelope = JSON.stringify({
+      context: { base_dir: baseDir, project_id: projectId },
+      result,
+    }, null, 2);
+    return result.status === 'ok' && result.publish_authorized === true
+      ? ok(envelope)
+      : errorResult(envelope);
+  }
+  if (['artifact-stage', 'evaluate', 'shadow', 'approve', 'promote', 'result-record'].includes(operation)
+      && !args.candidate_id) {
+    return errorResult(`${operation} requires candidate_id`);
+  }
+  if (operation === 'artifact-stage' || operation === 'result-record') {
+    const allowed = operation === 'artifact-stage'
+      ? ['name', 'content']
+      : ['name', 'version'];
+    const invalidInput = rejectUnknownArgs(args.input, allowed, `${operation} input`);
+    if (invalidInput) return invalidInput;
+    if (typeof args.input.name !== 'string' || !args.input.name.trim()) {
+      return errorResult(`${operation} requires input.name`);
+    }
+    const context = resolveLearningContext({}, { entrypoint: 'mcp' });
+    assertActionEnabled(operation, context);
+    const baseDir = context.base_dir;
+    const projectId = context.project_id;
+    const result = operation === 'artifact-stage'
+      ? stageCandidateArtifact(
+        args.input.name.trim(),
+        args.candidate_id,
+        args.input.content,
+        { baseDir, projectId }
+      )
+      : recordAuthoritativeResult(
+        args.input.name.trim(),
+        args.candidate_id,
+        { baseDir, projectId, version: args.input.version }
+      );
+    return ok(JSON.stringify({
+      context: { base_dir: baseDir, project_id: projectId },
+      result,
+    }, null, 2));
+  }
+  if (operation === 'evaluate') {
+    verifyStagedArtifactForEvaluation(args.candidate_id, args.input.subject_artifact_hash, {
+      baseDir: path.resolve(resolveBaseDir()),
+      projectId: detectStableProjectIdentity(process.cwd()).id,
+    });
+  }
+  return learningEnvelope(args, operation);
+}
+
 const TOOL_DEFINITIONS = [
   {
     name: 'tp_memory_search',
@@ -234,15 +482,20 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'tp_memory_save',
-    description: 'Save a durable memory note into the current project topic file.',
+    description: 'Save only a user-confirmed verbatim durable note. Never use for inferred learning, automatic Compound output, or agent-authored summaries.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         body: { type: 'string', description: 'Memory body (single short paragraph).' },
         topic: { type: 'string', description: 'Topic slug, e.g. architecture / debugging / workflow.', default: 'general' },
         confidence: { type: 'number', description: 'Confidence 0.3-0.95.', default: 0.7 },
+        user_confirmation_ref: {
+          type: 'string',
+          description: 'Active canonical BehaviorEvent event_id whose explicit user input_digest binds this exact redacted verbatim note.',
+        },
       },
-      required: ['body'],
+      required: ['body', 'user_confirmation_ref'],
     },
     handler: handleSave,
   },
@@ -266,6 +519,80 @@ const TOOL_DEFINITIONS = [
       properties: {},
     },
     handler: handleProjectProfile,
+  },
+  {
+    name: 'tp_learning_record',
+    description: 'Record one weak agent-observed BehaviorEvent. MCP cannot mint user authority, verified results, or EvidenceRefs.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { type: 'string', enum: ['event'], default: 'event' },
+        input: { type: 'object', description: 'BehaviorEvent observation input; authority fields are server-bound.' },
+      },
+      required: ['input'],
+    },
+    handler: handleLearningRecord,
+  },
+  {
+    name: 'tp_learning_close',
+    description: 'Close a task/session BehaviorEpisode from authoritative events and record its EvidenceRef.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        input: { type: 'object', description: 'Episode identity, timestamp, and journal actor.' },
+      },
+      required: ['input'],
+    },
+    handler: handleLearningClose,
+  },
+  {
+    name: 'tp_learning_propose',
+    description: 'Propose a scoped LearningCandidate from EvidenceRefs already committed to the authority journal.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        input: { type: 'object', description: 'LearningCandidate proposal input.' },
+      },
+      required: ['input'],
+    },
+    handler: handleLearningPropose,
+  },
+  {
+    name: 'tp_learning_inspect',
+    description: 'Inspect provenance, TV, counterexamples, lifecycle, context, metrics, or journal integrity.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        view: { type: 'string', enum: ['inspect', 'context', 'metrics', 'verify-store'], default: 'inspect' },
+        candidate_id: { type: 'string' },
+      },
+    },
+    handler: handleLearningInspect,
+  },
+  {
+    name: 'tp_learning_govern',
+    description: 'Stage a canonical candidate artifact, evaluate, shadow, explicitly approve, promote, derive a v3 result record, validate the authoritative publish guard, correct, expire, tombstone, or apply retention; never auto-publishes runtime assets.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        operation: {
+          type: 'string',
+          enum: [
+            'artifact-stage', 'evaluate', 'shadow', 'approve', 'promote', 'result-record',
+            'govern', 'retention', 'publish-guard',
+          ],
+        },
+        candidate_id: { type: 'string' },
+        input: { type: 'object' },
+      },
+      required: ['operation', 'input'],
+    },
+    handler: handleLearningGovern,
   },
 ];
 
@@ -296,4 +623,9 @@ module.exports = {
   handleSave,
   handleFileHistory,
   handleProjectProfile,
+  handleLearningRecord,
+  handleLearningClose,
+  handleLearningPropose,
+  handleLearningInspect,
+  handleLearningGovern,
 };

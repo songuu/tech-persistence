@@ -21,6 +21,8 @@ const operatorReviewPacket = require('./agent-orchestrator/operator-review-packe
 const turnTransaction = require('./agent-orchestrator/turn-transaction');
 const schedulerControl = require('./agent-orchestrator/scheduler-control');
 const turnBudget = require('./agent-orchestrator/turn-budget');
+const { resolveBaseDir } = require('./lib/runtime-paths');
+const { detectStableProjectIdentity } = require('./lib/project-identity');
 
 const pipeline = require('./agent-orchestrator/pipeline');
 const pipelineState = require('./agent-orchestrator/pipeline-state');
@@ -1366,6 +1368,39 @@ function buildCodexProviderInvocation(
   });
 }
 
+function buildSelfLearningProviderEnv(state, attempt, options = {}) {
+  if (!state || typeof state.workdir !== 'string' || !path.isAbsolute(state.workdir)) {
+    throw new Error('managed self-learning environment requires an absolute workdir');
+  }
+  if (!attempt || !attempt.task
+      || typeof attempt.task.ref !== 'string'
+      || typeof attempt.task.hash !== 'string') {
+    throw new Error('managed self-learning environment requires a typed task identity');
+  }
+  const baseDir = path.resolve(options.baseDir || resolveBaseDir());
+  const project = detectStableProjectIdentity(state.workdir);
+  return {
+    TP_SELF_LEARNING_BASE_DIR: baseDir,
+    TP_SELF_LEARNING_PROJECT_ID: project.id,
+    TP_SELF_LEARNING_TASK_REF: attempt.task.ref,
+    TP_SELF_LEARNING_SOURCE_EVENT_BASE: attempt.task.hash,
+  };
+}
+
+function attachSelfLearningProviderEnv(invocation, state, attempt, options = {}) {
+  invocation.env = {
+    ...(invocation.env || {}),
+    // A parent Codex/Claude host session is not the native session created by
+    // this provider invocation. Clear inherited values so hook stdin remains
+    // the sole native session authority unless an explicit expected binding is
+    // deliberately added in the future.
+    CODEX_SESSION_ID: '',
+    CLAUDE_SESSION_ID: '',
+    ...buildSelfLearningProviderEnv(state, attempt, options),
+  };
+  return invocation;
+}
+
 function providerResumeRefs(state, runtime, providerKey, stage) {
   return providerLifecycle.providerResumeRefs(state && state.providerRecovery, {
     runtime,
@@ -2133,6 +2168,7 @@ function runSpecProvider(state, statePath, runDir, options) {
     schemaPath: invocation.schemaPath,
     stamp: providerLogStamp,
   });
+  attachSelfLearningProviderEnv(invocation, state, attempt);
 
   const { record, result } = runProcess(
     'spec provider',
@@ -2378,6 +2414,7 @@ function runImplementationProvider(state, statePath, runDir, options) {
     contractHash: providerProfiles.hash(readText(path.join(runDir, 'spec.json'))),
     stamp: providerLogStamp,
   });
+  attachSelfLearningProviderEnv(invocation, state, attempt);
 
   const { record, result } = runProcess(
     'implementation provider',
@@ -2952,6 +2989,7 @@ function runReviewProvider(state, statePath, runDir, options) {
     contractHash: providerProfiles.hash(readText(path.join(runDir, 'spec.json'))),
     stamp: providerLogStamp,
   });
+  attachSelfLearningProviderEnv(invocation, state, attempt);
 
   const { record, result } = runProcess(
     'review provider',
@@ -5196,6 +5234,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  attachSelfLearningProviderEnv,
+  buildSelfLearningProviderEnv,
   collectGitDiff,
   listChangedFiles,
   normalizeTurnValidation,
