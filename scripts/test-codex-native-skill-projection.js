@@ -326,31 +326,48 @@ function assertSolutionIndexPluginRuntimeClosure() {
 
 function assertProjectionContracts() {
   const claudeSkills = listSkillNames(legacyRoot);
+  const canonicalClaudeSkills = listSkillNames(path.join(root, 'user-level', 'skills'));
   const commandSkills = fs.readdirSync(path.join(root, 'user-level', 'commands'))
     .filter((name) => name.endsWith('.md'))
-    .map((name) => path.basename(name, '.md'));
-  const expectedCodexSkills = [...new Set([...claudeSkills, ...commandSkills])].sort();
+    .map((name) => path.basename(name, '.md'))
+    .sort();
+  const expectedClaudeSkills = [...new Set([...canonicalClaudeSkills, ...commandSkills])].sort();
+  const expectedCodexSkills = [...new Set([...canonicalClaudeSkills, ...commandSkills])].sort();
+  assert.deepStrictEqual(
+    claudeSkills,
+    expectedClaudeSkills,
+    'Claude plugin skill projection inventory'
+  );
   assert.deepStrictEqual(
     listSkillNames(projectionRoot),
     expectedCodexSkills,
     'codex projection inventory'
   );
-  for (const name of claudeSkills) {
+  for (const name of canonicalClaudeSkills) {
     assertDirectoriesEqual(
       path.join(legacyRoot, name),
       path.join(root, 'user-level', 'skills', name),
       `${name} Claude native projection`
     );
   }
-  assertMarkdownEofCanonical(path.join(pluginRoot, 'commands'), 'generated commands');
+  for (const name of commandSkills) {
+    assert.strictEqual(
+      fs.readFileSync(path.join(legacyRoot, name, 'SKILL.md'), 'utf8'),
+      builder.normalizeLf(fs.readFileSync(path.join(root, 'user-level', 'commands', `${name}.md`), 'utf8')),
+      `${name} Claude command skill projection`
+    );
+  }
+  const emptyClaudeSkillDirs = fs.readdirSync(legacyRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .filter((entry) => !fs.existsSync(path.join(legacyRoot, entry.name, 'SKILL.md')))
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepStrictEqual(emptyClaudeSkillDirs, [], 'Claude plugin skills must not contain empty directories');
+  assert(!fs.existsSync(path.join(pluginRoot, 'commands')), 'legacy flat plugin commands must be absent');
+  assertMarkdownEofCanonical(legacyRoot, 'generated Claude skills');
   assertMarkdownEofCanonical(projectionRoot, 'generated Codex skills');
   assertSolutionIndexPluginRuntimeClosure();
 
-  assert.deepStrictEqual(
-    fs.readFileSync(path.join(pluginRoot, 'commands', 'compound.md')),
-    fs.readFileSync(path.join(root, 'user-level', 'commands', 'compound.md')),
-    'Claude compound command projection must stay byte-identical'
-  );
   const compoundWrapper = builder.commandToSkill(
     'compound.md',
     fs.readFileSync(path.join(root, 'user-level', 'commands', 'compound.md'), 'utf8')
@@ -424,11 +441,9 @@ function assertProjectionContracts() {
 function main() {
   assertNativeContracts();
 
-  const legacyBefore = directoryDigest(legacyRoot);
   runBuilder();
   const legacyAfterFirstBuild = directoryDigest(legacyRoot);
   const projectionAfterFirstBuild = directoryDigest(projectionRoot);
-  assert.strictEqual(legacyAfterFirstBuild, legacyBefore, 'first build changed legacy skills bytes');
   assertProjectionContracts();
   assertSprintRuntimeValidatorContracts();
 

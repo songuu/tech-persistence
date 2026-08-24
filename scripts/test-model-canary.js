@@ -1036,7 +1036,7 @@ test('versioned Claude surface baseline matches the real frozen repository surfa
   assert.strictEqual(verification.candidate.totalBytes, 1135196);
   assert.strictEqual(
     verification.candidate.surfaceHash,
-    'd587fce37548d7330c1d8a57fdb9b2bd427d779a7d1f2feff52434b012168296'
+    '09df6a74d8ac89a850f9de8d1b423cc67e9e4c0c6c8e0a7daa6a69c1b64036ef'
   );
   assert.deepStrictEqual(verification.candidate.warnings, []);
 

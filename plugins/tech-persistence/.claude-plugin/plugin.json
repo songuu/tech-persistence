@@ -1,6 +1,6 @@
 {
   "name": "tech-persistence",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Self-evolving engineering toolchain: think/plan/work/review/compound workflow + memory v5 + skills + Codex orchestration + pre-commit defense (ADR-012/013).",
   "author": {
     "name": "songyu_qiming"

@@ -102,6 +102,16 @@ function checkPropagateSync(stagedFiles, repoRoot) {
 
   const t = loadTransformers(repoRoot);
   const mismatches = [];
+  const commandSourcesChanged = userLevelChanged.some((file) => file.startsWith('user-level/commands/'));
+  const legacyCommandsDir = path.join(repoRoot, 'plugins', 'tech-persistence', 'commands');
+  if (commandSourcesChanged && fs.existsSync(legacyCommandsDir)) {
+    mismatches.push({
+      source: 'user-level/commands',
+      derived: 'plugins/tech-persistence/commands',
+      kind: 'command',
+      reason: 'legacy flat plugin commands directory must be absent',
+    });
+  }
 
   for (const sourceRel of userLevelChanged) {
     const sourceContent = readIfExists(path.join(repoRoot, sourceRel));
@@ -119,20 +129,16 @@ function checkPropagateSync(stagedFiles, repoRoot) {
 
       const pluginCmdRel = `plugins/tech-persistence/commands/${name}.md`;
       const pluginCmdActual = readIfExists(path.join(repoRoot, pluginCmdRel));
-      // plugins/tech-persistence/commands/ 服务 Claude Code 2.x plugin 系统,
-      // 应保持 Claude Code 形态 (与 propagate-command-changes.js line 81 一致,
-      // build-codex-plugin.js::copyCommands 也已改为 shouldTransform=false).
-      // 期望: 源内容 LF-normalize, 不跑 codex transform.
-      const pluginCmdExpected = t.normalizeLf(sourceContent);
-      if (pluginCmdActual !== pluginCmdExpected) {
-        mismatches.push({ source: sourceRel, derived: pluginCmdRel, kind: 'command', reason: 'plugin command out of sync (LF-normalized plain copy expected)' });
+      if (pluginCmdActual !== null) {
+        mismatches.push({ source: sourceRel, derived: pluginCmdRel, kind: 'command', reason: 'legacy flat plugin command must be absent' });
       }
 
       if (Array.isArray(t.expectedCommands) && t.expectedCommands.includes(`${name}.md`)) {
         const skillRel = `plugins/tech-persistence/skills/${name}/SKILL.md`;
         const skillActual = readIfExists(path.join(repoRoot, skillRel));
-        if (skillActual !== null) {
-          mismatches.push({ source: sourceRel, derived: skillRel, kind: 'command', reason: 'command leaked into Claude skills projection' });
+        const skillExpected = t.normalizeLf(sourceContent);
+        if (skillActual !== skillExpected) {
+          mismatches.push({ source: sourceRel, derived: skillRel, kind: 'command', reason: 'Claude command skill out of sync (LF-normalized plain copy expected)' });
         }
         const codexSkillRel = `plugins/tech-persistence/codex-skills/${name}/SKILL.md`;
         const codexSkillActual = readIfExists(path.join(repoRoot, codexSkillRel));

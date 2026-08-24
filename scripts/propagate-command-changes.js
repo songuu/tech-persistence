@@ -2,12 +2,13 @@
 
 /**
  * Propagate user-level/commands/*.md changes to:
- *  - plugins/tech-persistence/commands/*.md (verbatim)
+ *  - plugins/tech-persistence/skills/<name>/SKILL.md (LF-normalized Claude skill)
  *  - .codex/commands/*.md (native thin entry for think/plan/work/review/compound/sprint; regex otherwise)
  *  - plugins/tech-persistence/codex-skills/* (rebuilt projection)
  *
- * Claude plugin skills are independent canonical skills and are never derived
- * from commands. Command wrappers exist only in the Codex projection.
+ * Flat plugin commands are deliberately retired. On Windows, command
+ * `skill.md` collides with the SKILL.md discovery convention and can hide all
+ * sibling commands behind a false `commands` skill.
  *
  * Also copies user-level/rules/<rule>.md to .codex/rules/<rule>.md for any rule
  * passed via --rules flag.
@@ -86,6 +87,29 @@ function stripFrontmatter(content) {
   return content.slice(end + 5);
 }
 
+function removeLegacyPluginCommands() {
+  const commandsDir = path.join(repoRoot, 'plugins', 'tech-persistence', 'commands');
+  if (!fs.existsSync(commandsDir)) return;
+  if (!fs.lstatSync(commandsDir).isDirectory()) {
+    throw new Error(`legacy plugin commands target is not a directory: ${commandsDir}`);
+  }
+  const entries = fs.readdirSync(commandsDir).sort();
+  const expected = new Set(buildCodexPlugin.expectedCommands);
+  const unexpected = entries.filter((entry) => !expected.has(entry));
+  if (unexpected.length > 0) {
+    throw new Error(`legacy plugin commands contain unrecognized entries: ${unexpected.join(', ')}`);
+  }
+  entries.forEach((entry) => {
+    const legacyPath = path.join(commandsDir, entry);
+    if (!fs.lstatSync(legacyPath).isFile()) {
+      throw new Error(`legacy plugin command is not a regular file: ${legacyPath}`);
+    }
+    fs.rmSync(legacyPath);
+  });
+  fs.rmdirSync(commandsDir);
+  console.log(`[ok]   retired legacy plugin commands directory: ${path.relative(repoRoot, commandsDir)}`);
+}
+
 function propagateCommand(name) {
   const sourcePath = path.join(repoRoot, 'user-level', 'commands', `${name}.md`);
   if (!fs.existsSync(sourcePath)) {
@@ -93,12 +117,13 @@ function propagateCommand(name) {
     return;
   }
   const sourceText = readText(sourcePath);
+  removeLegacyPluginCommands();
 
   const targets = [
     {
-      label: 'plugin command',
-      path: path.join(repoRoot, 'plugins', 'tech-persistence', 'commands', `${name}.md`),
-      transform: (text) => text,
+      label: 'plugin Claude skill',
+      path: path.join(repoRoot, 'plugins', 'tech-persistence', 'skills', name, 'SKILL.md'),
+      transform: (text) => buildCodexPlugin.normalizeLf(text),
     },
     {
       label: 'codex command',
@@ -108,10 +133,6 @@ function propagateCommand(name) {
   ];
 
   for (const target of targets) {
-    if (!fs.existsSync(path.dirname(target.path))) {
-      console.warn(`[skip] ${target.label} dir missing for ${name}`);
-      continue;
-    }
     writeText(target.path, target.transform(sourceText));
     console.log(`[ok]   ${target.label}: ${path.relative(repoRoot, target.path)}`);
   }
@@ -161,6 +182,7 @@ module.exports = {
   injectIntoSkillWrapper,
   commandSkillWrapper,
   stripFrontmatter,
+  removeLegacyPluginCommands,
   propagateCommand,
   propagateRule,
 };

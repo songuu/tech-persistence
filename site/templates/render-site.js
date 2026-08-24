@@ -77,10 +77,13 @@ function normalizeModel(input = {}) {
         sourceMetrics.codexSkills ??
         sourceMetrics.skills ??
         catalog.filter((item) => item.type === "skill").length,
-      claudeCommands:
+      claudeSkills:
+        sourceMetrics.claudeSkills ??
         sourceMetrics.claudeCommands ??
         sourceMetrics.commands ??
-        catalog.filter((item) => item.type === "command").length,
+        catalog.filter((item) =>
+          Array.isArray(item.runtimes) && item.runtimes.includes("Claude Code"),
+        ).length,
       hooks: sourceMetrics.hooks ?? sourceMetrics.hookEvents ?? 0,
       mcpTools: sourceMetrics.mcpTools ?? sourceMetrics.tools ?? 5,
       architectureDocs:
@@ -354,7 +357,7 @@ function renderHome(model, basePath) {
       </div>
       <div class="shell proof-strip">
         ${metric(model.metrics.codexSkills, "Codex skills", "build-time discovery")}
-        ${metric(model.metrics.claudeCommands, "Claude commands", "compatibility surface")}
+        ${metric(model.metrics.claudeSkills, "Claude skills", "plugin discovery")}
         ${metric(model.metrics.mcpTools, "Memory MCP tools", "on-demand retrieval")}
         ${metric("2", "Agent runtimes", "one durable store")}
       </div>
@@ -567,10 +570,10 @@ function renderCatalog(model, basePath) {
       label: "Repository-backed catalog",
       title: "浏览 Tech Persistence 能力。",
       description:
-        "从当前仓库自动发现 skills 与兼容命令。按工作流选择、搜索并复制一份使用清单，不虚构不存在的选择性安装能力。",
+        "从当前仓库自动发现 skills 与运行时投影。按工作流选择、搜索并复制一份使用清单，不虚构不存在的选择性安装能力。",
       stats: [
         [model.metrics.codexSkills, " Codex skills"],
-        [model.metrics.claudeCommands, " Claude commands"],
+        [model.metrics.claudeSkills, " Claude skills"],
         [model.catalog.length, " catalog items"],
       ],
     })}
@@ -814,7 +817,7 @@ function renderStatus(model) {
     })}
     <section class="section">
       <div class="shell status-grid">
-        <article class="status-card status-card--ok"><span><i></i>Generated</span><h2>Repository projection</h2><p>本次构建读取了 skills、commands、hooks、manifest、README 与架构文档索引。</p><dl><div><dt>Codex skills</dt><dd>${escapeHtml(model.metrics.codexSkills)}</dd></div><div><dt>Claude commands</dt><dd>${escapeHtml(model.metrics.claudeCommands)}</dd></div><div><dt>Architecture docs</dt><dd>${escapeHtml(model.metrics.architectureDocs)}</dd></div></dl></article>
+        <article class="status-card status-card--ok"><span><i></i>Generated</span><h2>Repository projection</h2><p>本次构建读取了 skills、Claude skill projection、hooks、manifest、README 与架构文档索引。</p><dl><div><dt>Codex skills</dt><dd>${escapeHtml(model.metrics.codexSkills)}</dd></div><div><dt>Claude skills</dt><dd>${escapeHtml(model.metrics.claudeSkills)}</dd></div><div><dt>Architecture docs</dt><dd>${escapeHtml(model.metrics.architectureDocs)}</dd></div></dl></article>
         <article class="status-card"><span>Boundary</span><h2>Not asserted here</h2><p>此页不推断本地安装、MCP 进程、Obsidian 客户端、远端同步或第三方服务是否健康。</p><ul><li>安装状态需运行 validator</li><li>同步状态需读回目标端</li><li>部署状态需 loopback + public probe</li></ul></article>
         <article class="status-card"><span>Source</span><h2>Review the exact revision</h2><p>构建 ID 由公开投影输入计算，用于把线上页面与源树快照关联。</p><a href="${escapeHtml(model.meta.repository)}" rel="noreferrer">打开 GitHub ${icon("arrow")}</a></article>
       </div>
@@ -845,7 +848,7 @@ function renderSitePages(input, options = {}) {
       page: "catalog",
       title: "能力目录",
       description:
-        "从 Tech Persistence 当前仓库生成的 skills、commands 与工作流目录。",
+        "从 Tech Persistence 当前仓库生成的 skills 与工作流目录。",
       body: renderCatalog(model, basePath),
     }),
     "platforms/index.html": shell({

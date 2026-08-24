@@ -75,6 +75,7 @@ function listSkillNames(dir) {
 const expectedCommands = listTopLevelMarkdownNames(path.join(root, 'user-level', 'commands'));
 const expectedSkills = listSkillNames(path.join(root, 'user-level', 'skills'));
 const expectedCommandSkills = expectedCommands.map((name) => path.basename(name, '.md'));
+const expectedClaudeSkills = Array.from(new Set([...expectedSkills, ...expectedCommandSkills])).sort();
 const expectedCodexSkills = Array.from(new Set([...expectedSkills, ...expectedCommandSkills])).sort();
 const expectedClaudeAgents = ['claude-explorer.md', 'claude-implementer.md', 'claude-reviewer.md'];
 const expectedCodexAgents = ['explorer.toml', 'implementer.toml', 'reviewer.toml'];
@@ -495,8 +496,8 @@ function validateOptionalFile(file, label = file) {
 function validateAgentLoopAutoFlagParity() {
   const targets = [
     {
-      label: 'plugin command agent-loop.md',
-      file: path.join(pluginRoot, 'commands', 'agent-loop.md'),
+      label: 'plugin Claude skill agent-loop/SKILL.md',
+      file: path.join(pluginRoot, 'skills', 'agent-loop', 'SKILL.md'),
     },
     {
       label: 'plugin Codex skill agent-loop/SKILL.md',
@@ -740,41 +741,45 @@ validateLocalRequireClosure(
 );
 
 const commandsDir = path.join(pluginRoot, 'commands');
-if (isDirectory(commandsDir, 'commands dir')) {
-  const commandEntries = fs
-    .readdirSync(commandsDir)
-    .filter((name) => name.endsWith('.md'))
-    .sort();
-  validateInventory('commands dir', commandEntries, expectedCommands);
-  expectedCommands.forEach((name) => {
-    isFile(path.join(commandsDir, name), `command ${name}`);
-    validateGeneratedFileParity(
-      path.join(root, 'user-level', 'commands', name),
-      path.join(commandsDir, name),
-      `Claude command ${name}`
-    );
-  });
+if (fs.existsSync(commandsDir)) {
+  fail('legacy commands dir must be absent; Claude command wrappers belong in skills/<name>/SKILL.md');
+} else {
+  ok('legacy commands dir absent');
 }
 
 const skillsDir = path.join(pluginRoot, 'skills');
 if (isDirectory(skillsDir, 'skills dir')) {
   const skillEntries = listSkillNames(skillsDir);
-  validateInventory('skills dir', skillEntries, expectedSkills);
-  expectedSkills.forEach((name) => {
+  validateInventory('skills dir', skillEntries, expectedClaudeSkills);
+  const emptySkillDirectories = fs.readdirSync(skillsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .filter((entry) => !fs.existsSync(path.join(skillsDir, entry.name, 'SKILL.md')))
+    .map((entry) => entry.name)
+    .sort();
+  if (emptySkillDirectories.length > 0) {
+    fail(`skills dir contains empty skill directories: ${emptySkillDirectories.join(', ')}`);
+  } else {
+    ok('skills dir contains no empty skill directories');
+  }
+  expectedClaudeSkills.forEach((name) => {
     const skillDir = path.join(skillsDir, name);
     if (isDirectory(skillDir, `skill ${name}`)) {
       isFile(path.join(skillDir, 'SKILL.md'), `skill ${name} SKILL.md`);
     }
   });
-  const overlap = skillEntries.filter((name) => expectedCommandSkills.includes(name));
-  if (overlap.length > 0) {
-    fail(`Claude command/skill overlap must be empty: ${overlap.join(', ')}`);
-  }
   expectedSkills.forEach((name) => validateDirectoryParity(
     path.join(root, 'user-level', 'skills', name),
     path.join(skillsDir, name),
     `Claude skill ${name}`
   ));
+  expectedCommands.forEach((commandName) => {
+    const skillName = path.basename(commandName, '.md');
+    validateGeneratedFileParity(
+      path.join(root, 'user-level', 'commands', commandName),
+      path.join(skillsDir, skillName, 'SKILL.md'),
+      `Claude command skill ${commandName}`
+    );
+  });
 }
 
 const codexSkillsDir = path.join(pluginRoot, 'codex-skills');

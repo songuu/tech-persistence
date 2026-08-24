@@ -20,7 +20,7 @@ const fixture = {
   },
   metrics: {
     codexSkills: 4,
-    claudeCommands: 3,
+    claudeSkills: 3,
     hooks: 2,
     mcpTools: 5,
     architectureDocs: 7,

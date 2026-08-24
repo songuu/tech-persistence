@@ -33,7 +33,6 @@ const SPRINT_PHASES = Object.freeze(['think', 'plan', 'work', 'review', 'compoun
 const CLAUDE_SURFACE = Object.freeze([
   'user-level/commands/**',
   'user-level/skills/**',
-  'plugins/tech-persistence/commands/**',
   'plugins/tech-persistence/skills/**',
   'plugins/tech-persistence/hooks/**',
   'scripts/lib/hook-registry.js',

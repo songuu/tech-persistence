@@ -60,6 +60,16 @@ const expectedSkills = [
   'context-handoff',
 ];
 
+const expectedCommandSkillNames = expectedCommands.map((name) => path.basename(name, '.md'));
+const expectedClaudeSkills = Array.from(new Set([
+  ...expectedSkills,
+  ...expectedCommandSkillNames,
+])).sort();
+
+if (expectedClaudeSkills.length !== expectedSkills.length + expectedCommandSkillNames.length) {
+  throw new Error('Claude skill and command names must not overlap');
+}
+
 const utilityScripts = [
   'configure-shared-homunculus.js',
   'agent-orchestrator.js',
@@ -3271,40 +3281,39 @@ ${commandBody}
 `);
 }
 
-function copyCommands() {
+function copyCommands(targetPluginRoot = pluginRoot) {
   const sourceDir = path.join(repoRoot, 'user-level', 'commands');
-  const targetDir = path.join(pluginRoot, 'commands');
+  const targetDir = path.join(targetPluginRoot, 'commands');
   const commandFiles = fs.readdirSync(sourceDir)
     .filter((name) => name.endsWith('.md'))
     .sort();
 
   assertInventory('commands', commandFiles, expectedCommands);
-  ensureDir(targetDir);
-  fs.readdirSync(targetDir)
-    .filter((name) => name.endsWith('.md') && !commandFiles.includes(name))
-    .forEach((name) => fs.rmSync(path.join(targetDir, name), { force: true }));
-  // plugins/tech-persistence/commands/ 服务于 Claude Code 2.x plugin 系统,
-  // 必须保持 Claude Code 形态 (~/.claude/ 路径). Codex 端通过 skills/ 调用,
-  // 不读 commands/, 所以这里不应该跑 codex transform.
-  // 与 propagate-command-changes.js line 81 行为对齐 (transform = identity).
-  commandFiles.forEach((name) => {
-    copyTextFile(path.join(sourceDir, name), path.join(targetDir, name), false);
-  });
-  const copied = fs.readdirSync(targetDir)
-    .filter((name) => name.endsWith('.md'))
-    .sort();
-  const copiedSet = new Set(copied);
-  commandFiles
-    .filter((name) => !copiedSet.has(name))
-    .forEach((name) => {
-      copyTextFile(path.join(sourceDir, name), path.join(targetDir, name), false);
-    });
-  assertInventory(
-    'generated commands',
-    fs.readdirSync(targetDir).filter((name) => name.endsWith('.md')).sort(),
-    expectedCommands
+  // Claude Code discovers plugin-native skills from skills/<name>/SKILL.md.
+  // Publishing flat commands here is unsafe on Windows: commands/skill.md is
+  // indistinguishable from commands/SKILL.md to a case-insensitive discovery
+  // walk, which shadows every sibling command as a single "commands" skill.
+  // Keep an empty staged directory solely so the transactional publisher can
+  // remove command files from older plugin bundles.
+  emptyDir(targetDir);
+  return 0;
+}
+
+function removeRetiredLegacyCommandsDirectory() {
+  const targetDir = assertSafePublishTarget(
+    path.join(canonicalPluginRoot, 'commands'),
+    canonicalPluginRoot
   );
-  return commandFiles.length;
+  if (!fs.existsSync(targetDir)) return false;
+  if (!fs.lstatSync(targetDir).isDirectory()) {
+    throw new Error(`retired legacy commands target is not a directory: ${targetDir}`);
+  }
+  const entries = fs.readdirSync(targetDir);
+  if (entries.length !== 0) {
+    throw new Error(`retired legacy commands target is not empty: ${targetDir}`);
+  }
+  fs.rmdirSync(targetDir);
+  return true;
 }
 
 function copySkills(targetPluginRoot = pluginRoot) {
@@ -3327,7 +3336,19 @@ function copySkills(targetPluginRoot = pluginRoot) {
       { transformText: false }
     );
   });
-  return skillDirs.length;
+  expectedCommands.forEach((name) => {
+    copyTextFile(
+      path.join(repoRoot, 'user-level', 'commands', name),
+      path.join(targetDir, path.basename(name, '.md'), 'SKILL.md'),
+      false
+    );
+  });
+  const copiedSkills = fs.readdirSync(targetDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(targetDir, entry.name, 'SKILL.md')))
+    .map((entry) => entry.name)
+    .sort();
+  assertInventory('generated Claude skills', copiedSkills, expectedClaudeSkills);
+  return copiedSkills.length;
 }
 
 function copyClaudeAgents(targetPluginRoot = pluginRoot) {
@@ -3636,6 +3657,7 @@ function main() {
         target: path.join(canonicalPluginRoot, 'scripts', name),
       })),
     });
+    removeRetiredLegacyCommandsDirectory();
   } finally {
     if (fs.existsSync(stageRoot)) fs.rmSync(stageRoot, { recursive: true, force: true });
     releaseLock();
@@ -3646,7 +3668,8 @@ function main() {
     mcpCount, utilityCount, schemaCount,
   } = counts;
 
-  console.log(`[OK] generated ${commandCount} commands`);
+  console.log(`[OK] generated ${commandCount} legacy Claude commands`);
+  console.log('[OK] retired flat Claude command projection');
   console.log(`[OK] generated ${skillCount} skills`);
   console.log(`[OK] generated ${claudeAgentCount} Claude agents`);
   console.log(`[OK] generated ${codexSkillCount} codex skills`);
@@ -3690,6 +3713,8 @@ module.exports = {
   replacements,
   expectedCommands,
   expectedSkills,
+  expectedClaudeSkills,
+  removeRetiredLegacyCommandsDirectory,
   utilityScripts,
   RECOVERY_DIRECTORY_NAME,
   SOURCE_PROJECTION_CONTRACT,
@@ -3698,6 +3723,7 @@ module.exports = {
   preserveAgentLoopProviderProvenance,
   transformCompoundCommandContent,
   transformCommandContent,
+  copyCommands,
   copySkills,
   copyClaudeAgents,
   copyCodexSkills,

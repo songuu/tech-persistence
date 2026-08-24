@@ -33,6 +33,7 @@ function makeRepo() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-skill-budget-'));
   fs.mkdirSync(path.join(root, 'user-level', 'commands'), { recursive: true });
   fs.mkdirSync(path.join(root, '.codex', 'skills', 'review'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'plugins', 'tech-persistence', 'skills', 'review'), { recursive: true });
   fs.mkdirSync(path.join(root, 'user-level', 'skills', 'manual'), { recursive: true });
   fs.writeFileSync(
     path.join(root, 'user-level', 'commands', 'review.md'),
@@ -41,6 +42,10 @@ function makeRepo() {
   fs.writeFileSync(
     path.join(root, '.codex', 'skills', 'review', 'SKILL.md'),
     ['---', 'name: review', '---', '', 'Codex-compatible entry point for the former /review command.', '', 'y'.repeat(160), ''].join('\n')
+  );
+  fs.writeFileSync(
+    path.join(root, 'plugins', 'tech-persistence', 'skills', 'review', 'SKILL.md'),
+    ['---', 'description: Review command', '---', '', '# Review', '', 'z'.repeat(120), ''].join('\n')
   );
   fs.writeFileSync(
     path.join(root, 'user-level', 'skills', 'manual', 'SKILL.md'),
@@ -73,15 +78,21 @@ test('collectSkillSizeBudget classifies command-derived runtime skills', () => {
   const root = makeRepo();
   const report = collectSkillSizeBudget({ root, warnBytes: 100, heavyBytes: 200 });
   const reviewSkill = report.entries.find((entry) => entry.path === '.codex/skills/review/SKILL.md');
+  const claudeReviewSkill = report.entries.find(
+    (entry) => entry.path === 'plugins/tech-persistence/skills/review/SKILL.md'
+  );
   const manualSkill = report.entries.find((entry) => entry.path === 'user-level/skills/manual/SKILL.md');
 
   assert.ok(reviewSkill, 'missing review skill entry');
   assert.strictEqual(reviewSkill.commandDerived, true);
   assert.strictEqual(reviewSkill.surface, 'codex-skill-runtime');
   assert.strictEqual(reviewSkill.pressure, 'heavy');
+  assert.ok(claudeReviewSkill, 'missing Claude review skill entry');
+  assert.strictEqual(claudeReviewSkill.commandDerived, true);
+  assert.strictEqual(claudeReviewSkill.surface, 'plugin-skill-runtime');
   assert.ok(manualSkill, 'missing manual skill entry');
   assert.strictEqual(manualSkill.commandDerived, false);
-  assert.strictEqual(report.total.commandDerivedSkills, 1);
+  assert.strictEqual(report.total.commandDerivedSkills, 2);
 
   fs.rmSync(root, { recursive: true, force: true });
 });

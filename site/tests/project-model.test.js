@@ -98,10 +98,10 @@ function createRepositoryFixture() {
   );
   writeFixtureFile(
     root,
-    "plugins/tech-persistence/commands/sprint.md",
+    "plugins/tech-persistence/skills/sprint/SKILL.md",
     [
       "---",
-      'description: "Claude command for the full workflow."',
+      'description: "Claude skill for the full workflow."',
       "---",
       "",
       "# /sprint",
@@ -109,7 +109,7 @@ function createRepositoryFixture() {
   );
   writeFixtureFile(
     root,
-    "plugins/tech-persistence/commands/think.md",
+    "plugins/tech-persistence/skills/think/SKILL.md",
     [
       "---",
       'description: "Frame product scope before implementation."',
@@ -243,7 +243,7 @@ test("collects a deterministic catalog, metrics, updates, and source manifest", 
 
   assert.deepEqual(model.metrics, {
     codexSkills: 3,
-    claudeCommands: 2,
+    claudeSkills: 2,
     hooks: 4,
     mcpTools: 2,
     architectureDocs: 2,
@@ -259,7 +259,7 @@ test("collects a deterministic catalog, metrics, updates, and source manifest", 
 
   const sprint = model.catalog.find((entry) => entry.id === "sprint");
   assert.deepEqual(sprint.runtimes, ["Codex", "Claude Code"]);
-  assert.deepEqual(sprint.invocations, ["$sprint", "/sprint"]);
+  assert.deepEqual(sprint.invocations, ["$sprint", "/tech-persistence:sprint"]);
   assert.equal(sprint.type, "skill");
   assert.equal(sprint.category, "workflow");
   assert.equal(sprint.featured, true);
@@ -281,9 +281,9 @@ test("collects a deterministic catalog, metrics, updates, and source manifest", 
   assert.equal(contextHandoff.name, "Context Handoff");
 
   const think = model.catalog.find((entry) => entry.id === "think");
-  assert.equal(think.type, "command");
+  assert.equal(think.type, "skill");
   assert.deepEqual(think.runtimes, ["Claude Code"]);
-  assert.deepEqual(think.invocations, ["/think"]);
+  assert.deepEqual(think.invocations, ["/tech-persistence:think"]);
 
   assert.deepEqual(
     model.updates.map((update) => update.date),
@@ -391,18 +391,31 @@ test("the real repository remains the source of truth for current counts", () =>
           ),
         ),
     ).length;
-  const commandCount = fs
+  const claudeSkillCount = fs
     .readdirSync(
-      path.join(repoRoot, "plugins", "tech-persistence", "commands"),
+      path.join(repoRoot, "plugins", "tech-persistence", "skills"),
       { withFileTypes: true },
     )
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md")).length;
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        fs.existsSync(
+          path.join(
+            repoRoot,
+            "plugins",
+            "tech-persistence",
+            "skills",
+            entry.name,
+            "SKILL.md",
+          ),
+        ),
+    ).length;
 
   assert.equal(model.metrics.codexSkills, skillCount);
-  assert.equal(model.metrics.claudeCommands, commandCount);
+  assert.equal(model.metrics.claudeSkills, claudeSkillCount);
   assert.equal(model.catalog.filter((entry) => entry.type === "skill").length, skillCount);
   assert.equal(model.meta.version, "1.0.7");
-  assert.equal(model.metrics.mcpTools, 5);
+  assert.equal(model.metrics.mcpTools, 10);
   assert.ok(model.updates.length > 0);
   assert.ok(model.architectureSources.length > 0);
 });

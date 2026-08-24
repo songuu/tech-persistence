@@ -15,6 +15,10 @@ It includes:
 
 The plugin-native entry is `$skill` or the `@` picker. The repository user installer also installs thin `/think`, `/plan`, `/work`, `/review`, `/compound`, and `/sprint` compatibility entries that route to the same Codex-native skills. Use `$agent-loop`, `$prototype`, `$caveman`, and other non-core workflows as skills.
 
+## Claude Code invocation
+
+The Claude plugin exposes the same workflows as native skills. Use the plugin namespace, for example `/tech-persistence:sprint`; do not rely on a flat `commands/` projection.
+
 ## Agent Loop v7
 
 For multi-agent work, run the neutral orchestrator instead of relying on either agent to understand the other:

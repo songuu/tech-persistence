@@ -6,7 +6,7 @@
     "name": "songyu_qiming"
   },
   "metadata": {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Single-plugin local marketplace exposing tech-persistence to Claude Code 2.x plugin system"
   },
   "plugins": [

@@ -31,13 +31,6 @@ const SCAN_TARGETS = Object.freeze([
     pattern: 'flat-md',
   },
   {
-    dir: path.join('plugins', 'tech-persistence', 'commands'),
-    kind: 'command',
-    surface: 'plugin-command-projection',
-    origin: 'projection',
-    pattern: 'flat-md',
-  },
-  {
     dir: path.join('user-level', 'skills'),
     kind: 'skill',
     surface: 'skill-source',

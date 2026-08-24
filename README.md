@@ -227,7 +227,7 @@ node scripts/validate-claude-install.js --project
 
 Codex 使用原生插件包 `plugins/tech-persistence/`，用户级安装会复制到 `~/plugins/tech-persistence` 并更新 `~/.agents/plugins/marketplace.json`。Codex 知识库默认写入 `~/.codex/homunculus`，可用 `TECH_PERSISTENCE_HOME` 临时覆盖，也可用 `~/.tech-persistence/config.json` 配置持续共享目录。
 
-Codex 插件的原生入口是 `$skill` 或 `@` picker。用户级安装器还为 `/think`、`/plan`、`/work`、`/review`、`/compound`、`/sprint` 安装薄兼容入口，它们路由到同一套 Codex-native skill；其余工作流使用 `$prototype`、`$agent-loop`、`$caveman` 等 skill。Claude Code 继续使用原有 `/command`。
+Codex 插件的原生入口是 `$skill` 或 `@` picker。用户级安装器还为 `/think`、`/plan`、`/work`、`/review`、`/compound`、`/sprint` 安装薄兼容入口，它们路由到同一套 Codex-native skill；其余工作流使用 `$prototype`、`$agent-loop`、`$caveman` 等 skill。Claude Code plugin 使用原生 skill 命名空间，例如 `/tech-persistence:sprint`；只有 Claude classic 用户级安装仍使用未命名空间的 `/sprint`。
 
 Windows:
 ```powershell

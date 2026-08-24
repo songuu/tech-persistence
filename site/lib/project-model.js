@@ -2,7 +2,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const PROJECT_MODEL_SCHEMA_VERSION = 1;
+const PROJECT_MODEL_SCHEMA_VERSION = 2;
 const DEFAULT_BRANCH = "main";
 const DEFAULT_UPDATES_LIMIT = 8;
 const CODEX_MANIFEST_PATH =
@@ -12,7 +12,7 @@ const CLAUDE_MANIFEST_PATH =
 const MCP_MANIFEST_PATH =
   "plugins/tech-persistence/.codex-plugin/.mcp.json";
 const CODEX_SKILLS_DIR = "plugins/tech-persistence/codex-skills";
-const CLAUDE_COMMANDS_DIR = "plugins/tech-persistence/commands";
+const CLAUDE_SKILLS_DIR = "plugins/tech-persistence/skills";
 const CLAUDE_HOOKS_PATH = "plugins/tech-persistence/hooks/hooks.json";
 const CODEX_HOOKS_PATH = "plugins/tech-persistence/codex-hooks/hooks.json";
 const ARCHITECTURE_DOCS_DIR = "docs/architecture";
@@ -407,15 +407,31 @@ function collectCatalog({ repoRoot, repository, sourceReader }) {
     const relative = relativePath.slice(`${CODEX_SKILLS_DIR}/`.length);
     return relative.split("/").length === 2;
   });
-  const commandFiles = listFiles(repoRoot, CLAUDE_COMMANDS_DIR, {
-    extension: ".md",
+  const claudeSkillFiles = listFiles(repoRoot, CLAUDE_SKILLS_DIR, {
+    recursive: true,
+    extension: "SKILL.md",
+  }).filter((relativePath) => {
+    const relative = relativePath.slice(`${CLAUDE_SKILLS_DIR}/`.length);
+    return relative.split("/").length === 2;
   });
-  const commands = new Map();
+  const claudeSkills = new Map();
 
-  for (const commandPath of commandFiles) {
-    const id = path.posix.basename(commandPath, ".md");
-    const document = parseMarkdownDocument(sourceReader.read(commandPath), id);
-    commands.set(id, { id, path: commandPath, document });
+  for (const skillPath of claudeSkillFiles) {
+    const directoryId = skillPath
+      .slice(`${CLAUDE_SKILLS_DIR}/`.length)
+      .split("/")[0];
+    const document = parseMarkdownDocument(
+      sourceReader.read(skillPath),
+      directoryId,
+    );
+    const id = String(document.meta.name || directoryId).trim();
+    if (!id) {
+      throw new Error(`Claude skill has no stable id: ${skillPath}`);
+    }
+    if (claudeSkills.has(id)) {
+      throw new Error(`Duplicate Claude skill capability id: ${id}`);
+    }
+    claudeSkills.set(id, { id, path: skillPath, document });
   }
 
   const catalog = [];
@@ -438,11 +454,13 @@ function collectCatalog({ repoRoot, repository, sourceReader }) {
     }
     seenIds.add(id);
 
-    const matchingCommand = commands.get(id);
-    const runtimes = matchingCommand
+    const matchingClaudeSkill = claudeSkills.get(id);
+    const runtimes = matchingClaudeSkill
       ? ["Codex", "Claude Code"]
       : ["Codex"];
-    const invocations = matchingCommand ? [`$${id}`, `/${id}`] : [`$${id}`];
+    const invocations = matchingClaudeSkill
+      ? [`$${id}`, `/tech-persistence:${id}`]
+      : [`$${id}`];
 
     catalog.push({
       id,
@@ -461,27 +479,27 @@ function collectCatalog({ repoRoot, repository, sourceReader }) {
     });
   }
 
-  for (const command of commands.values()) {
-    if (seenIds.has(command.id)) continue;
-    seenIds.add(command.id);
+  for (const skill of claudeSkills.values()) {
+    if (seenIds.has(skill.id)) continue;
+    seenIds.add(skill.id);
     catalog.push({
-      id: command.id,
-      name: titleFromSlug(command.id),
+      id: skill.id,
+      name: titleFromSlug(skill.id),
       description:
         String(
-          command.document.meta.description ||
-            command.document.summary ||
+          skill.document.meta.description ||
+            skill.document.summary ||
             "",
         ).trim() ||
-        `${titleFromSlug(command.id)} command for Tech Persistence.`,
-      type: "command",
-      category: categoryForCapability(command.id),
-      path: command.path,
-      sourceUrl: sourceBlobUrl(repository, command.path),
-      featured: FEATURED_CAPABILITIES.has(command.id),
-      profile: FEATURED_CAPABILITIES.has(command.id) ? "core" : "extended",
+        `${titleFromSlug(skill.id)} skill for Tech Persistence.`,
+      type: "skill",
+      category: categoryForCapability(skill.id),
+      path: skill.path,
+      sourceUrl: sourceTreeUrl(repository, skill.path),
+      featured: FEATURED_CAPABILITIES.has(skill.id),
+      profile: FEATURED_CAPABILITIES.has(skill.id) ? "core" : "extended",
       runtimes: ["Claude Code"],
-      invocations: [`/${command.id}`],
+      invocations: [`/tech-persistence:${skill.id}`],
     });
   }
 
@@ -495,7 +513,7 @@ function collectCatalog({ repoRoot, repository, sourceReader }) {
   return {
     catalog,
     skillCount: skillFiles.length,
-    commandCount: commandFiles.length,
+    claudeSkillCount: claudeSkillFiles.length,
   };
 }
 
@@ -697,7 +715,7 @@ function collectProjectModel(options = {}) {
     );
   }
 
-  const { catalog, skillCount, commandCount } = collectCatalog({
+  const { catalog, skillCount, claudeSkillCount } = collectCatalog({
     repoRoot,
     repository,
     sourceReader,
@@ -754,7 +772,7 @@ function collectProjectModel(options = {}) {
     },
     metrics: {
       codexSkills: skillCount,
-      claudeCommands: commandCount,
+      claudeSkills: claudeSkillCount,
       hooks: hookSurfaces.length,
       mcpTools: mcpProjection.tools.length,
       architectureDocs: architectureSources.length,
