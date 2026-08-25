@@ -57,12 +57,16 @@ Progressive disclosure 检查:
 
 > trace 入口是半自动（LLM 提取 + 人工确认），不靠 hook 自动检测——skill 成败是语义判断，无 exit code。
 
-4. （可选，B2）若该条 trace 值得固化为 eval 测试，人工确认后转结构化 case（最有价值的测试 = 真实失败）：
+4. （可选，B2）若该条 trace 值得固化为 eval 测试，先从 canonical self-learning journal
+   选择与触发输入摘要一致、仍 active 的原生用户 `BehaviorEvent`，再转结构化 case：
    ```bash
    node scripts/skill-eval-cases.js add --name <skill> \
-     --input "<触发输入>" --expectation "<期望>" --from-trace '<trace JSON 快照>'
+     --input "<触发输入>" --expectation "<期望>" \
+     --source-event-ref "<BehaviorEvent event_id>"
    ```
-   追加到 `skill-evals/{name}/cases/cases.jsonl`，供 `/skill eval` 消费。case 强制带 `provenance=trace` + trace 快照（护城河：不接受 skill 自产）。
+   追加到 `skill-evals/{name}/cases/cases.jsonl`，供 `/skill eval` 消费。case v2 只接受 journal
+   派生的 `source_event_ref`，并在 stage/read 时重验 project、actor、digest 与 tombstone；诊断 trace
+   仍是审阅材料，不能自行授权测试 case。
 
 ## 触发时机
 - 手动执行

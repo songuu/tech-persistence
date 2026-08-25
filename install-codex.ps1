@@ -721,7 +721,7 @@ function Install-Project {
     $projectCommandDir = Join-Path $ScriptDir "project-level\.claude\commands"
     $catalogPath = Join-Path $ScriptDir "project-level\profiles\catalog.json"
     if (-not (Test-Path -LiteralPath $catalogPath)) { throw "Missing project standards catalog: $catalogPath" }
-    $catalog = Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json
+    $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $projectCommandNames = @($catalog.shared.commands | ForEach-Object { [System.IO.Path]::GetFileName([string]$_) })
     $nativeCommandDir = Join-Path $ScriptDir "codex-native\commands"
     $nativeCommandNames = @(Get-ChildItem $nativeCommandDir -Filter "*.md" | ForEach-Object { $_.Name })

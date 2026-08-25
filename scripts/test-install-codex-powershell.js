@@ -49,6 +49,7 @@ function functionBody(name, nextName) {
 const userAssetsBody = functionBody('Install-CodexUserAssets', 'Build-Plugin');
 const pluginInstallBody = functionBody('Install-CodexPluginBundle', 'Update-Marketplace');
 const installUserBody = functionBody('Install-User', 'Install-Project');
+const installProjectBody = functionBody('Install-Project', 'Import-ClaudeHomunculus');
 assert.ok(!userAssetsBody.includes('Copy-CodexSkillDir'), 'user assets must not copy direct skills');
 assert.ok(!userAssetsBody.includes('continuous-learning'), 'user assets must not copy direct hooks');
 assert.ok(source.includes('$CodexAgentsInstallScript = Join-Path $ScriptDir "scripts\\install-codex-agents.js"'), 'PowerShell must use the shared safe AGENTS installer');
@@ -66,6 +67,10 @@ assert.ok(source.includes('--fix --install-canonical'), 'explicit user installer
 assert.ok(source.includes('--plugin-owner-status --json'), 'project installer must probe plugin ownership');
 assert.ok(source.includes('Join-Path $PluginSource "codex-skills"'), 'project fallback must use Codex-native skills');
 assert.ok(source.includes('Join-Path $ScriptDir "codex-native\\commands"'), 'direct commands must use Codex-native overrides');
+assert.ok(
+  installProjectBody.includes('$catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFrom-Json'),
+  'project catalog must be decoded explicitly as UTF-8 under Windows PowerShell 5.1'
+);
 assert.ok(source.includes('scripts\\install-managed-project-fallback.js'), 'project fallback must use the shared Node helper');
 assert.ok(source.includes('--user-codex-home $CodexHome'), 'project fallback must reconcile user-level skill exclusions');
 assert.ok(!source.includes('$fallbackScript = @\''), 'PowerShell must not retain a second embedded fallback implementation');
@@ -226,6 +231,37 @@ assert.strictEqual(
   `install-codex.ps1 must parse under Windows PowerShell 5.1.\n${output}`
 );
 assert.ok(!/ParserError|Unexpected token|Missing closing/i.test(output), output);
+
+const catalogPath = path
+  .join(repoRoot, 'project-level', 'profiles', 'catalog.json')
+  .replaceAll("'", "''");
+const catalogResult = spawnSync(
+  'powershell.exe',
+  [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    [
+      `$catalog = Get-Content -LiteralPath '${catalogPath}' -Raw -Encoding UTF8 | ConvertFrom-Json`,
+      'if ($catalog.schemaVersion -ne 1) { throw "unexpected catalog schema" }',
+      'if (@($catalog.profiles.PSObject.Properties).Count -ne 10) { throw "unexpected profile count" }',
+      'if ([int][char]$catalog.profiles.base.description[0] -ne 0x6240) { throw "catalog text was not decoded as UTF-8" }',
+    ].join('; '),
+  ],
+  {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }
+);
+const catalogOutput = `${catalogResult.stdout || ''}${catalogResult.stderr || ''}`;
+assert.ifError(catalogResult.error);
+assert.strictEqual(
+  catalogResult.status,
+  0,
+  `project standards catalog must decode as UTF-8 under Windows PowerShell 5.1.\n${catalogOutput}`
+);
 
 const textAssetPath = path.join(repoRoot, 'scripts', 'install-codex-text-asset.js').replaceAll("'", "''");
 const projectionHarness = [

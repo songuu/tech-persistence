@@ -9,6 +9,11 @@ const {
   marketplaceExpectationFromRaw,
   publishTextCompareAndSwap,
 } = require('./update-codex-marketplace');
+const {
+  MANAGED_END: PROJECT_STANDARDS_END,
+  MANAGED_START: PROJECT_STANDARDS_START,
+  managedEntryBlock,
+} = require('./project-standards');
 
 const MAX_AGENTS_BYTES = 256 * 1024;
 // Exact normalized hashes of historical Tech Persistence-generated Codex
@@ -125,8 +130,46 @@ function firstNormalizedLine(raw) {
   return normalizeComparableText(raw.toString('utf8')).split('\n', 1)[0];
 }
 
+function projectTemplateWithStandards(templateRaw) {
+  const template = templateRaw.toString('utf8').trimEnd();
+  return Buffer.from(`${template}\n\n${managedEntryBlock('codex')}\n`, 'utf8');
+}
+
+function parseProjectStandardsOverlay(raw, templateRaw) {
+  const text = raw.toString('utf8');
+  const startCount = text.split(PROJECT_STANDARDS_START).length - 1;
+  const endCount = text.split(PROJECT_STANDARDS_END).length - 1;
+  if (startCount === 0 && endCount === 0) return null;
+  if (startCount !== 1 || endCount !== 1) return { valid: false };
+  const start = text.indexOf(PROJECT_STANDARDS_START);
+  const endStart = text.indexOf(PROJECT_STANDARDS_END, start);
+  if (endStart < start) return { valid: false };
+  const end = endStart + PROJECT_STANDARDS_END.length;
+  const prefix = text.slice(0, start).trimEnd();
+  return {
+    valid: true,
+    block: text.slice(start, end),
+    currentTemplate: prefix === templateRaw.toString('utf8').trimEnd(),
+    suffix: text.slice(start),
+  };
+}
+
+function projectTemplateWithPreservedOverlay(templateRaw, existingRaw) {
+  const overlay = parseProjectStandardsOverlay(existingRaw, templateRaw);
+  if (!overlay || !overlay.valid) return templateRaw;
+  const template = templateRaw.toString('utf8').trimEnd();
+  return Buffer.from(`${template}\n\n${overlay.suffix}`, 'utf8');
+}
+
 function classifyExistingAgents({ raw, templateRaw, legacyRaw, kind }) {
   if (raw.equals(templateRaw)) return 'managed-current';
+  if (kind === 'project') {
+    const overlay = parseProjectStandardsOverlay(raw, templateRaw);
+    if (overlay && !overlay.valid) return 'custom';
+    if (overlay && overlay.currentTemplate) {
+      return raw.equals(projectTemplateWithStandards(templateRaw)) ? 'managed-current' : 'custom';
+    }
+  }
   const marker = MANAGED_MARKERS[kind];
   if (firstNormalizedLine(raw) === marker) return 'managed-marker';
   if (LEGACY_GENERATED_HASHES[kind].includes(normalizedSha256(raw.toString('utf8')))) {
@@ -226,13 +269,20 @@ function installCodexAgents(options = {}) {
     };
   }
 
+  const installedRaw = kind === 'project'
+    ? projectTemplateWithPreservedOverlay(template.raw, existingRaw)
+    : template.raw;
+  if (installedRaw.length > MAX_AGENTS_BYTES) {
+    throw new Error(`migrated Codex AGENTS exceeds ${MAX_AGENTS_BYTES} bytes: ${safety.target}`);
+  }
+
   const expectation = marketplaceExpectationFromRaw(
     existingRaw,
     process.platform === 'win32' ? null : targetStat.mode & 0o777
   );
   const published = publishTextCompareAndSwap(
     safety.target,
-    template.raw,
+    installedRaw,
     expectation,
     {
       retainPrevious: true,
@@ -242,7 +292,7 @@ function installCodexAgents(options = {}) {
   );
   assertSafeTarget(safety.root, safety.target);
   const installed = fs.readFileSync(safety.target);
-  if (!installed.equals(template.raw)) {
+  if (!installed.equals(installedRaw)) {
     throw new Error(`migrated Codex AGENTS bytes failed verification: ${safety.target}`);
   }
   if (!published.previousPath || !pathExists(published.previousPath)) {

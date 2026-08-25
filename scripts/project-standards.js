@@ -1754,6 +1754,7 @@ module.exports = {
   installProjectStandards,
   loadProjectStandardsCatalog,
   main,
+  managedEntryBlock,
   normalizeExplicitProfiles,
   parseArgs,
   planProjectStandards,

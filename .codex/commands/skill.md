@@ -4,8 +4,37 @@ description: "Skill 进化统一入口：diagnose/eval/improve/publish/auto/list
 
 # /skill — Skill 进化统一入口
 
-> **本命令为 LLM 协议入口，无 deterministic backing 代码。**
-> Stage A hook（`scripts/lib/skill-signals.js`）仅负责派生 `skill-signals/{name}.jsonl` 数据文件；本文档的 list / diagnose / eval / improve / publish / auto 子动作均由 LLM 读取信号文件后按本文档规范产出结果。若你需要 deterministic 数据查询，调 `node -e "console.log(require('scripts/lib/skill-signals').summarizeSkillSignals(...))"`。
+> 本命令仍由 LLM 编排 diagnose/improve/eval/publish，但 candidate lifecycle 必须调用 canonical
+> `scripts/self-learning.js`；LLM 文本、内存中的 proposal 或标量 pass rate 都不是发布授权。
+> Stage A hook（`scripts/lib/skill-signals.js`）只派生使用信号，不能创建 approval 或 promotion。
+
+## Self-learning candidate gate
+
+- `/skill improve` 必须 `propose` `LearningCandidate` 并返回 `candidate_id`、`candidate_hash`；target 必须是
+  exact `{key,source_path,source_hash}`：key 仅为 `skill:<name>`/`command:<name>`，source_path 仅允许
+  `codex-native/skills/<name>/SKILL.md`、`user-level/skills/<name>/SKILL.md` 或对应
+  `user-level/commands/<name>.md`，source_hash 绑定提案所基于的当前源文件。
+- `/skill eval` 必须由独立 evaluator `evaluate`，绑定 candidate/skill/baseline/case-set/evaluator hash、
+  `case_results_hash/case_count/passed_count/pass_rate`，并返回 `evaluation_id`、`evaluation_hash`；通过后
+  也只能进入 `shadow`，其中 pass rate 必须由 counts 派生。
+- `approve` 必须引用绑定当前 candidate hash 的显式 `user.approval` 和独立
+  `approval_receipt_id`、`approval_receipt_hash`；`promote` 只能由 publish gate 调用。
+- 自动化最多执行 diagnose、`propose`、`evaluate`、`shadow`；不得执行 `approve`、`promote`、publish，
+  不得写 skill、command、rules、runtime projection 或 `absorbed_into`/`evolved_into` marker。
+- `/skill publish` 即使已有有效 approval receipt，仍保留当前动作的人工 `go` gate。
+- `/skill publish` 的机器门禁优先通过 MCP `tp_learning_govern(operation="publish-guard")` 读取
+  authoritative journal；不要假设业务仓库 cwd 下存在 `scripts/skill-eval-results.js`。CLI 仅作为
+  Tech Persistence repo/admin 入口。
+- eval 前调用 MCP `tp_learning_govern(operation="artifact-stage")`，只传 name、candidate_id 和 bounded
+  content，由固定 authority 以原子 no-clobber/CAS 写入 canonical
+  `skill-evals/<name>/candidates/<candidate_id>/artifact.md`；evaluation 的 `subject_artifact_hash` 与
+  publish guard 对 baseline/current 的实际文件读回必须一致。promote 后的 v3 timeline 必须调用
+  `operation="result-record"` 从 authority 派生，caller 只能提供 name、candidate_id 与展示 version。
+- case 结果不能通过 MCP 自报或 stage。独立 evaluator 在同一可信本地进程调用
+  `stageEvaluationArtifactAuthority(...,{baseDir,projectId,cwd})`，显式 project identity 并 exact 覆盖
+  不可变 `cases.jsonl` 的全部唯一 case id；每次 stage/read 均重验 active journal refs。MCP
+  `evaluate` 只提交 `evaluation_artifact_ref:{name}`，服务从固定路径读回并签发当前进程 brand，所有
+  case hash/count/pass rate 均由服务端派生。
 
 替代分散的 `/skill-diagnose` `/skill-eval` `/skill-improve` `/skill-publish` 4 命令。**4 个旧命令保留作 alias**，行为完全一致。
 
@@ -17,14 +46,15 @@ description: "Skill 进化统一入口：diagnose/eval/improve/publish/auto/list
 /skill eval <name>         ← 等价 /skill-eval
 /skill improve <name>      ← 等价 /skill-improve
 /skill publish <name>      ← 等价 /skill-publish
-/skill auto <name>         ← 一键跑闭环 diagnose → eval → improve → publish
+/skill auto <name>         ← 自动跑 diagnose → improve/propose → eval → shadow（不发布）
 ```
 
 Codex 同义：`$skill <action> <name>`
 
 ## 数据源
 
-所有子动作读 `~/.codex/homunculus/skill-signals/{name}.jsonl`（Stage A hook 自动派生）。
+diagnose 读 `~/.codex/homunculus/skill-signals/{name}.jsonl`；improve/eval/publish 还必须读取 canonical
+self-learning candidate/evaluation/approval receipt。skill-signals 仅证明 usage，不能证明质量或授权。
 
 **数据局限**（必读）：
 - 信号源**仅覆盖 Codex 端 `tool:"Skill"` 调用**。Codex 端 SlashCommand 不进 PreToolUse hook，结构性无法捕获
@@ -60,42 +90,55 @@ Codex 同义：`$skill <action> <name>`
 
 ### `/skill eval <name>`
 
-用预定义测试集验证 skill 质量。测试集除 LLM 自动生成外，可从真实失败 trace 半自动沉淀（`node scripts/skill-eval-cases.js add ...`，护城河强化：case 来自真实使用而非 skill 自产）。跑完**必须**记录结构化结果（`node scripts/skill-eval-results.js record ...`）供 publish 护栏读取。详细规范见 [skill-eval.md](./skill-eval.md)。
+用独立、不可变测试集验证指定 candidate。promotion case 只能引用当前项目 canonical journal 中仍 active 的
+trusted native user `UserPromptSubmit` BehaviorEvent；caller trace snapshot 和同源自动 case 只能 exploratory。
+evaluation 必须绑定 exact target、`candidate_id`、`candidate_hash`、`skill_hash`、
+`baseline_hash`、server-derived `case_set_hash`、`evaluator_id`，并产出 `evaluation_id`、
+`evaluation_hash`。详细规范见
+[skill-eval.md](./skill-eval.md)。
 
 ### `/skill improve <name>`
 
-基于 diagnose 报告 + 相关本能 + 失败 trace（`skill-traces/`）生成结构化修改提案；对每条 trace 做根因反思（GEPA 内核）。详细规范见 [skill-improve.md](./skill-improve.md)。
+基于 diagnose 报告 + 相关本能 + 失败 trace（`skill-traces/`）生成结构化修改 proposal；对每条 trace
+做根因反思（GEPA 内核），随后通过 canonical writer `propose`，不修改 skill。详细规范见
+[skill-improve.md](./skill-improve.md)。
 
 ### `/skill publish <name>`
 
-发布已 eval 验证的提案为新版本，含 backup + changelog + rollback。**发布前强制跑确定性护栏** `node scripts/skill-eval-results.js guard <name>`，新版通过率退化时 `exit 2` 拒绝（[[ADR-013]]）。详细规范见 [skill-publish.md](./skill-publish.md)。
+发布已验证 candidate，含 backup、changelog、readback、rollback。发布前必须严格验证 candidate、
+evaluation 和显式 user approval receipt 的 identity/hash，再跑确定性回归护栏；缺失、损坏、陈旧或
+不匹配、tombstoned 或当前状态非 promoted 全部 fail closed。最后仍需人工 `go`。详细规范见
+[skill-publish.md](./skill-publish.md)。
 
 ### `/skill auto <name>`
 
-**新增**。一键跑完整闭环：
+一键跑到 shadow 为止；`/skill auto` 不得调用 publish 或 `promote`：
 
 ```text
 Phase 1/4: diagnose <name>
   → 信号 0 → 中止，输出 "需要 ≥ 5 次 Codex Skill 调用才能诊断"
   → 信号充足 → 输出诊断报告，进 Phase 2
 
-Phase 2/4: eval <name>
-  → 测试集不存在 → 提示是否自动生成（y/n）
-  → 测试集存在 → 跑 v_current 通过率，进 Phase 3
+Phase 2/4: improve/propose <name>
+  → 基于 diagnose 生成 proposal preview
+  → 写入 canonical candidate，读回 candidate_id + candidate_hash
 
-Phase 3/4: improve <name>
-  → 基于 diagnose 输出生成 N 个提案
-  → 输出 diff 预览，等待人工 'go' 确认
+Phase 3/4: eval <name> --candidate <candidate_id>
+  → 测试集/基线不存在或 identity 不完整 → needs-review 并中止
+  → 独立 eval，读回 evaluation_id + evaluation_hash
 
-Phase 4/4: publish <name>
-  → 先跑护栏 node scripts/skill-eval-results.js guard <name>
-  → exit 2（新版通过率退化）→ 中止发布；exit 0 → 继续
-  → 备份 + changelog + 标记 absorbed_into
+Phase 4/4: shadow <candidate_id>
+  → eval pass 且 hash 一致 → shadow
+  → 输出建议与缺口；不 approve、不 promote、不 publish、不写 marker
 ```
 
-**强制人工 gate**（即使会话启用 `--auto` 也保留）：
-- Phase 1 → 2：信号不足时不进
-- Phase 3 → 4：publish 改 skill 源文件，必须用户 'go' 确认
+**强制 gate**（即使会话启用 `--auto` 也保留）：
+
+- Phase 1 → 2：信号不足时不进；调用次数只表示 usage。
+- Phase 2 → 3：必须有读回成功的 candidate identity/hash。
+- Phase 3 → 4：必须有独立 evaluation identity/hash，任一 malformed/stale 立即中止。
+- auto 在 shadow 结束，不能询问或推断 approval。后续 `/skill publish` 需显式 `user.approval` receipt，
+  并在实际改源文件前再次等待人工 `go`。
 
 ## 子动作 vs Stage A 关系
 
@@ -104,9 +147,9 @@ Phase 4/4: publish <name>
 | list | skill-signals/*.jsonl | ✅ 立即可用（hook 已派生）|
 | diagnose | 同上 + 历史 sessions | ✅ 立即可用（信号 ≥ 5 触发） |
 | eval | skill-evals/{name}/ 测试集 | ⚠ 需先创建测试集（auto 模式提示创建） |
-| improve | diagnose + 待吸收本能 | ✅ 立即可用 |
-| publish | improve 提案 + eval 通过 | ⚠ 需 eval 数据 |
-| auto | 上述全部 | ✅ 各阶段失败时给明确提示 |
+| improve | diagnose + evidence/trace | ✅ 只生成 candidate |
+| publish | candidate + eval + approval receipt + 人工 go | ⚠ 严格 gate |
+| auto | diagnose → candidate → eval → shadow | ✅ 不发布 |
 
 ## /compound 集成（自动提示）
 

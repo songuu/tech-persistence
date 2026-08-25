@@ -15,6 +15,7 @@ const {
   legacyClaudeToCodex,
   normalizedSha256,
 } = require('./install-codex-agents');
+const { managedEntryBlock } = require('./project-standards');
 
 function write(file, content) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -162,6 +163,50 @@ try {
     legacySource: legacy,
   });
   assert.strictEqual(projectCreated.status, 'created');
+
+  const projectWithStandards = `${fs.readFileSync(projectTemplate, 'utf8').trimEnd()}\n\n${managedEntryBlock('codex')}\n`;
+  fs.writeFileSync(projectTarget, projectWithStandards);
+  const projectOverlayUnchanged = installCodexAgents({
+    kind: 'project',
+    allowedRoot: projectRoot,
+    target: projectTarget,
+    template: projectTemplate,
+    legacySource: legacy,
+  });
+  assert.strictEqual(projectOverlayUnchanged.status, 'unchanged');
+  assert.strictEqual(projectOverlayUnchanged.backupPath, null);
+  assert.strictEqual(fs.readFileSync(projectTarget, 'utf8'), projectWithStandards);
+
+  const upgradedProjectTemplate = path.join(root, 'native-project-v2.md');
+  const upgradedProjectTemplateText = `${MANAGED_MARKERS.project}\n# Project v2\n`;
+  write(upgradedProjectTemplate, upgradedProjectTemplateText);
+  const upgradedProject = installCodexAgents({
+    kind: 'project',
+    allowedRoot: projectRoot,
+    target: projectTarget,
+    template: upgradedProjectTemplate,
+    legacySource: legacy,
+  });
+  const upgradedProjectWithStandards = `${upgradedProjectTemplateText.trimEnd()}\n\n${managedEntryBlock('codex')}\n`;
+  assert.strictEqual(upgradedProject.status, 'updated-managed');
+  assert.strictEqual(fs.readFileSync(upgradedProject.backupPath, 'utf8'), projectWithStandards);
+  assert.strictEqual(fs.readFileSync(projectTarget, 'utf8'), upgradedProjectWithStandards);
+
+  const driftedProjectStandards = upgradedProjectWithStandards.replace(
+    'Treat detected profiles as evidence',
+    'Treat detected profiles as guesses'
+  );
+  fs.writeFileSync(projectTarget, driftedProjectStandards);
+  const driftedProjectPreserved = installCodexAgents({
+    kind: 'project',
+    allowedRoot: projectRoot,
+    target: projectTarget,
+    template: upgradedProjectTemplate,
+    legacySource: legacy,
+  });
+  assert.strictEqual(driftedProjectPreserved.status, 'preserved-custom');
+  assert.strictEqual(driftedProjectPreserved.backupPath, null);
+  assert.strictEqual(fs.readFileSync(projectTarget, 'utf8'), driftedProjectStandards);
 
   if (process.platform !== 'win32') {
     const outside = path.join(root, 'outside');
