@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "shared": {
+    "commands": [
+      ".claude/commands/debug-journal.md",
+      ".claude/commands/learn.md",
+      ".claude/commands/project-audit.md",
+      ".claude/commands/retrospective.md"
+    ],
+    "skills": [
+      ".claude/skills/project-standards"
+    ]
+  },
+  "retiredAssets": [],
+  "legacyMarkerHashes": {
+    "entrypoint": {
+      "claude": [],
+      "codex": []
+    },
+    "attributes": []
+  },
+  "legacyHashes": {
+    "commands/debug-journal.md": {
+      "claude": [
+        "b31a75b8aa14221509e5dfd78c66a49d5cf280f50b2dfe2e3463f46c3c56dc4f"
+      ],
+      "codex": [
+        "5e6272d0d87729e391f66e12ffe5fa782c61b60afcf7511851d504994d7fe23e"
+      ]
+    },
+    "commands/learn.md": {
+      "claude": [
+        "d7209b65d749468e5e137518207e66c72567eca782648f2e80904e2836a8d563"
+      ],
+      "codex": [
+        "d020beecf743e135ef717d7cc65bce2f8f7505b64ced32993446056f92a077e5"
+      ]
+    },
+    "commands/project-audit.md": {
+      "claude": [
+        "bf9f5da029043964c74aaa2beee417b5b97edab692f121095218a61ad6259226",
+        "fd28ab47dc1ec3ea8c56c4913ce6bfdafb318308ac62330465356a8e6a6caf37",
+        "9a79420fb0e8b3201af773bc7fb8722e62f929e4c375375001dcbb04dad953ce"
+      ],
+      "codex": [
+        "59e66e9e71aff3cbe6a69a29024dcd8f981d97aa2d955dce292627f61570fcee",
+        "fc9c3537f0bc622b42d327b95bddc3a3d1219d7b757b0f6ded777ecdf35b93e4",
+        "99814b5c57c69e9a1c6cc74ccf39705ed922af5bb07ea56af13e185b9bf689bc"
+      ]
+    },
+    "commands/retrospective.md": {
+      "claude": [
+        "2a87ed1a842b8b34ba83116159f3f74334cbd36c403f6796d486a08dfad60164"
+      ],
+      "codex": [
+        "9574b18b9709616a6fb3898fc2a4f56c3626167ba065fac12cb944c6722b11ea"
+      ]
+    },
+    "skills/project-standards/SKILL.md": {
+      "claude": [
+        "636718b740941bdc2a83b7abe71a5619b356b0e51ecceb9e401e26ecf6a75d19",
+        "556ad8045bfc01a9ac3b258a6b110607a3c1b2e180b19228e2e3fbdb02fb2891",
+        "4a473ca4bf04c4b570431992c8d291d3a9ac6c339ad5a238ffbb938a032f2378",
+        "4000d7cb33e23ec8059eb0d39c6fe80d33f6f34ea0436a9cc6b1c55c51973596"
+      ],
+      "codex": [
+        "fcba7cd756fb14e7744f460c355b8048d490097f3309efc4aa5788b677bdc1b0",
+        "386a3ef2190c6aea45cb76a6bb4f127d69f46fb47b0385fd828b3734d490440c",
+        "c9e47bf6e1bb81905d7d7239604fd5d529cc07812e2b0101f7e850d9e0d2cbed",
+        "88ae61e54e6b3e8e1788c00d3a2cf2a2ec3982201bfef700ab64b19348b9394c"
+      ]
+    }
+  },
+  "profiles": {
+    "base": {
+      "description": "所有项目共享的事实核验、边界控制与风险分级验证规则。",
+      "scopes": [
+        "**/*"
+      ],
+      "rules": [
+        "profiles/base/rules/architecture-base.md"
+      ]
+    },
+    "frontend": {
+      "description": "面向 Web 前端及基于 Web 技术外壳的组件、样式、状态、接口与交付边界。",
+      "scopes": [
+        "**/*.html",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.jsx",
+        "**/*.tsx",
+        "**/*.vue",
+        "**/*.svelte",
+        "**/*.astro",
+        "**/components/**/*",
+        "**/styles/**/*"
+      ],
+      "rules": [
+        "profiles/frontend/rules/architecture-frontend.md"
+      ]
+    },
+    "backend": {
+      "description": "面向服务端请求处理、领域逻辑、持久化、认证与可观测性的分层规则。",
+      "scopes": [
+        "**/api/**/*",
+        "**/server/**/*",
+        "**/controllers/**/*",
+        "**/routes/**/*",
+        "**/services/**/*",
+        "**/repositories/**/*",
+        "**/migrations/**/*",
+        "**/*.sql"
+      ],
+      "rules": [
+        "profiles/backend/rules/architecture-backend.md"
+      ]
+    },
+    "agent": {
+      "description": "面向提示词、工具、技能、记忆、评测、安全与运行时的 Agent 工程规则。",
+      "scopes": [
+        "**/agents/**/*",
+        "**/prompts/**/*",
+        "**/tools/**/*",
+        "**/skills/**/*",
+        "**/memory/**/*",
+        "**/evals/**/*",
+        "**/runtime/**/*"
+      ],
+      "rules": [
+        "profiles/agent/rules/architecture-agent.md"
+      ]
+    },
+    "data": {
+      "description": "面向数据契约、转换、质量、血缘、回填与隐私的数据工程规则。",
+      "scopes": [
+        "**/pipelines/**/*",
+        "**/dags/**/*",
+        "**/models/**/*",
+        "**/warehouse/**/*",
+        "**/notebooks/**/*",
+        "**/*.sql"
+      ],
+      "rules": [
+        "profiles/data/rules/architecture-data.md"
+      ]
+    },
+    "infrastructure": {
+      "description": "面向基础设施即代码、部署、密钥、权限、健康检查与回滚的规则。",
+      "scopes": [
+        "**/Dockerfile*",
+        "**/docker-compose*.yml",
+        "**/docker-compose*.yaml",
+        "**/compose*.yml",
+        "**/compose*.yaml",
+        "**/*.tf",
+        "**/deploy/**/*",
+        "**/infra/**/*",
+        "**/infrastructure/**/*",
+        "**/k8s/**/*",
+        "**/kubernetes/**/*",
+        "**/terraform/**/*",
+        "**/helm/**/*",
+        ".github/workflows/**/*"
+      ],
+      "rules": [
+        "profiles/infrastructure/rules/architecture-infrastructure.md"
+      ]
+    },
+    "library": {
+      "description": "面向可复用库的公共 API、兼容性、依赖、打包与发布规则。",
+      "scopes": [
+        "package.json",
+        "pyproject.toml",
+        "Cargo.toml",
+        "go.mod",
+        "go.sum",
+        "src/**/*",
+        "lib/**/*",
+        "include/**/*",
+        "packages/**/*",
+        "tests/**/*"
+      ],
+      "rules": [
+        "profiles/library/rules/architecture-library.md"
+      ]
+    },
+    "monorepo": {
+      "description": "面向多包仓库的所有权、依赖方向、任务图与跨包变更边界。",
+      "scopes": [
+        "package.json",
+        "pnpm-workspace.yaml",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "package-lock.json",
+        "turbo.json",
+        "nx.json",
+        "lerna.json",
+        "Cargo.toml",
+        "go.work",
+        "pyproject.toml",
+        "apps/**/*",
+        "packages/**/*",
+        "services/**/*",
+        "libs/**/*",
+        "tools/**/*"
+      ],
+      "rules": [
+        "profiles/monorepo/rules/architecture-monorepo.md"
+      ]
+    },
+    "fullstack": {
+      "description": "面向前后端一体项目的跨信任边界、共享契约与端到端交付规则。",
+      "scopes": [
+        "**/*"
+      ],
+      "rules": [
+        "profiles/fullstack/rules/architecture-fullstack.md"
+      ]
+    },
+    "unknown": {
+      "description": "架构证据不足时使用的 discovery-first 规则，不提前假定技术栈。",
+      "scopes": [
+        "**/*"
+      ],
+      "rules": [
+        "profiles/unknown/rules/architecture-unknown.md"
+      ]
+    }
+  }
+}

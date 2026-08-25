@@ -360,8 +360,18 @@ copy_codex_text() {
   fi
 }
 copy_codex_commands() {
-  local source_dir="$1" target_dir="$2" exclude_native="${3:-false}" count=0
+  local source_dir="$1" target_dir="$2" exclude_native="${3:-false}" exclude_project="${4:-false}" count=0
+  local project_command_names=""
   [[ -d "$source_dir" ]] || { echo 0; return; }
+  if [[ "$exclude_project" == true ]]; then
+    local catalog_path="${SCRIPT_DIR}/project-level/profiles/catalog.json"
+    [[ -f "$catalog_path" ]] || { echo "[FAIL] Missing project standards catalog: ${catalog_path}" >&2; return 1; }
+    project_command_names="$(node -e '
+      const path = require("path");
+      const catalog = require(path.resolve(process.argv[1]));
+      for (const source of (catalog.shared && catalog.shared.commands) || []) console.log(path.basename(source));
+    ' "$catalog_path")" || return $?
+  fi
   mkdir -p "$target_dir" || return $?
   for file in "$source_dir"/*.md; do
     [[ -f "$file" ]] || continue
@@ -369,6 +379,11 @@ copy_codex_commands() {
       case "$(basename "$file")" in
         compound.md|plan.md|review.md|sprint.md|think.md|work.md) continue ;;
       esac
+    fi
+    if [[ "$exclude_project" == true ]]; then
+      local file_name
+      file_name="$(basename "$file")"
+      if printf '%s\n' "$project_command_names" | grep -Fqx -- "$file_name"; then continue; fi
     fi
     copy_codex_text "$file" "${target_dir}/$(basename "$file")" "backup" || return $?
     count=$((count + 1))
@@ -797,16 +812,20 @@ install_project() {
     "${SCRIPT_DIR}/codex-native/agents/project.md" \
     "${SCRIPT_DIR}/project-level/CLAUDE.md" || return $?
 
-  local user_commands project_commands project_rules
-  user_commands="$(copy_codex_commands "${SCRIPT_DIR}/user-level/commands" "${codex_dir}/commands" true)"
-  project_commands="$(copy_codex_commands "${SCRIPT_DIR}/project-level/.claude/commands" "${codex_dir}/commands")"
+  local user_commands project_rules
+  user_commands="$(copy_codex_commands "${SCRIPT_DIR}/user-level/commands" "${codex_dir}/commands" true true)"
   local native_commands
   native_commands="$(copy_codex_commands "${SCRIPT_DIR}/codex-native/commands" "${codex_dir}/commands")"
-  log_ok "commands copied (${user_commands} user, ${project_commands} project, ${native_commands} native)"
+  log_ok "commands copied (${user_commands} user, ${native_commands} native; project commands deferred to standards resolver)"
 
   copy_codex_rules "${SCRIPT_DIR}/user-level/rules" "${codex_dir}/rules" >/dev/null
   project_rules="$(copy_codex_rules "${SCRIPT_DIR}/project-level/.claude/rules" "${codex_dir}/rules")"
   log_ok "rules copied (${project_rules} project)"
+
+  local standards_script="${SCRIPT_DIR}/scripts/project-standards.js"
+  [[ -f "$standards_script" ]] || { echo "[FAIL] Missing project standards installer: $standards_script" >&2; return 1; }
+  node "$standards_script" --project-root "$project_root" --runtime codex --profiles auto || return $?
+  log_ok "architecture-aware project standards"
 
   if command -v codex >/dev/null 2>&1; then
     local owner_output owner_status

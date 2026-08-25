@@ -2,7 +2,13 @@
 description: "全面回顾：经验审查 + 本能审计 + Skill 诊断 + 观察归档 + 裁剪"
 ---
 
-# /retrospective — 阶段性回顾（含 Skill 诊断）
+# retrospective — 阶段性只读回顾
+
+## Guardrails
+
+- 默认只读；不自动归档、裁剪、改写 rules、发布 Skill 或批准 LearningCandidate。
+- 区分当前事实、历史证据、推断和未知项；没有消费者与验证证据的文件不标记为可删除。
+- 所有写入或裁剪行动项先输出影响范围、恢复方式和人工确认点。
 
 ## 执行流程
 
@@ -12,8 +18,8 @@ description: "全面回顾：经验审查 + 本能审计 + Skill 诊断 + 观察
 ### 2. 本能层审计
 置信度分布、衰减预警、可聚类的本能组。
 
-### 3. Skill 健康诊断（自动附带）
-对所有有信号数据的 skill 执行 `/skill-diagnose`，输出摘要：
+### 3. Skill 健康诊断
+只对有信号数据的 skill 做只读诊断并输出摘要：
 ```
 Skill 健康概览:
   /prototype: 🟡 建议迭代 (3 个步骤跳过率 > 30%)
@@ -22,11 +28,11 @@ Skill 健康概览:
   /plan: 🟡 2 个新本能待吸收
 ```
 
-### 4. 观察层归档
-observations.jsonl > 5MB → 自动归档。
+### 4. 观察层归档建议
+observations.jsonl > 5MB 时生成归档建议、目标与恢复方式，不自动移动。
 
 ### 5. 跨层一致性
 rules 与高置信本能是否一致？进化产物是否与 rules 重复？
 
 ### 6. 生成行动项
-按 HIGH/MEDIUM/LOW 列出，等待确认后执行。
+按 HIGH/MEDIUM/LOW 列出，等待确认后再执行任何写入。

@@ -7,6 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { hashPath, renderManagedSkillExclusions } = require('./codex-runtime-doctor');
+const { MANAGED_END, MANAGED_START } = require('./project-standards');
 const {
   findDirectCollisions,
   hasActiveManagedFallback,
@@ -14,6 +15,7 @@ const {
   ownerProbe,
   stripManagedSolutionIndex,
   validateDirectFallback,
+  validateCodexText,
   validateNativeAgents,
   validateNativeCommands,
   validateOwnerIntegrity,
@@ -76,6 +78,36 @@ try {
     assert.strictEqual(validateNativeCommands(commandRoot, 'fixture', () => {}, () => {}), false);
   });
 
+  test('managed audit commands may name the sibling runtime without weakening other command checks', () => {
+    const commandRoot = path.join(tempRoot, 'cross-runtime-commands');
+    fs.mkdirSync(commandRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(commandRoot, 'project-audit.md'),
+      'Audit `.claude/project-standards.json` through `CLAUDE.md`.\n'
+    );
+    fs.writeFileSync(
+      path.join(commandRoot, 'ordinary.md'),
+      'Do not carry a stale `.claude/` implementation into Codex.\n'
+    );
+
+    const failures = [];
+    validateCodexText(commandRoot, 'fixture', {
+      allowCrossRuntimeFiles: ['project-audit.md'],
+      onFailure: (message) => failures.push(message),
+    });
+    assert.strictEqual(failures.length, 1);
+    assert.ok(failures[0].includes('ordinary.md'));
+
+    fs.appendFileSync(path.join(commandRoot, 'project-audit.md'), '锛\n');
+    failures.length = 0;
+    validateCodexText(commandRoot, 'fixture', {
+      allowCrossRuntimeFiles: ['project-audit.md'],
+      onFailure: (message) => failures.push(message),
+    });
+    assert.strictEqual(failures.length, 2);
+    assert.ok(failures.some((message) => message.includes('project-audit.md')));
+  });
+
   test('owner probe distinguishes zero, one, and duplicate plugin owners', () => {
     const fixture = path.join(tempRoot, 'plugins.json');
     writeJson(fixture, []);
@@ -134,6 +166,16 @@ try {
     assert.strictEqual(validateNativeAgents(target, 'user', 'fixture', () => {}, () => {}), true);
     fs.appendFileSync(target, 'user edit\n');
     assert.strictEqual(validateNativeAgents(target, 'user', 'fixture', () => {}, () => {}), false);
+  });
+
+  test('project AGENTS validator permits only the generated standards routing block as an overlay', () => {
+    const target = path.join(tempRoot, 'project-AGENTS.md');
+    const template = path.join(__dirname, '..', 'codex-native', 'agents', 'project.md');
+    const lean = fs.readFileSync(template, 'utf8');
+    fs.writeFileSync(target, `${lean.trimEnd()}\n\n${MANAGED_START}\nmanaged router\n${MANAGED_END}\n`);
+    assert.strictEqual(validateNativeAgents(target, 'project', 'fixture', () => {}, () => {}), true);
+    fs.appendFileSync(target, 'user edit outside the managed block\n');
+    assert.strictEqual(validateNativeAgents(target, 'project', 'fixture', () => {}, () => {}), false);
   });
 
   test('managed project fallback verifies inventory and SHA256 hashes', () => {

@@ -13,6 +13,7 @@ const {
   getHookScriptNames,
   getHookSettingsExpectations,
 } = require('./lib/hook-registry');
+const { validateProjectStandards } = require('./project-standards');
 
 let hasFailure = false;
 
@@ -57,6 +58,18 @@ function expectedUserRules() {
 
 function expectedProjectRules() {
   return listMarkdownFiles(path.join(repoRoot, 'project-level', '.claude', 'rules'));
+}
+
+function union(left, right) {
+  return [...new Set([...left, ...right])].sort();
+}
+
+function standardAssetNames(validation, kind) {
+  if (!validation || !validation.manifest || !Array.isArray(validation.manifest.assets)) return [];
+  return validation.manifest.assets
+    .filter((asset) => asset.kind === kind)
+    .map((asset) => path.basename(asset.path))
+    .sort();
 }
 
 function expectedClaudeSkills() {
@@ -233,8 +246,24 @@ function validateProjectInstall() {
   console.log('\nProject-level Claude Code install:');
   isFile(path.join(projectRoot, 'CLAUDE.md'), 'CLAUDE.md');
   validateSettingsHooks(path.join(projectClaudeRoot, 'settings.json'), '.claude/settings.json');
-  validateInventory(path.join(projectClaudeRoot, 'commands'), expectedProjectCommands(), '.claude/commands');
-  validateInventory(path.join(projectClaudeRoot, 'rules'), expectedProjectRules(), '.claude/rules');
+  const standards = validateProjectStandards({
+    projectRoot,
+    sourceRoot: path.join(repoRoot, 'project-level'),
+    runtime: 'claude',
+  });
+  if (standards.valid) ok('architecture-aware project standards are complete and hash-verified');
+  else standards.issues.forEach((issue) => fail(`project standards ${issue.path}: ${issue.reason}`));
+  validateInventory(
+    path.join(projectClaudeRoot, 'commands'),
+    union(expectedProjectCommands(), standardAssetNames(standards, 'command')),
+    '.claude/commands'
+  );
+  validateInventory(
+    path.join(projectClaudeRoot, 'rules'),
+    union(expectedProjectRules(), standardAssetNames(standards, 'rule')),
+    '.claude/rules'
+  );
+  validateSkills(path.join(projectClaudeRoot, 'skills'), ['project-standards'], '.claude/skills');
   isDirectory(path.join(projectClaudeRoot, 'plans'), '.claude/plans');
 }
 

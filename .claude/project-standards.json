@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "owner": "tech-persistence",
+  "runtime": "claude",
+  "mode": "auto",
+  "profiles": [
+    "base",
+    "agent",
+    "infrastructure"
+  ],
+  "scopes": {
+    "base": [
+      "**/*"
+    ],
+    "agent": [
+      "**/agents/**/*",
+      "**/prompts/**/*",
+      "**/tools/**/*",
+      "**/skills/**/*",
+      "**/memory/**/*",
+      "**/evals/**/*",
+      "**/runtime/**/*"
+    ],
+    "infrastructure": [
+      "**/Dockerfile*",
+      "**/docker-compose*.yml",
+      "**/docker-compose*.yaml",
+      "**/compose*.yml",
+      "**/compose*.yaml",
+      "**/*.tf",
+      "**/deploy/**/*",
+      "**/infra/**/*",
+      "**/infrastructure/**/*",
+      "**/k8s/**/*",
+      "**/kubernetes/**/*",
+      "**/terraform/**/*",
+      "**/helm/**/*",
+      ".github/workflows/**/*"
+    ]
+  },
+  "evidence": [
+    {
+      "profile": "agent",
+      "source": "scripts/agent-orchestrator.js",
+      "signal": "agent prompt/tool/eval layout"
+    },
+    {
+      "profile": "infrastructure",
+      "source": ".github/workflows",
+      "signal": "deployment/infrastructure asset"
+    }
+  ],
+  "assets": [
+    {
+      "kind": "rule",
+      "profile": "agent",
+      "source": "profiles/agent/rules/architecture-agent.md",
+      "path": "rules/architecture-agent.md",
+      "sha256": "479d06eee1bc1a590f74b9d95385e58636f9c7d4d9c189512b1d9ce828cdd62c"
+    },
+    {
+      "kind": "rule",
+      "profile": "base",
+      "source": "profiles/base/rules/architecture-base.md",
+      "path": "rules/architecture-base.md",
+      "sha256": "ba369f216bef0bc77d3fe7ba97956349b59fb5621f4c14ed492373e5e91d4f32"
+    },
+    {
+      "kind": "rule",
+      "profile": "infrastructure",
+      "source": "profiles/infrastructure/rules/architecture-infrastructure.md",
+      "path": "rules/architecture-infrastructure.md",
+      "sha256": "9fea01654a54dddce2b4ccec4994627038fc2f41fd863124785e9fbcda9edcfb"
+    },
+    {
+      "kind": "command",
+      "profile": "shared",
+      "source": ".claude/commands/debug-journal.md",
+      "path": "commands/debug-journal.md",
+      "sha256": "5f4aeced4a81c36b13afeb768e7276478b6a2e50b999e3f13c5912875cd293d1"
+    },
+    {
+      "kind": "command",
+      "profile": "shared",
+      "source": ".claude/commands/learn.md",
+      "path": "commands/learn.md",
+      "sha256": "6a26693b7eee0dc64c6e4e27be7265ce244c0bd8babc6a9f82c4fe77523ee6a8"
+    },
+    {
+      "kind": "command",
+      "profile": "shared",
+      "source": ".claude/commands/project-audit.md",
+      "path": "commands/project-audit.md",
+      "sha256": "440ba4061c79128a789c43a19e6022bf4944dff5007068a0e71e323f4845a494"
+    },
+    {
+      "kind": "command",
+      "profile": "shared",
+      "source": ".claude/commands/retrospective.md",
+      "path": "commands/retrospective.md",
+      "sha256": "abcddc6afe2dcd4d2ddf7cf4c0a4d3f090bcb4a71d181fb51d27858dc8df4909"
+    },
+    {
+      "kind": "skill",
+      "profile": "shared",
+      "source": ".claude/skills/project-standards/SKILL.md",
+      "path": "skills/project-standards/SKILL.md",
+      "sha256": "73898472c78a602fc67d72a1727cf69a8a07bedb423453154d55a69fad6e978a"
+    }
+  ],
+  "conflicts": [],
+  "attributes": {
+    "path": ".gitattributes",
+    "markerSha256": "3fff935f3bbe22ff2829836453c73666fcd0638aa8bbcacfd5a864a881ab3dfd"
+  },
+  "entrypoint": {
+    "path": "CLAUDE.md",
+    "markerSha256": "99e8c3fd2858889343027e13107e559b5f0f1729a302e88a19a19857aadc1b43"
+  }
+}

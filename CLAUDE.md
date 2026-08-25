@@ -174,3 +174,12 @@
 - [2026-06-15] [sibling-eval/external-reference/moai-adk] Sibling-eval：MoAI-ADK (modu-ai) vs tech-persistence — Sibling-eval：MoAI-ADK (modu-ai) vs tech-persistence → `docs/solutions/2026-06-15-moai-adk-eval.md`
 
 <!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->
+
+<!-- tech-persistence:project-standards:start -->
+## Project standards routing
+
+- Architecture evidence and the exact managed inventory live in `.claude/project-standards.json`.
+- Before architecture-sensitive work, Claude Code must read that manifest and the listed rules for the active profiles.
+- Treat detected profiles as evidence, not as a substitute for inspecting real manifests, source layout, tests, and repository-local instructions.
+- Use the project-local `project-standards` skill for a standards audit; `project-audit` is read-only and must not silently rewrite user-owned files.
+<!-- tech-persistence:project-standards:end -->

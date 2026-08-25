@@ -301,19 +301,17 @@ install_project() {
     log_ok ".claude/settings.json (含 4 Hook 配置)"
   fi
 
-  # Commands
-  local cmds=(learn.md retrospective.md debug-journal.md)
-  for cmd in "${cmds[@]}"; do
-    safe_copy "${SCRIPT_DIR}/project-level/.claude/commands/${cmd}" "${claude_dir}/commands/${cmd}"
-    log_ok "命令 /${cmd%.md}"
-  done
-
   # Rules
-  local rules=(architecture.md debugging-gotchas.md performance.md testing-patterns.md api-conventions.md)
+  local rules=(architecture.md debugging-gotchas.md performance.md testing-patterns.md api-conventions.md hook-exit-codes.md)
   for rule in "${rules[@]}"; do
     safe_copy_no_overwrite "${SCRIPT_DIR}/project-level/.claude/rules/${rule}" "${claude_dir}/rules/${rule}"
   done
   log_ok "规则模板 (${#rules[@]} 个领域)"
+
+  local standards_script="${SCRIPT_DIR}/scripts/project-standards.js"
+  [[ -f "$standards_script" ]] || { echo "[FAIL] Missing project standards installer: $standards_script" >&2; return 1; }
+  node "$standards_script" --project-root "$project_root" --runtime claude --profiles auto || return $?
+  log_ok "架构感知项目规范与命令"
 
   # 确保用户级 Hook 脚本存在
   local hooks_dir="${CLAUDE_HOME}/skills/continuous-learning/hooks"

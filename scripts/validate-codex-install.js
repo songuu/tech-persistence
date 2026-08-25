@@ -14,6 +14,11 @@ const {
   normalizePluginOwners,
 } = require('./codex-runtime-doctor');
 const { inspectDisabledSkillPaths } = require('./install-managed-project-fallback');
+const {
+  MANAGED_END: PROJECT_STANDARDS_END,
+  MANAGED_START: PROJECT_STANDARDS_START,
+  validateProjectStandards,
+} = require('./project-standards');
 
 const repoRoot = path.resolve(__dirname, '..');
 const args = new Set(process.argv.slice(2));
@@ -97,6 +102,14 @@ function expectedProjectRules() {
   return listMarkdownFiles(path.join(repoRoot, 'project-level', '.claude', 'rules'));
 }
 
+function standardAssetNames(validation, kind) {
+  if (!validation || !validation.manifest || !Array.isArray(validation.manifest.assets)) return [];
+  return validation.manifest.assets
+    .filter((asset) => asset.kind === kind)
+    .map((asset) => path.basename(asset.path))
+    .sort();
+}
+
 function union(left, right) {
   return [...new Set([...left, ...right])].sort();
 }
@@ -139,12 +152,19 @@ function walkMarkdownFiles(dir) {
 }
 
 function validateCodexText(dir, label, options = {}) {
-  const forbidden = options.allowCrossRuntimeReferences
-    ? /Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/
-    : /CLAUDE\.md|Claude Code|~\/\.claude|\.claude\/|Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/;
+  const strictForbidden = /CLAUDE\.md|Claude Code|~\/\.claude|\.claude\/|Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/;
+  const crossRuntimeForbidden = /Codex\.md|\.Codex|~\/\.Codex|锛|銆|鏋|绛|璁|鍐|鐨|涓€/;
+  const allowedFiles = new Set(
+    (options.allowCrossRuntimeFiles || []).map((file) => String(file).replace(/\\/g, '/'))
+  );
+  const onFailure = options.onFailure || fail;
   for (const file of walkMarkdownFiles(dir)) {
+    const relative = path.relative(dir, file).replace(/\\/g, '/');
+    const forbidden = options.allowCrossRuntimeReferences || allowedFiles.has(relative)
+      ? crossRuntimeForbidden
+      : strictForbidden;
     if (forbidden.test(fs.readFileSync(file, 'utf8'))) {
-      fail(`${label} contains unconverted or mojibake text: ${file}`);
+      onFailure(`${label} contains unconverted or mojibake text: ${file}`);
     }
   }
 }
@@ -235,11 +255,20 @@ function ownerProbe({ pluginListFile, pluginListJson, codexHome } = {}) {
 function validateNativeAgents(file, kind, label, onFailure = fail, onSuccess = ok) {
   const template = path.join(repoRoot, 'codex-native', 'agents', `${kind}.md`);
   if (!fs.existsSync(file) || !fs.existsSync(template)) return false;
-  if (!fs.readFileSync(file).equals(fs.readFileSync(template))) {
+  let actual = fs.readFileSync(file, 'utf8');
+  const expected = fs.readFileSync(template, 'utf8');
+  if (kind === 'project') {
+    const start = actual.indexOf(PROJECT_STANDARDS_START);
+    const end = actual.indexOf(PROJECT_STANDARDS_END, start);
+    if (start >= 0 && end >= start) {
+      actual = `${actual.slice(0, start).trimEnd()}\n${actual.slice(end + PROJECT_STANDARDS_END.length).trimStart()}`;
+    }
+  }
+  if (actual.replace(/\r\n/g, '\n').trimEnd() !== expected.replace(/\r\n/g, '\n').trimEnd()) {
     onFailure(`${label} is preserved custom or stale generated content; Codex-native context optimization is not active`);
     return false;
   }
-  onSuccess(`${label} byte-matches the lean Codex-native ${kind} template`);
+  onSuccess(`${label} matches the lean Codex-native ${kind} template${kind === 'project' ? ' plus the managed standards router' : ''}`);
   return true;
 }
 
@@ -477,19 +506,30 @@ function validateProjectInstall(context) {
   console.log('\nProject-level Codex install:');
   isFile(path.join(projectRoot, 'AGENTS.md'), 'AGENTS.md');
   validateNativeAgents(path.join(projectRoot, 'AGENTS.md'), 'project', 'AGENTS.md');
+  const standards = validateProjectStandards({
+    projectRoot,
+    sourceRoot: path.join(repoRoot, 'project-level'),
+    runtime: 'codex',
+  });
+  if (standards.valid) ok('architecture-aware project standards are complete and hash-verified');
+  else standards.issues.forEach((issue) => fail(`project standards ${issue.path}: ${issue.reason}`));
   validateInventory(
     path.join(projectCodexRoot, 'commands'),
-    union(expectedUserCommands(), expectedProjectCommands()),
+    union(union(expectedUserCommands(), expectedProjectCommands()), standardAssetNames(standards, 'command')),
     '.codex/commands'
   );
   validateNativeCommands(path.join(projectCodexRoot, 'commands'), '.codex/commands');
   validateInventory(
     path.join(projectCodexRoot, 'rules'),
-    union(expectedUserRules(), expectedProjectRules()),
+    union(union(expectedUserRules(), expectedProjectRules()), standardAssetNames(standards, 'rule')),
     '.codex/rules'
   );
   isDirectory(path.join(projectCodexRoot, 'plans'), '.codex/plans');
-  validateCodexText(path.join(projectCodexRoot, 'commands'), '.codex/commands');
+  validateCodexText(path.join(projectCodexRoot, 'commands'), '.codex/commands', {
+    // Managed audit commands intentionally inspect the sibling Claude projection.
+    allowCrossRuntimeFiles: standardAssetNames(standards, 'command')
+      .filter((name) => name === 'project-audit.md'),
+  });
   validateCodexText(path.join(projectCodexRoot, 'rules'), '.codex/rules', { allowCrossRuntimeReferences: true });
   validateCodexFile(path.join(projectRoot, 'AGENTS.md'), 'AGENTS.md');
 
@@ -581,6 +621,7 @@ module.exports = {
   ownerProbe,
   stripManagedSolutionIndex,
   validateDirectFallback,
+  validateCodexText,
   validateNativeCommands,
   validateNativeAgents,
   validateOwnerIntegrity,

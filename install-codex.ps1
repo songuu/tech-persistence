@@ -719,22 +719,28 @@ function Install-Project {
         (Join-Path $ScriptDir "project-level\CLAUDE.md")
 
     $projectCommandDir = Join-Path $ScriptDir "project-level\.claude\commands"
-    $projectCommandNames = @()
-    if (Test-Path $projectCommandDir) {
-        $projectCommandNames = @(Get-ChildItem $projectCommandDir -Filter "*.md" | ForEach-Object { $_.Name })
-    }
+    $catalogPath = Join-Path $ScriptDir "project-level\profiles\catalog.json"
+    if (-not (Test-Path -LiteralPath $catalogPath)) { throw "Missing project standards catalog: $catalogPath" }
+    $catalog = Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json
+    $projectCommandNames = @($catalog.shared.commands | ForEach-Object { [System.IO.Path]::GetFileName([string]$_) })
     $nativeCommandDir = Join-Path $ScriptDir "codex-native\commands"
     $nativeCommandNames = @(Get-ChildItem $nativeCommandDir -Filter "*.md" | ForEach-Object { $_.Name })
     $excludedUserCommandNames = @($projectCommandNames + $nativeCommandNames | Select-Object -Unique)
     $userCommands = Copy-CodexCommandDir (Join-Path $ScriptDir "user-level\commands") (Join-Path $codexDir "commands") $excludedUserCommandNames
-    $projectCommands = Copy-CodexCommandDir $projectCommandDir (Join-Path $codexDir "commands")
+    $projectCommands = 0 # Catalog-managed commands are installed by project-standards.js below.
     $nativeCommands = Copy-CodexCommandDir $nativeCommandDir (Join-Path $codexDir "commands")
-    Write-OK "commands copied ($userCommands user, $projectCommands project, $nativeCommands native)"
+    Write-OK "commands copied ($userCommands user, $nativeCommands native; project commands deferred to standards resolver)"
 
     Copy-CodexRuleDir (Join-Path $ScriptDir "user-level\rules") (Join-Path $codexDir "rules") | Out-Null
     $rulesSource = Join-Path $ScriptDir "project-level\.claude\rules"
     $projectRules = Copy-CodexRuleDir $rulesSource (Join-Path $codexDir "rules")
     Write-OK "rules copied ($projectRules project)"
+
+    $standardsScript = Join-Path $ScriptDir "scripts\project-standards.js"
+    if (-not (Test-Path -LiteralPath $standardsScript)) { throw "Missing project standards installer: $standardsScript" }
+    & node $standardsScript --project-root $root --runtime codex --profiles auto
+    if ($LASTEXITCODE -ne 0) { throw "Codex project standards installation failed" }
+    Write-OK "architecture-aware project standards"
 
     $ownerStatus = Get-CodexPluginOwnerStatus
     if (-not $ownerStatus.Available) {

@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync, spawnSync } = require('child_process');
 const { classifyExistingAgents } = require('./install-codex-agents');
+const { detectProjectProfiles } = require('./project-standards');
 
 const OK = '\x1b[32m✅\x1b[0m';
 const WARN = '\x1b[33m⚠️\x1b[0m';
@@ -336,6 +337,12 @@ function runCodexPreflight() {
     }
   });
 
+  check('项目架构 profiles', () => {
+    const detected = detectProjectProfiles(process.cwd());
+    console.log(`     ${detected.profiles.join(', ')} (${detected.evidence.length} 条证据)`);
+    return detected.profiles.includes('unknown') ? 'warn' : true;
+  });
+
   check('.codex/ 目录', () => {
     if (fs.existsSync('.codex')) {
       console.log('     已存在 — 安装时会保留现有文件');
@@ -539,6 +546,12 @@ check('Git 仓库', () => {
     console.log('     不在 Git 仓库中 — 项目级安装需要在项目根目录');
     return 'warn';
   }
+});
+
+check('项目架构 profiles', () => {
+  const detected = detectProjectProfiles(process.cwd());
+  console.log(`     ${detected.profiles.join(', ')} (${detected.evidence.length} 条证据)`);
+  return detected.profiles.includes('unknown') ? 'warn' : true;
 });
 
 check('.claude/ 目录', () => {

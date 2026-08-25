@@ -241,6 +241,44 @@ node scripts/preflight.js --codex
 bash install-codex.sh --all
 ```
 
+### 架构感知项目规范
+
+Claude 与 Codex 的项目安装器会调用同一个 resolver，从真实依赖、源码入口、workspace 和部署资产中组合
+`base`、`frontend`、`backend`、`agent`、`data`、`infrastructure`、`library`、`monorepo`、
+`fullstack` 或 `unknown` profile。结果分别写入 `.claude/project-standards.json` 与
+`.codex/project-standards.json`；两端 rules、project-local skill 和 command compatibility asset 都由
+`project-level/` 的单一 canonical catalog 生成并进行 SHA-256 校验。
+
+```powershell
+# 只读查看检测证据
+node scripts\project-standards.js --detect-only --json
+
+# 查看 create/update/retire/conflict、入口和 LF 属性计划，不写文件
+node scripts\project-standards.js --dry-run --runtime both --json
+
+# 首次自动检测并安装；既有 explicit 选择会在后续安装器更新中保持
+node scripts\project-standards.js --runtime both --profiles auto
+
+# 架构不完整时显式覆盖；fullstack 会展开为 frontend + backend
+node scripts\project-standards.js --runtime both --profiles frontend,agent
+
+# 用户明确要求放弃 explicit 选择时，才恢复自动检测
+node scripts\project-standards.js --runtime both --profiles auto --refresh-auto
+
+# 独立校验 manifest、hash、入口路由和双运行时 parity
+node scripts\project-standards.js --check --runtime both
+```
+
+安装器只更新其上次写入且 hash 未漂移的文件；用户修改或同名自有文件会作为 conflict 保留并使安装失败。
+已不再适用、且仍与上次受管 hash 一致的 profile 文件会移动到 runtime 内的备份目录，而不是直接删除。
+catalog 删除或重命名逻辑资产时，先以 `retiredAssets` tombstone 记录原 identity 与双运行时 hashes，旧项目才能
+证明所有权并做可恢复退休；不得直接删掉历史 identity。
+入口路由或 LF block 合法升级时，同样先把旧 marker hash 加入 `legacyMarkerHashes`；只有目标块、旧 manifest
+与 catalog allowlist 三者一致时才会 CAS 更新。
+resolver 会在项目根 `.gitattributes` 末尾维护冲突安全的 LF block，使 Windows fresh checkout 后的原始字节
+SHA-256 仍稳定；既有用户属性保留。`.env*`、凭据/私钥、VCS 元数据、依赖/缓存目录、
+`settings.local.*`、symlink、空 Skill、lock、session 与 PID 文件不会进入规范投影。
+
 迁移 Claude 历史知识库（可选）：
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-codex.ps1 -All -ImportClaude

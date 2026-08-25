@@ -209,13 +209,16 @@ function Install-Project {
         Write-OK "settings.json hooks merged"
     }
 
-    Get-ChildItem (Join-Path $ScriptDir "project-level/.claude/commands") -Filter "*.md" | ForEach-Object {
-        Safe-Copy $_.FullName (Join-Path $cd "commands/$($_.Name)"); Write-OK ("cmd /" + $_.BaseName)
-    }
     Get-ChildItem (Join-Path $ScriptDir "project-level/.claude/rules") -Filter "*.md" | ForEach-Object {
         Safe-CopyNew $_.FullName (Join-Path $cd "rules/$($_.Name)")
     }
     Write-OK "rules ($((@(Get-ChildItem (Join-Path $cd 'rules') -Filter '*.md' -ErrorAction SilentlyContinue)).Count) files)"
+
+    $standardsScript = Join-Path $ScriptDir "scripts/project-standards.js"
+    if (-not (Test-Path -LiteralPath $standardsScript)) { throw "Missing project standards installer: $standardsScript" }
+    & node $standardsScript --project-root $root --runtime claude --profiles auto
+    if ($LASTEXITCODE -ne 0) { throw "Claude project standards installation failed" }
+    Write-OK "architecture-aware project standards and commands"
 
     # Install project-local git pre-commit defense hook
     $ghInstall = Join-Path $ScriptDir "scripts/install-git-hooks.js"
