@@ -1,0 +1,68 @@
+services:
+  tech-persistence-postgres:
+    image: postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    container_name: tech-persistence-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tech_persistence
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: UTC
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - max_connections=40
+      - -c
+      - wal_compression=on
+      - -c
+      - max_wal_size=512MB
+      - -c
+      - log_min_duration_statement=500ms
+      - -c
+      - timezone=UTC
+    ports:
+      - "127.0.0.1:${TECH_PERSISTENCE_POSTGRES_PORT:-55433}:5432"
+    volumes:
+      - type: bind
+        source: "${TECH_PERSISTENCE_POSTGRES_DATA_DIR:?set TECH_PERSISTENCE_POSTGRES_DATA_DIR to a stable absolute directory}"
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - postgres_admin_password
+      - transcript_reader_password
+      - transcript_writer_password
+    shm_size: 128mb
+    mem_limit: 512m
+    cpus: "1.0"
+    pids_limit: 256
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tech_persistence"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+secrets:
+  postgres_admin_password:
+    file: ../postgres/secrets/postgres-admin-password
+  transcript_reader_password:
+    file: ../postgres/secrets/transcript-reader-password
+  transcript_writer_password:
+    file: ../postgres/secrets/transcript-writer-password

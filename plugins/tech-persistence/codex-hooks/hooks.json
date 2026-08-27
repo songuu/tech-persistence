@@ -116,11 +116,16 @@
     ],
     "SessionEnd": [
       {
-        "matcher": "other",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-lifecycle-evidence.js\"",
+            "async": false,
+            "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-transcript-outbox.js\"",
             "async": false,
             "timeout": 3
           }

@@ -192,6 +192,13 @@ const runHookCmd = [
   '',
 ].join('\r\n');
 
+// WHY: preserve the frozen legacy Claude wrapper surface while allowing the
+// Codex-only SessionEnd outbox entrypoint in the Codex projection.
+const codexRunHookJs = runHookJs.replace(
+  '"codex-lifecycle-evidence.js",',
+  '"codex-lifecycle-evidence.js","codex-transcript-outbox.js",'
+);
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -3540,7 +3547,7 @@ function copyCodexHooks() {
     copyTextFile(path.join(repoRoot, 'scripts', name), path.join(targetDir, name), false);
   });
   const hookLibCount = copyHookLibs(targetDir, { includeCodexOnly: true });
-  writeTextFile(path.join(targetDir, 'run-hook.js'), runHookJs);
+  writeTextFile(path.join(targetDir, 'run-hook.js'), codexRunHookJs);
   writeTextFile(path.join(targetDir, 'run-hook.cmd'), runHookCmd);
   return hookScripts.length + hookLibCount + 3;
 }

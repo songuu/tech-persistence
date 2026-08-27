@@ -39,7 +39,10 @@ const CODEX_HOOKS = Object.freeze([
   { event: 'SubagentStart', matcher: '*', script: 'codex-lifecycle-evidence.js', timeout: 2, async: false },
   { event: 'SubagentStop', matcher: '*', script: 'codex-lifecycle-evidence.js', timeout: 2, async: false },
   { event: 'PostCompact', matcher: 'manual|auto', script: 'codex-lifecycle-evidence.js', timeout: 2, async: false },
-  { event: 'SessionEnd', matcher: 'other', script: 'codex-lifecycle-evidence.js', timeout: 3, async: false },
+  { event: 'SessionEnd', script: 'codex-lifecycle-evidence.js', timeout: 3, async: false },
+  // Queue only verified transcript metadata. PostgreSQL delivery is owned by a
+  // separate retryable consumer, so session shutdown never depends on network.
+  { event: 'SessionEnd', script: 'codex-transcript-outbox.js', timeout: 3, async: false },
   // Capture stays synchronous because background hooks may finish out of order
   // or be cancelled at session end. Promotion and shared-runtime writes remain
   // outside these hooks and require their explicit governance gates.

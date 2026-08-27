@@ -8,9 +8,19 @@
   },
   "scripts": {
     "test": "node scripts/run-tests.js",
+    "transcripts:postgres": "node scripts/transcript-postgres-runtime.js up",
+    "transcripts:postgres:status": "node scripts/transcript-postgres-runtime.js status",
+    "transcripts:configure": "node scripts/configure-codex-transcript-sync.js --env-file deploy/postgres/.env.transcripts",
+    "transcripts:sync": "node scripts/sync-codex-transcripts.js --env-file deploy/postgres/.env.transcripts",
+    "transcripts:backfill": "node scripts/sync-codex-transcripts.js --all --env-file deploy/postgres/.env.transcripts",
+    "transcripts:watch": "node scripts/sync-codex-transcripts.js --watch --env-file deploy/postgres/.env.transcripts",
+    "transcripts:test": "node scripts/run-tests.js --grep transcript",
     "figma:audit": "node scripts/figma-fidelity-audit.js",
     "site:data": "node site/lib/project-model.js",
     "site:test": "node --test \"site/tests/*.test.js\"",
     "site:build": "node site/build.js --base /tech-persistence/ --output site/dist"
+  },
+  "dependencies": {
+    "pg": "8.22.0"
   }
 }

@@ -1,6 +1,10 @@
 .worktrees/
 .agent-runs/
 _shared_homunculus/
+node_modules/
+deploy/postgres/.env.transcripts
+deploy/postgres/data/
+deploy/postgres/secrets/
 *.bak.*
 docs/plans/.handoff/
 site/dist/

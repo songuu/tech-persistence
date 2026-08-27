@@ -540,8 +540,11 @@ Skill 优化:       /skill diagnose → /skill-improve → /skill-eval → /skil
 | PostToolUse | codex-behavior-hook.js | 记录 `tool.result`/`tool_response`；内层结果结构未由平台统一定义时保持 `unknown`，包括 Bash 非零退出 |
 | Stop | codex-behavior-hook.js | 只记录 lifecycle；仅有受管 `task_ref` 时关闭 Episode，不把 assistant message 当作任务成功或用户接受 |
 | SubagentStart / SubagentStop / PostCompact / SessionEnd | codex-lifecycle-evidence.js | 在显式 managed identity 下追加 run-local immutable lifecycle evidence |
+| SessionEnd | codex-transcript-outbox.js | 在 3 秒上限内把 transcript 路径、文件身份、大小和时间写入本机耐久 outbox，再唤醒单实例 PostgreSQL worker；hook 内不连接数据库、不复制正文 |
 
-本机 Codex 0.147.0 与当前 [Codex hooks release contract](https://developers.openai.com/codex/hooks) 均将上述 hooks 标为 stable。hook `timeout` 使用整数秒，本项目统一限制为 1～5 秒；事件只使用官方 `session_id`、`transcript_path`、`cwd`、`model`、`turn_id`、`tool_use_id`、`tool_response` 等字段，不用 payload 时间戳或 Claude alias 伪造 receipt。
+本机 Codex 0.147.0 与当前 [Codex hooks release contract](https://learn.chatgpt.com/docs/hooks) 均将上述 hooks 标为 stable。hook `timeout` 使用整数秒；本项目限制普通 hook 为 1～5 秒，并按官方约束将 `SessionEnd` 固定为最多 3 秒。事件只使用官方 `session_id`、`transcript_path`、`cwd`、`model`、`turn_id`、`tool_use_id`、`tool_response` 等字段，不用 payload 时间戳或 Claude alias 伪造 receipt。
+
+Codex 会加载插件 hooks，但非 managed 定义必须按精确 hash 显式信任后才执行。安装或升级插件后，在交互式 Codex 中运行 `/hooks`，检查并信任 Tech Persistence hook 定义；定义变化后需重新审核。`--dangerously-bypass-hook-trust` 只适合单次诊断，不会持久启用。
 
 需要把用户 prompt 解释为显式 feedback/correction/approval 时，必须从 prompt 首字节开始使用固定前缀，后接逐字 canonical JSON（整条 UTF-8 不超过 4096 bytes；无空白、换行、额外 key 或重复 key）：
 
@@ -553,6 +556,34 @@ TP_SELF_LEARNING_CONTROL_V1:{"action":"remember","body":"Persist only this exact
 ```
 
 approval 只在项目 journal 中 `shadow` 候选的 current candidate hash 与 `candidate_id` 同时精确匹配时生成 accepted `user.approval`，且 live-shadow 校验与 receipt append 在同一 journal transaction/lock 内完成。receipt 的 `source_event_id`/`authority_ref` 只绑定原生 `session_id`、`turn_id` 与 `UserPromptSubmit` hook；prompt/control semantic 只是受保护内容，不参与 identity。相同 turn 的逐字同语义 replay 为 no-op，任何 summary、action、approval 内容或普通/control 分类变化都触发 identity conflict，不能追加第二条。普通 prompt 仍是 `user.prompt`，无效 control fail closed 且 stderr 只输出有界错误码。自然语言、Agent 输出、generic MCP/CLI JSON 都不能生成该 native user authority。hook 不自动执行 `approve`/`promote`，也不写 skill、rule 或共享 runtime。
+
+### Codex transcript 自动同步到 PostgreSQL（显式配置）
+
+配置完成后，每个主对话的 `SessionEnd` 都会先原子生成无正文 outbox job，再 detached 唤醒单实例 worker。worker 立即消费 outbox，数据库或网络不可用时保留 job 并指数退避重试；启动时和默认每 15 分钟还会扫描首次启用时间 `reconcileAfter` 之后更新的 `~/.codex/sessions`，补齐启用后的 Codex 崩溃、关机、hook 超时以及 subagent 没有独立 `SessionEnd` 的漏单。首次启用前的历史会话不会被自动回灌，必须在容量核验后显式运行 `transcripts:backfill`。只有独立 reader 回读成功后才确认并删除 job。
+
+```powershell
+npm install
+npm run transcripts:postgres          # 创建私有凭据并等待本机 PostgreSQL healthy
+npm run transcripts:postgres:status
+npm run transcripts:configure         # 写入 ~/.tech-persistence/config.json 并启用自动 worker
+npm run transcripts:sync              # 消费 SessionEnd outbox
+npm run transcripts:backfill          # 容量核验后显式回填首次启用前的 Codex sessions
+npm run transcripts:watch             # 前台观察同一套单实例 worker
+```
+
+Windows 客户端可用仓库脚本安装受管 SSH 隧道（先核验并写入服务器 host key）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\deploy\postgres\install-transcript-postgres-tunnel.ps1 `
+  -SshDestination user@server -LocalPort 55434 -RemoteHost 127.0.0.1 -RemotePort 5432
+```
+
+该任务直接执行并拥有 `ssh.exe`，确保 `Stop-ScheduledTask` 能回收转发进程，不会遗留 PowerShell 子进程启动的 SSH 隧道。`start-transcript-postgres-tunnel.ps1` 只用于前台诊断，不是 Scheduled Task 的 action。
+
+默认 Compose 数据库只监听 `127.0.0.1:55433`。生产服务端沿用 agent-build 的边界：远端 PostgreSQL 只绑定 loopback，reader/writer 分权，客户端通过受管 SSH 转发连接；不要开放公网 5432。稳定 PGDATA 必须位于 checkout/release 之外，Docker secrets 与读写连接配置保存在 `deploy/postgres/secrets/` 与私有 env 文件中，均不得提交。writer 只能追加 event 和更新 transcript 游标；每次事务提交后，sync 会通过独立 reader 做数量、重复位置、游标和 hash 回读，全部成功且游标覆盖入队快照后才删除 outbox job。旧 v1 job 还会重新核验完整入队前缀 hash；新的 v2 job 将 O(n) 读取移出 3 秒 hook，并依赖文件身份、快照覆盖、append-only 游标和数据库 hash chain 校验。
+
+PostgreSQL 保存的是脱敏后的事件 JSONB，不是 JSONL 原文件：system/developer 指令、reasoning、加密内容和 world-state 内部状态会被省略，常见凭据会被替换。用户消息、assistant 消息和工具事件仍可能含敏感业务数据，不应视为匿名化。完整运行、服务端与恢复边界见 [`docs/codex-transcript-postgres.md`](docs/codex-transcript-postgres.md)，安全边界见 [`SECURITY.md`](SECURITY.md)。
 
 ---
 

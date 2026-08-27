@@ -3,19 +3,19 @@
   "meta": {
     "name": "Tech Persistence",
     "packageName": "tech-persistence",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "description": "Persistent engineering memory for Codex",
     "longDescription": "Use Tech Persistence to run planning, work, review, compound learning, instinct evolution, risk-adaptive testing, context handoff, and Obsidian-compatible knowledge capture directly inside Codex.",
     "repository": "https://github.com/songuu/tech-persistence",
     "homepage": "https://github.com/songuu/tech-persistence",
     "license": "MIT",
     "runtimeVersions": {
-      "codex": "1.0.7",
+      "codex": "1.0.8",
       "claudeCode": "1.0.1"
     },
-    "buildId": "tp-1.0.7-f92ec91a4e20",
-    "generatedAt": "2026-08-24T01:08:39.578Z",
-    "sourceHash": "f92ec91a4e20a108ca6732b57642fc363b970918b99586a41ccc713f61d7acaa"
+    "buildId": "tp-1.0.8-d864d4b8f286",
+    "generatedAt": "2026-08-25T08:45:15.544Z",
+    "sourceHash": "d864d4b8f2869465ff917320e68f8c07b21e334a0d8acdd6152877ea4a881bf2"
   },
   "metrics": {
     "codexSkills": 33,
@@ -910,9 +910,10 @@
     {
       "runtime": "Codex",
       "event": "SessionEnd",
-      "handlers": 1,
+      "handlers": 2,
       "commands": [
-        "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-lifecycle-evidence.js\""
+        "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-lifecycle-evidence.js\"",
+        "node \"${CLAUDE_PLUGIN_ROOT}/codex-hooks/codex-transcript-outbox.js\""
       ]
     },
     {
@@ -976,7 +977,7 @@
   ],
   "source": {
     "algorithm": "sha256",
-    "hash": "f92ec91a4e20a108ca6732b57642fc363b970918b99586a41ccc713f61d7acaa",
+    "hash": "d864d4b8f2869465ff917320e68f8c07b21e334a0d8acdd6152877ea4a881bf2",
     "files": [
       {
         "path": "docs/architecture/2026-05-28-evolution-overview.md",
@@ -1270,7 +1271,7 @@
       },
       {
         "path": "plugins/tech-persistence/.codex-plugin/plugin.json",
-        "sha256": "5bf2ed3e3303a7616762e812712adb57023b40af99462d39c78c926f92862f49",
+        "sha256": "7655c0cd38be9a2f46ecd71dc2cb689a262a2338beed45c36494be95d7fdeb85",
         "bytes": 1777
       },
       {
@@ -1284,14 +1285,19 @@
         "bytes": 19344
       },
       {
+        "path": "plugins/tech-persistence/codex-hooks/codex-transcript-outbox.js",
+        "sha256": "80b10653bd7758cce7d3b56afbcfdab644f338516a6b3ab183d587034592a165",
+        "bytes": 19903
+      },
+      {
         "path": "plugins/tech-persistence/codex-hooks/guard-handoff-path-codex.js",
         "sha256": "38c10c9befbb6ba5930fd669e22c612e52559e67b6c10f39d2eb2ca4b552ecd2",
         "bytes": 5889
       },
       {
         "path": "plugins/tech-persistence/codex-hooks/hooks.json",
-        "sha256": "b5d60ea473e2de4943ac081eafebf3f7d44463914adfc5ffd572d33de7a32233",
-        "bytes": 3176
+        "sha256": "1b6b43ad7d6b8162667c292a76be0f651610a9e02a9e3cea3fba864de194fe70",
+        "bytes": 3353
       },
       {
         "path": "plugins/tech-persistence/codex-hooks/inject-context-codex.js",
@@ -1320,8 +1326,18 @@
       },
       {
         "path": "plugins/tech-persistence/codex-hooks/lib/codex-hook-registry.js",
-        "sha256": "1c075b8222bace68eef524e82fb0d531a2c3b4580794c0cd8c13c4f55a9a46e3",
-        "bytes": 4223
+        "sha256": "eaa7fe50264d71df306019d4081f3e7d89d8113c045748d53c5714c2d30356ac",
+        "bytes": 4456
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/codex-transcript-postgres.js",
+        "sha256": "d93192a5ea346e598bf9bf9007b02a664626c720919183c791628f757a37b59f",
+        "bytes": 28991
+      },
+      {
+        "path": "plugins/tech-persistence/codex-hooks/lib/codex-transcript-projection.js",
+        "sha256": "9d1799ce1e738b77166600b197d1a4eb99999d39fc7b1fd6750bec1115a014e1",
+        "bytes": 31411
       },
       {
         "path": "plugins/tech-persistence/codex-hooks/lib/hook-registry.js",
@@ -1425,8 +1441,8 @@
       },
       {
         "path": "plugins/tech-persistence/codex-hooks/run-hook.js",
-        "sha256": "3c4e7bc004e619f42a442518f46b6644df41907fc1b7b4cf86b696d8a67b385b",
-        "bytes": 2101
+        "sha256": "95e91641be2a97e027b520c2455523abca59df1a7de89e8050c31b404c8049c7",
+        "bytes": 2130
       },
       {
         "path": "plugins/tech-persistence/codex-skills/agent-loop/SKILL.md",
@@ -2035,8 +2051,8 @@
       },
       {
         "path": "README.md",
-        "sha256": "16d1cf29a5f0dcf311681ba33d051520e0426f47658b97bd9203add0c7daabd1",
-        "bytes": 38555
+        "sha256": "2555bfe8b09be3fe423c84ec66f1d5b5d9a5ab19e9dc0a68fb76fc540649a877",
+        "bytes": 43725
       }
     ]
   }

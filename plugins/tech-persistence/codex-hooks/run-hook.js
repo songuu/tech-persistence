@@ -3,7 +3,7 @@
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const ALLOWED_SCRIPT_NAMES = new Set(["caveman-activate.js","codex-behavior-hook.js","codex-lifecycle-evidence.js","evaluate-session.js","guard-handoff-path-codex.js","guard-handoff-path.js","inject-context-codex.js","inject-context.js","observe.js","prompt-submit.js"]);
+const ALLOWED_SCRIPT_NAMES = new Set(["caveman-activate.js","codex-behavior-hook.js","codex-lifecycle-evidence.js","codex-transcript-outbox.js","evaluate-session.js","guard-handoff-path-codex.js","guard-handoff-path.js","inject-context-codex.js","inject-context.js","observe.js","prompt-submit.js"]);
 const DIAGNOSTIC_MAX_BYTES = 128;
 const DIAGNOSTIC_CODES = new Set([
   'SCRIPT_NOT_ALLOWED',

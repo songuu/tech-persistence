@@ -10,6 +10,8 @@ user-controlled sharing.
 - The default location is `~/.claude/homunculus` for Claude-style runtimes and `~/.codex/homunculus` for Codex-style runtimes.
 - `TECH_PERSISTENCE_HOME` can override the homunculus directory for tests or custom setups.
 - Repository documents under `docs/`, `.claude/`, and `.codex/` are git-tracked only when you explicitly commit them.
+- Codex transcript PostgreSQL sync is explicitly configured. Its `SessionEnd` hook writes only local pointer/identity metadata to `~/.codex/transcript-outbox` and detached-starts a restricted single-instance worker; the hook itself never opens PostgreSQL or copies transcript content into the job.
+- The worker retries failures and periodically reconciles the trusted sessions tree. Local runtime data, secrets, and client configuration below `deploy/postgres/` are Git-ignored; production credentials must remain in an equally private operator-owned env file, and server PostgreSQL must remain behind loopback plus an authenticated encrypted transport.
 
 ## Telemetry
 
@@ -45,6 +47,8 @@ secrets in prompts or shell commands.
 - Do not paste API keys, passwords, private keys, or bearer tokens into prompts or commands.
 - Run `node scripts/secret-scan-on-demand.js --paths <path>` before committing security-sensitive changes.
 - If a secret is captured locally, rotate the secret first, then delete the affected local observation files.
+- A transcript projection removes internal system/developer instructions, reasoning, encrypted content, world-state internals, and known secret patterns. It is not anonymization: ordinary user, assistant, and tool content can still contain private business data.
+- Keep `deploy/postgres/.env.transcripts` and `deploy/postgres/secrets/` private. Use the generated reader URL for verification and the writer URL only for ingestion; never paste either URL into logs or prompts.
 
 ## Reporting
 

@@ -104,10 +104,28 @@ test('Codex registry keeps the four evidence-only lifecycle events alongside gov
     getCodexHookScriptNames().filter((name) => name === 'codex-lifecycle-evidence.js').length,
     1
   );
+  const transcriptOutboxHooks = CODEX_HOOKS.filter(
+    (hook) => hook.script === 'codex-transcript-outbox.js'
+  );
+  assert.strictEqual(transcriptOutboxHooks.length, 1);
+  assert.strictEqual(transcriptOutboxHooks[0].event, 'SessionEnd');
+  assert.strictEqual(transcriptOutboxHooks[0].matcher, undefined);
+  assert.strictEqual(lifecycleHooks.at(-1).matcher, undefined);
+  assert.strictEqual(transcriptOutboxHooks[0].async, false);
+  assert.strictEqual(transcriptOutboxHooks[0].timeout, 3);
 
   const config = buildCodexPluginHookConfig();
   assert.strictEqual(config.hooks.PostCompact[0].matcher, 'manual|auto');
-  assert.strictEqual(config.hooks.SessionEnd[0].matcher, 'other');
+  assert.strictEqual(config.hooks.SessionEnd[0].matcher, undefined);
+  assert.strictEqual(config.hooks.SessionEnd.length, 1);
+  assert.strictEqual(config.hooks.SessionEnd[0].hooks.length, 2);
+  assert(
+    config.hooks.SessionEnd[0].hooks.some(
+      (hook) => hook.command.includes('/codex-hooks/codex-transcript-outbox.js')
+        && hook.async === false
+        && hook.timeout === 3
+    )
+  );
   for (const event of LIFECYCLE_EVIDENCE_EVENTS) {
     const serialized = JSON.stringify(config.hooks[event]);
     assert(serialized.includes('/codex-hooks/codex-lifecycle-evidence.js'));

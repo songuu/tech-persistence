@@ -414,7 +414,7 @@ test("the real repository remains the source of truth for current counts", () =>
   assert.equal(model.metrics.codexSkills, skillCount);
   assert.equal(model.metrics.claudeSkills, claudeSkillCount);
   assert.equal(model.catalog.filter((entry) => entry.type === "skill").length, skillCount);
-  assert.equal(model.meta.version, "1.0.7");
+  assert.equal(model.meta.version, "1.0.8");
   assert.equal(model.metrics.mcpTools, 10);
   assert.ok(model.updates.length > 0);
   assert.ok(model.architectureSources.length > 0);

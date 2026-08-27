@@ -118,13 +118,16 @@ function ok(message) {
   console.log(`[OK] ${message}`);
 }
 
-function validateRunHookWrapper(file, label) {
+function validateRunHookWrapper(file, label, options = {}) {
   if (!isFile(file, label)) return;
   const content = fs.readFileSync(file, 'utf8');
-  const expectedAllowlist = Array.from(new Set([
+  const sharedAllowlist = Array.from(new Set([
     ...expectedHookScripts,
     ...expectedCodexHookScripts,
   ])).sort();
+  const expectedAllowlist = options.codex === true
+    ? sharedAllowlist
+    : sharedAllowlist.filter((name) => name !== 'codex-transcript-outbox.js');
   const allowlistMatch = content.match(
     /const ALLOWED_SCRIPT_NAMES = new Set\((\[[^\r\n]+\])\);/
   );
@@ -637,7 +640,7 @@ if (isFile(manifestPath, 'plugin manifest')) {
       if (!manifest[key]) fail(`manifest missing ${key}`);
     });
     if (manifest.name !== 'tech-persistence') fail('manifest name must be tech-persistence');
-    if (manifest.version !== '1.0.7') fail('manifest version must be 1.0.7');
+    if (manifest.version !== '1.0.8') fail('manifest version must be 1.0.8');
     if (manifest.skills !== './codex-skills/') fail('manifest skills must use isolated codex-skills');
     if (manifest.hooks !== './codex-hooks/hooks.json') fail('manifest hooks must use isolated codex-hooks');
   }
@@ -961,7 +964,8 @@ if (isDirectory(codexHooksLibDir, 'codex hook lib dir')) {
 isFile(path.join(codexHooksDir, 'run-hook.cmd'), 'codex hook run-hook.cmd');
 validateRunHookWrapper(
   path.join(codexHooksDir, 'run-hook.js'),
-  'codex hook run-hook.js'
+  'codex hook run-hook.js',
+  { codex: true }
 );
 validateLocalRequireClosure(
   expectedCodexHookScripts.map((script) => path.join(codexHooksDir, script)),
