@@ -1,5 +1,7 @@
 'use strict';
 
+const { evaluateCompletionGate } = require('./completion-gate');
+
 const RISK_RANK = { L0: 0, L1: 1, L2: 2, L3: 3, L4: 4 };
 const SENSITIVE_PATTERN = /\b(auth(?:entication|orization)?|oauth|permission|password|secret|credential|token|migration|schema|database|drop\s+table|delete\s+from|deploy(?:ment)?|production|payment|billing)\b/i;
 
@@ -35,17 +37,62 @@ function canAutoFreezeSpec(spec) {
   return { ok: reasons.length === 0, reasons, highestRisk, sensitiveTerms };
 }
 
-function canCompleteRun({ validation, spec } = {}) {
-  const highestRisk = highestTaskRisk(spec);
-  const status = String(validation && validation.status || 'missing').toLowerCase();
-  const reasons = [];
-  if (status === 'passed') return { ok: true, reasons, highestRisk, validationStatus: status };
-  if (status === 'skipped' && RISK_RANK[highestRisk] <= RISK_RANK.L1) {
-    return { ok: true, reasons, highestRisk, validationStatus: status };
-  }
-  if (status === 'skipped') reasons.push(`validation skipped for ${highestRisk}; L2+ requires explicit validation`);
-  else reasons.push(`validation status is ${status}`);
-  return { ok: false, reasons, highestRisk, validationStatus: status };
+function canCompleteRun(input = {}) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const validation = source.validation;
+  const specRisk = highestTaskRisk(source.spec);
+  const explicitRisk = Object.prototype.hasOwnProperty.call(source, 'risk')
+    ? normalizeRisk(source.risk)
+    : 'L0';
+  const highestRisk = RISK_RANK[explicitRisk] > RISK_RANK[specRisk] ? explicitRisk : specRisk;
+  const validationStatus = String(validation && validation.status || 'missing').toLowerCase();
+  const extendedKeys = [
+    'scope',
+    'review',
+    'material',
+    'effects',
+    'evidence',
+    'clarifications',
+    'revisions',
+    'blockers',
+    'pipeline',
+  ];
+  const extended = extendedKeys.some((key) => Object.prototype.hasOwnProperty.call(source, key));
+  const gateInput = extended
+    ? {
+      ...source,
+      scope: source.scope || 'classic',
+      risk: highestRisk,
+    }
+    : {
+      scope: 'classic',
+      risk: highestRisk,
+      review: {
+        decision: 'approved',
+        compliant: true,
+        findings: [],
+        followUpTasks: [],
+      },
+      validation: {
+        ...(validation && typeof validation === 'object' ? validation : {}),
+        status: validationStatus,
+        evidenceRef: validation && validation.evidenceRef
+          ? validation.evidenceRef
+          : 'validation.json',
+      },
+      material: false,
+      effects: { state: 'none', refs: [] },
+      evidence: { complete: true, refs: ['validation.json'] },
+      clarifications: [],
+      revisions: [],
+      blockers: [],
+    };
+  const gate = evaluateCompletionGate(gateInput);
+  return {
+    ...gate,
+    highestRisk,
+    validationStatus,
+  };
 }
 
 module.exports = { RISK_RANK, highestTaskRisk, findSensitiveTerms, canAutoFreezeSpec, canCompleteRun };

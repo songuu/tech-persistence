@@ -657,6 +657,7 @@ function advancePipeline(ctx, options, runDir, statePath, stateObj) {
     }
     if (current.status === RUN_STATES.INTEGRATION_READY) {
       current = providers.runIntegrationReviewProvider(ctx, current, statePath, runDir, options);
+      if (current.status !== RUN_STATES.COMPLETED) return current;
       continue;
     }
     ctx.log(`[STOP] unhandled run status: ${current.status}`);

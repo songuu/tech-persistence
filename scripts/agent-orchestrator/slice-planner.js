@@ -86,8 +86,11 @@ function buildSliceReviewPrompt(globalContract, slice, options) {
   lines.push('Hard rules:');
   lines.push('- Output exactly one JSON object that validates against agent-loop/review-result.schema.json with optional contractRevisions[].');
   lines.push('- contractRevisions[] are the ONLY way to propose changes to the frozen global contract. Sources outside this array are ignored.');
+  lines.push('- Each contractRevisions[] item MUST contain revisionId matching rev-[a-z0-9-]+, a non-empty fields object containing only goal/nonGoals/globalAcceptance/architectureConstraints/runtimeTargets, and a non-empty rationale.');
   lines.push('- If the slice is a reconciliation slice (id starts with reconcile-), you MUST NOT propose contractRevisions[]; the orchestrator will escalate any revision to contract-conflict.');
-  lines.push('- decision ∈ {approved, needs-followup, blocked}.');
+  lines.push('- decision MUST be one of approved, changes_requested, blocked.');
+  lines.push('- approved requires compliant=true and empty findings[], followUpTasks[], and contractRevisions[].');
+  lines.push('- changes_requested or blocked requires compliant=false. Never approve with unresolved findings, follow-up work, contract revisions, or a revise-spec clarification ruling.');
   lines.push('');
   lines.push('Frozen global contract:');
   lines.push('```json');
@@ -109,7 +112,9 @@ function buildIntegrationReviewPrompt(globalContract, slices, options) {
   lines.push('Goal: emit a final go/no-go review for the entire run.');
   lines.push('');
   lines.push('Hard rules:');
-  lines.push('- Output exactly one JSON object that validates against agent-loop/review-result.schema.json. decision MUST be one of approved, needs-followup, blocked.');
+  lines.push('- Output exactly one JSON object that validates against agent-loop/review-result.schema.json. decision MUST be one of approved, changes_requested, blocked.');
+  lines.push('- approved requires compliant=true and empty findings[], followUpTasks[], and contractRevisions[].');
+  lines.push('- changes_requested or blocked requires compliant=false. Never approve with unresolved findings, follow-up work, contract revisions, or a revise-spec clarification ruling.');
   lines.push('- Check global goal, global acceptance, every slice contract, every diff, every validation log, every contract revision.');
   lines.push('- Approve only when every required slice is slice-completed and no breaking/cross-cutting drift is outstanding.');
   lines.push('- Do NOT propose contractRevisions[]; the integration review is the final gate, not a revision moment.');
@@ -122,9 +127,12 @@ function buildIntegrationReviewPrompt(globalContract, slices, options) {
   lines.push('```json');
   lines.push(JSON.stringify(slices, null, 2));
   lines.push('```');
-  if (options && options.aggregatedValidation) {
-    lines.push('Aggregated validation commands (integration stage):');
-    for (const command of options.aggregatedValidation) {
+  if (options && options.validationArtifactPath) {
+    lines.push(`Executed integration validation evidence: ${options.validationArtifactPath} (status=${options.validationStatus || 'unknown'})`);
+  }
+  if (options && options.executedValidation) {
+    lines.push('Commands already executed by the harness:');
+    for (const command of options.executedValidation) {
       lines.push('  - ' + command);
     }
   }

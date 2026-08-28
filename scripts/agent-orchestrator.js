@@ -1027,6 +1027,7 @@ function normalizeReview(rawReview) {
     summary,
     findings: allFindings,
     followUpTasks: stringArray(raw.followUpTasks || raw.followUp || raw.requiredChanges),
+    contractRevisions: Array.isArray(raw.contractRevisions) ? raw.contractRevisions : [],
     clarificationRulings: normalizeClarificationRulings(raw.clarificationRulings || raw.rulings),
   };
 }
@@ -1073,6 +1074,14 @@ function statusFromReview(review, completionGate = { ok: true }) {
     return 'blocked';
   }
   return 'needs-followup';
+}
+
+function completionGateValidationEvidence(gate) {
+  return {
+    status: gate && gate.ok === true ? 'passed' : 'failed',
+    source: 'review-result-and-completion-gate',
+    evidenceRef: 'completion-gate.json',
+  };
 }
 
 function buildSpecPrompt(requirement, options) {
@@ -1171,6 +1180,9 @@ function buildReviewPrompt(state, runDir) {
     'You are also the spec-writer: rule on any open clarifications raised by the implementer.',
     'Review the implementation strictly against the frozen spec and technical design.',
     'Do not add new product requirements. Return JSON only and match the review schema.',
+    'decision MUST be approved, changes_requested, or blocked.',
+    'approved requires compliant=true and empty findings[], followUpTasks[], and contractRevisions[].',
+    'changes_requested or blocked requires compliant=false. Never approve unresolved work or a revise-spec ruling.',
     'If the diff context is truncated, inspect the repository files directly.',
     clarificationGuidance,
     `Run id: ${state.runId}`,
@@ -1847,7 +1859,9 @@ function acceptProviderAttempt(state, attempt, input) {
     acceptanceHash: providerProfiles.hash(outcome.acceptance),
     errorsHash: providerProfiles.hash(outcome.acceptance.errors || []),
   });
-  if (turnValidation.sourceStatus !== 'passed') {
+  const canPersistRejectedReadOnlyOutcome = input.allowFailedValidation === true
+    && outcome.result.effects.state === 'none';
+  if (turnValidation.sourceStatus !== 'passed' && !canPersistRejectedReadOnlyOutcome) {
     const error = new Error(
       `provider validation ${turnValidation.sourceStatus} for ${attempt.prefix}; material result requires passed validation before durable-writeback`
     );
@@ -2964,6 +2978,67 @@ function writeValidation(workdir, runDir, options) {
   });
 }
 
+function classicClarificationStatuses(runDir, review) {
+  const entries = clarifications.readClarifications(runDir);
+  const rulings = normalizeClarificationRulings(review && review.clarificationRulings);
+  const rulingById = new Map(rulings.map((ruling) => [ruling.id, ruling]));
+  const knownIds = new Set(entries.map((entry) => entry.id));
+  const statuses = entries.map((entry) => {
+    const ruling = rulingById.get(entry.id);
+    const decision = ruling ? ruling.decision : entry.decision;
+    const resolved = decision === 'confirm-assumption'
+      || (entry.status === 'ruled' && decision !== 'revise-spec');
+    return {
+      id: entry.id,
+      status: resolved ? 'resolved' : 'open',
+      decision: decision || null,
+    };
+  });
+  for (const ruling of rulings) {
+    if (!knownIds.has(ruling.id)) {
+      statuses.push({ id: ruling.id, status: 'open', decision: ruling.decision, reason: 'unknown clarification id' });
+    }
+  }
+  return statuses;
+}
+
+function classicCompletionGateInput(runDir, spec, review) {
+  const validation = readJson(path.join(runDir, 'validation.json'));
+  const changedFiles = readJson(path.join(runDir, 'changed-files.json'));
+  const material = Array.isArray(changedFiles) && changedFiles.length > 0;
+  const evidenceRefs = [
+    'handoff.json',
+    'diff.patch',
+    'changed-files.json',
+    'validation.json',
+    'review.json',
+    'provider-handoff.json',
+  ];
+  if (fs.existsSync(path.join(runDir, clarifications.CLARIFICATIONS_FILE))) {
+    evidenceRefs.push(clarifications.CLARIFICATIONS_FILE);
+  }
+  return {
+    scope: 'classic',
+    spec,
+    review,
+    validation: {
+      ...validation,
+      evidenceRef: 'validation.json',
+    },
+    material,
+    effects: material
+      ? { state: 'committed', refs: ['diff.patch'] }
+      : { state: 'none', refs: [] },
+    evidence: {
+      complete: evidenceRefs.every((ref) => fs.existsSync(path.join(runDir, ref))),
+      refs: evidenceRefs,
+    },
+    clarifications: classicClarificationStatuses(runDir, review),
+    revisions: Array.isArray(review.contractRevisions) ? review.contractRevisions : [],
+    blockers: [],
+  };
+}
+
 function runReviewProvider(state, statePath, runDir, options) {
   validateProviderHandoffBundle(state, runDir, options);
   const prompt = buildReviewPrompt(state, runDir);
@@ -3037,6 +3112,7 @@ function runReviewProvider(state, statePath, runDir, options) {
         'classic review result'
       );
       review = providerStep('output-normalization', () => normalizeReview(rawReview));
+      reviewModule.assertCanonicalReview(review);
     } catch (error) {
       writeJson(path.join(runDir, 'review.parse-error.json'), {
         message: error.message,
@@ -3050,10 +3126,10 @@ function runReviewProvider(state, statePath, runDir, options) {
       writeJson(path.join(runDir, 'review.raw.json'), rawReview);
       writeJson(path.join(runDir, 'review.json'), review);
     });
-    const completionGate = providerStep('validation', () => policyGates.canCompleteRun({
-      validation: readJson(path.join(runDir, 'validation.json')),
-      spec: readJson(path.join(runDir, 'spec.json')),
-    }));
+    const completionGate = providerStep('validation', () => {
+      const spec = readJson(path.join(runDir, 'spec.json'));
+      return policyGates.canCompleteRun(classicCompletionGateInput(runDir, spec, review));
+    });
     providerStep('artifact', () => writeJson(
       path.join(runDir, 'completion-gate.json'),
       completionGate
@@ -3070,11 +3146,8 @@ function runReviewProvider(state, statePath, runDir, options) {
         reviewHash: providerProfiles.hash(review),
         completionGateHash: providerProfiles.hash(completionGate),
       },
-      validation: {
-        status: 'passed',
-        source: 'review-result-and-completion-gate',
-        evidenceRef: 'completion-gate.json',
-      },
+      validation: completionGateValidationEvidence(completionGate),
+      allowFailedValidation: true,
       payload: review,
     }));
     record.resultEnvelopeHash = accepted.result.hash;
@@ -4057,6 +4130,21 @@ function runSelfTest() {
   const normalizedReview = normalizeReview(wrappedReview);
   assertSelfTest('review passed alias normalizes to approved', normalizedReview.decision, 'approved');
   assertSelfTest('approved review maps to completed', statusFromReview(normalizedReview), 'completed');
+  const normalizedRevisionReview = normalizeReview({
+    decision: 'changes_requested',
+    compliant: false,
+    findings: [],
+    followUpTasks: ['apply the frozen-contract revision'],
+    contractRevisions: [{
+      revisionId: 'rev-classic-selftest',
+      fields: { goal: 'revised goal' },
+      rationale: 'exercise classic revision preservation',
+    }],
+  });
+  assertSelfTest('classic review preserves contract revisions',
+    normalizedRevisionReview.contractRevisions.length, 1);
+  assertSelfTest('failed completion gate cannot claim passed turn validation',
+    completionGateValidationEvidence({ ok: false }).status, 'failed');
 
   const handoffClarifications = normalizeHandoff({
     summary: 's',
@@ -4772,9 +4860,131 @@ function runProviderIntegrationSelfTests() {
   assertSelfTest('provider integration: approved slice marked completed', reviewOutcome.state.pipeline.sliceStates['slice-001'], 'slice-completed');
   assertSelfTest('provider integration: completed-owner lock', JSON.parse(fs.readFileSync(path.join(tmpBase, 'locks.json'), 'utf8')).files['mock.txt'].status, 'completed-owner');
 
+  const integrationReadyState = pipelineState.transitionRun(
+    reviewOutcome.state,
+    pipelineState.RUN_STATES.INTEGRATION_READY,
+    { source: 'self-test', reason: 'all required slices completed' }
+  );
+  writeJson(statePath, integrationReadyState);
+  mockCtx.runIntegrationValidation = (commands, runnerOptions) => {
+    commands.forEach((_command, index) => {
+      writeText(path.join(runnerOptions.runDir, 'logs', `integration-validation-${index}.stdout.log`), 'passed\n');
+      writeText(path.join(runnerOptions.runDir, 'logs', `integration-validation-${index}.stderr.log`), '');
+    });
+    const artifact = {
+      schemaVersion: 'integration-validation-v1',
+      attemptId: runnerOptions.attemptId,
+      status: 'passed',
+      artifactRef: 'integration-validation.json',
+      commands: commands.map((command, index) => ({
+        index,
+        command,
+        status: 'passed',
+        stdout: { ref: `logs/integration-validation-${index}.stdout.log` },
+        stderr: { ref: `logs/integration-validation-${index}.stderr.log` },
+      })),
+    };
+    writeJson(path.join(runnerOptions.runDir, 'integration-validation.json'), artifact);
+    return artifact;
+  };
+  mockCtx._stdoutQueue.push(reviewApprovedRaw);
+  const integrationOutcome = providers.runIntegrationReviewProvider(
+    mockCtx,
+    integrationReadyState,
+    statePath,
+    tmpBase,
+    {}
+  );
+  assertSelfTest('provider integration: integration validation artifact written',
+    fs.existsSync(path.join(tmpBase, 'integration-validation.json')), true);
+  assertSelfTest('provider integration: completion gate artifact written',
+    fs.existsSync(path.join(tmpBase, 'integration-completion-gate.json')), true);
+  assertSelfTest('provider integration: passing integration completion gate',
+    readJson(path.join(tmpBase, 'integration-completion-gate.json')).ok, true);
+  assertSelfTest('provider integration: approved integration marked completed',
+    integrationOutcome.status, 'completed');
+
+  const failedValidationState = pipelineState.transitionRun(
+    reviewOutcome.state,
+    pipelineState.RUN_STATES.INTEGRATION_READY,
+    { source: 'self-test', reason: 'exercise failed integration validation' }
+  );
+  writeJson(statePath, failedValidationState);
+  mockCtx.runIntegrationValidation = (_commands, runnerOptions) => {
+    const artifact = {
+      schemaVersion: 'integration-validation-v1',
+      attemptId: runnerOptions.attemptId,
+      status: 'failed',
+      artifactRef: 'integration-validation.json',
+      commands: [{
+        index: 0,
+        command: 'git diff --check',
+        status: 'failed',
+        stdout: { ref: 'logs/integration-validation-failed.stdout.log' },
+        stderr: { ref: 'logs/integration-validation-failed.stderr.log' },
+      }],
+    };
+    writeJson(path.join(runnerOptions.runDir, 'integration-validation.json'), artifact);
+    return artifact;
+  };
+  const callsBeforeFailedValidation = calls;
+  const failedValidationOutcome = providers.runIntegrationReviewProvider(
+    mockCtx,
+    failedValidationState,
+    statePath,
+    tmpBase,
+    {}
+  );
+  assertSelfTest('provider integration: failed validation does not call reviewer',
+    calls, callsBeforeFailedValidation);
+  assertSelfTest('provider integration: failed validation remains integration-ready',
+    failedValidationOutcome.status, 'integration-ready');
+  assertSelfTest('provider integration: failed validation cannot pass completion gate',
+    readJson(path.join(tmpBase, 'integration-completion-gate.json')).ok, false);
+
   stateObj = stateBeforeApprovedReview;
   writeJson(statePath, stateObj);
   pipelineQueue.saveQueue(tmpBase, pipelineQueue.moveToRunning(pipelineQueue.emptyQueue(), slice.id));
+  locksModule.saveLocks(tmpBase, locksModule.claimAll(locksModule.emptyLocks(), slice));
+  mockCtx._stdoutQueue.push(JSON.stringify({
+    decision: 'changes_requested',
+    compliant: false,
+    findings: [{ severity: 'P1', message: 'follow-up required' }],
+    followUpTasks: ['revise the implementation without changing the frozen contract'],
+    contractRevisions: [],
+  }));
+  const followUpOutcome = providers.runSliceReviewProvider(mockCtx, stateObj, statePath, tmpBase, {}, slice);
+  assertSelfTest('provider integration: changes-requested slice is blocked',
+    followUpOutcome.state.pipeline.sliceStates['slice-001'], 'slice-blocked');
+  const followUpQueue = pipelineQueue.loadQueue(tmpBase);
+  assertSelfTest('provider integration: changes-requested slice enters blocked queue',
+    followUpQueue.blocked[0].sliceId, slice.id);
+  assertSelfTest('provider integration: changes-requested slice releases locks',
+    locksModule.loadLocks(tmpBase).files['mock.txt'].status, 'released');
+
+  stateObj = stateBeforeApprovedReview;
+  writeJson(statePath, stateObj);
+  pipelineQueue.saveQueue(tmpBase, pipelineQueue.moveToRunning(pipelineQueue.emptyQueue(), slice.id));
+  locksModule.saveLocks(tmpBase, locksModule.claimAll(locksModule.emptyLocks(), slice));
+  mockCtx._stdoutQueue.push(JSON.stringify({
+    decision: 'blocked',
+    compliant: false,
+    findings: [{ severity: 'P0', message: 'required external evidence is unavailable' }],
+    followUpTasks: ['obtain the missing evidence before retrying review'],
+    contractRevisions: [],
+  }));
+  const blockedOutcome = providers.runSliceReviewProvider(mockCtx, stateObj, statePath, tmpBase, {}, slice);
+  assertSelfTest('provider integration: blocked review cannot complete slice',
+    blockedOutcome.state.pipeline.sliceStates['slice-001'], 'slice-blocked');
+  assertSelfTest('provider integration: blocked review enters blocked queue',
+    pipelineQueue.loadQueue(tmpBase).blocked[0].sliceId, slice.id);
+  assertSelfTest('provider integration: blocked review releases locks',
+    locksModule.loadLocks(tmpBase).files['mock.txt'].status, 'released');
+
+  stateObj = stateBeforeApprovedReview;
+  writeJson(statePath, stateObj);
+  pipelineQueue.saveQueue(tmpBase, pipelineQueue.moveToRunning(pipelineQueue.emptyQueue(), slice.id));
+  locksModule.saveLocks(tmpBase, locksModule.claimAll(locksModule.emptyLocks(), slice));
   const reviewBreakingRaw = JSON.stringify({
     decision: 'changes_requested',
     compliant: false,

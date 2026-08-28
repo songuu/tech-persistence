@@ -15,6 +15,145 @@ const { stableHash } = require('./agent-orchestrator/runtime-capabilities');
 
 const schemaRoot = path.join(__dirname, '..', 'schemas', 'agent-loop');
 
+const refSchemaRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-structured-ref-'));
+try {
+  const writeRefSchema = (name, schema) => {
+    fs.writeFileSync(path.join(refSchemaRoot, name), `${JSON.stringify(schema, null, 2)}\n`);
+  };
+  const assertRefSchemaRejects = (name, schema, value, pattern) => {
+    writeRefSchema(name, schema);
+    assert.throws(
+      () => structuredOutput.assertStructuredOutput(value, {
+        schemaRoot: refSchemaRoot,
+        schemaName: name,
+        label: `restricted ref ${name}`,
+      }),
+      pattern
+    );
+  };
+
+  writeRefSchema('hash-ref.schema.json', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['hash'],
+    properties: {
+      hash: { $ref: '#/$defs/hash' },
+    },
+    $defs: {
+      hash: {
+        type: 'string',
+        pattern: '^sha256:[a-f0-9]{64}$',
+      },
+    },
+  });
+
+  const validHashRef = { hash: `sha256:${'a'.repeat(64)}` };
+  assert.deepStrictEqual(
+    structuredOutput.assertStructuredOutput(validHashRef, {
+      schemaRoot: refSchemaRoot,
+      schemaName: 'hash-ref.schema.json',
+      label: 'hash ref fixture',
+    }),
+    validHashRef
+  );
+  assert.throws(
+    () => structuredOutput.assertStructuredOutput({ hash: 99999 }, {
+      schemaRoot: refSchemaRoot,
+      schemaName: 'hash-ref.schema.json',
+      label: 'hash ref fixture',
+    }),
+    /hash ref fixture failed local schema validation.*hash/
+  );
+
+  for (const [name, ref] of [
+    ['network-ref.schema.json', 'https://example.invalid/schema.json#/$defs/value'],
+    ['sibling-ref.schema.json', 'other.schema.json#/$defs/value'],
+    ['escape-ref.schema.json', '../outside.schema.json#/$defs/value'],
+    ['absolute-ref.schema.json', 'C:\\outside.schema.json#/$defs/value'],
+    ['non-def-fragment.schema.json', '#/properties/value'],
+  ]) {
+    assertRefSchemaRejects(name, {
+      type: 'object',
+      properties: { value: { $ref: ref } },
+    }, {}, /only document-local #\/\$defs\//);
+  }
+
+  assertRefSchemaRejects('missing-ref.schema.json', {
+    type: 'object',
+    properties: { value: { $ref: '#/$defs/missing' } },
+    $defs: {},
+  }, {}, /does not resolve/);
+
+  assertRefSchemaRejects('non-string-ref.schema.json', {
+    type: 'object',
+    properties: { value: { $ref: 7 } },
+    $defs: {},
+  }, {}, /\$ref must be a string/);
+
+  assertRefSchemaRejects('cycle-ref.schema.json', {
+    type: 'object',
+    properties: { value: { $ref: '#/$defs/a' } },
+    $defs: {
+      a: { $ref: '#/$defs/b' },
+      b: { $ref: '#/$defs/a' },
+    },
+  }, {}, /reference cycle/);
+
+  const deepDefs = {};
+  const deepRefCount = structuredOutput.MAX_REF_DEPTH + 8;
+  for (let index = 0; index < deepRefCount; index += 1) {
+    deepDefs[`level${index}`] = index === deepRefCount - 1
+      ? { type: 'string' }
+      : { $ref: `#/$defs/level${index + 1}` };
+  }
+  assertRefSchemaRejects('deep-ref.schema.json', {
+    type: 'object',
+    properties: { value: { $ref: '#/$defs/level0' } },
+    $defs: deepDefs,
+  }, {}, /exceeds maximum depth/);
+} finally {
+  fs.rmSync(refSchemaRoot, { recursive: true, force: true });
+}
+
+const validAgentInvocation = {
+  schemaVersion: 'agent-invocation-v1',
+  kind: 'agent-invocation',
+  ref: 'invocation:test',
+  hash: `sha256:${'a'.repeat(64)}`,
+  idempotencyKey: `idem:${'b'.repeat(64)}`,
+  assignmentRef: 'assignment:test',
+  assignmentHash: `sha256:${'c'.repeat(64)}`,
+  assignmentIdempotencyKey: `idem:${'d'.repeat(64)}`,
+  runtime: 'codex',
+  adapter: 'codex-exec',
+  enforcement: 'contract-enforced',
+  status: 'completed',
+  actualRole: null,
+  runtimeRefs: {},
+  native: {
+    nativeAccepted: true,
+    terminalEvent: 'turn.completed',
+    terminalStatus: 'completed',
+    acceptanceErrors: [],
+  },
+};
+assert.deepStrictEqual(
+  structuredOutput.assertStructuredOutput(validAgentInvocation, {
+    schemaRoot,
+    schemaName: 'agent-invocation.schema.json',
+    label: 'tracked agent invocation schema',
+  }),
+  validAgentInvocation
+);
+assert.throws(
+  () => structuredOutput.assertStructuredOutput({ ...validAgentInvocation, hash: 99999 }, {
+    schemaRoot,
+    schemaName: 'agent-invocation.schema.json',
+    label: 'tracked agent invocation schema',
+  }),
+  /tracked agent invocation schema failed local schema validation.*\$\.hash/
+);
+
 function validHandoff() {
   return {
     summary: 'implemented',
@@ -126,6 +265,53 @@ assert.throws(
   }),
   /followUpTasks/
 );
+
+const canonicalApprovedReview = {
+  decision: 'approved',
+  compliant: true,
+  findings: [],
+  followUpTasks: [],
+  contractRevisions: [],
+};
+assert.deepStrictEqual(
+  structuredOutput.assertStructuredOutput(canonicalApprovedReview, {
+    schemaRoot,
+    schemaName: 'review-result.schema.json',
+    label: 'pipeline review',
+  }),
+  canonicalApprovedReview
+);
+
+for (const invalidReview of [
+  { ...canonicalApprovedReview, compliant: false },
+  {
+    ...canonicalApprovedReview,
+    findings: [{ severity: 'P1', message: 'required behavior is missing' }],
+  },
+  {
+    decision: 'changes_requested',
+    compliant: true,
+    findings: [],
+    followUpTasks: ['implement required behavior'],
+    contractRevisions: [],
+  },
+  {
+    decision: 'changes_requested',
+    compliant: false,
+    findings: [],
+    followUpTasks: [],
+    contractRevisions: [{ arbitrary: true }],
+  },
+]) {
+  assert.throws(
+    () => structuredOutput.assertStructuredOutput(invalidReview, {
+      schemaRoot,
+      schemaName: 'review-result.schema.json',
+      label: 'pipeline review',
+    }),
+    /pipeline review failed local schema validation/
+  );
+}
 
 const pipelineRunDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-pipeline-invalid-handoff-'));
 try {
@@ -267,4 +453,4 @@ try {
   fs.rmSync(pipelineRunDir, { recursive: true, force: true });
 }
 
-console.log('provider-structured-output: 12 passed');
+console.log('provider-structured-output: all assertions passed');

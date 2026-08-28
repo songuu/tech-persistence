@@ -4,6 +4,91 @@ const fs = require('fs');
 const path = require('path');
 
 const BUILTIN_INTEGRATION_VALIDATION = ['git diff --check'];
+const CANONICAL_REVIEW_DECISIONS = Object.freeze(['approved', 'changes_requested', 'blocked']);
+const CONTRACT_REVISION_FIELDS = Object.freeze([
+  'goal',
+  'nonGoals',
+  'globalAcceptance',
+  'architectureConstraints',
+  'runtimeTargets',
+]);
+const REVISION_ID_PATTERN = /^rev-[a-z0-9-]+$/;
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function contractRevisionErrors(revision, at) {
+  const errors = [];
+  if (!isPlainObject(revision)) return [`${at} must be an object`];
+  const allowedKeys = new Set(['revisionId', 'fields', 'rationale']);
+  const extraKeys = Object.keys(revision).filter((key) => !allowedKeys.has(key));
+  if (extraKeys.length > 0) errors.push(`${at} has unsupported field(s): ${extraKeys.join(', ')}`);
+  if (typeof revision.revisionId !== 'string' || !REVISION_ID_PATTERN.test(revision.revisionId)) {
+    errors.push(`${at}.revisionId must match ${REVISION_ID_PATTERN}`);
+  }
+  if (typeof revision.rationale !== 'string' || !revision.rationale.trim()) {
+    errors.push(`${at}.rationale must be a non-empty string`);
+  }
+  if (!isPlainObject(revision.fields)) {
+    errors.push(`${at}.fields must be a non-empty object`);
+    return errors;
+  }
+  const fieldNames = Object.keys(revision.fields);
+  if (fieldNames.length === 0) errors.push(`${at}.fields must be a non-empty object`);
+  const unsupportedFields = fieldNames.filter((key) => !CONTRACT_REVISION_FIELDS.includes(key));
+  if (unsupportedFields.length > 0) {
+    errors.push(`${at}.fields has unsupported canonical field(s): ${unsupportedFields.join(', ')}`);
+  }
+  return errors;
+}
+
+function canonicalReviewErrors(review) {
+  if (!isPlainObject(review)) return ['review must be an object'];
+  const errors = [];
+  if (!CANONICAL_REVIEW_DECISIONS.includes(review.decision)) {
+    errors.push(`decision must be one of ${CANONICAL_REVIEW_DECISIONS.join('|')}`);
+  }
+  const expectedCompliance = review.decision === 'approved';
+  if (review.compliant !== expectedCompliance) {
+    errors.push(`${review.decision || 'unknown'} requires compliant=${expectedCompliance}`);
+  }
+  for (const field of ['findings', 'followUpTasks']) {
+    if (!Array.isArray(review[field])) errors.push(`${field} must be an array`);
+  }
+  if (review.contractRevisions !== undefined && !Array.isArray(review.contractRevisions)) {
+    errors.push('contractRevisions must be an array when present');
+  }
+  const revisions = Array.isArray(review.contractRevisions) ? review.contractRevisions : [];
+  revisions.forEach((revision, index) => {
+    errors.push(...contractRevisionErrors(revision, `contractRevisions[${index}]`));
+  });
+
+  if (review.decision === 'approved') {
+    if (Array.isArray(review.findings) && review.findings.length > 0) {
+      errors.push('approved review cannot contain unresolved findings');
+    }
+    if (Array.isArray(review.followUpTasks) && review.followUpTasks.length > 0) {
+      errors.push('approved review cannot contain unresolved followUpTasks');
+    }
+    if (revisions.length > 0) {
+      errors.push('approved review cannot contain unresolved contractRevisions');
+    }
+    const rulings = Array.isArray(review.clarificationRulings) ? review.clarificationRulings : [];
+    if (rulings.some((ruling) => ruling && ruling.decision === 'revise-spec')) {
+      errors.push('approved review cannot contain unresolved revise-spec clarification rulings');
+    }
+  }
+  return errors;
+}
+
+function assertCanonicalReview(review) {
+  const errors = canonicalReviewErrors(review);
+  if (errors.length > 0) {
+    throw new Error(`canonical review contract violated: ${errors.join('; ')}`);
+  }
+  return review;
+}
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -64,13 +149,20 @@ function loadIntegrationReview(runDir) {
 }
 
 function reviewApproved(review) {
-  if (!review) return false;
-  if (typeof review.decision !== 'string') return false;
-  return review.decision.toLowerCase() === 'approved';
+  try {
+    assertCanonicalReview(review);
+    return review.decision === 'approved';
+  } catch (_error) {
+    return false;
+  }
 }
 
 module.exports = {
   BUILTIN_INTEGRATION_VALIDATION,
+  CANONICAL_REVIEW_DECISIONS,
+  CONTRACT_REVISION_FIELDS,
+  canonicalReviewErrors,
+  assertCanonicalReview,
   aggregateIntegrationValidationCommands,
   writeSliceReview,
   writeIntegrationReview,

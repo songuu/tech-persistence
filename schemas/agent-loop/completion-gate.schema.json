@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/completion-gate.schema.json",
+  "title": "Agent Loop Completion Gate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "scope",
+    "ok",
+    "reasons",
+    "evidenceRefs"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "completion-gate-v1" },
+    "scope": {
+      "type": "string",
+      "enum": ["classic", "slice", "integration", "unknown"]
+    },
+    "ok": { "type": "boolean" },
+    "reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "highestRisk": {
+      "type": "string",
+      "enum": ["L0", "L1", "L2", "L3", "L4"]
+    },
+    "validationStatus": { "type": "string", "minLength": 1 }
+  }
+}

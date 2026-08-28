@@ -14,6 +14,8 @@ const locksModule = require('./locks');
 const driftDetector = require('./drift-detector');
 const reconciliation = require('./reconciliation');
 const validationPolicy = require('./validation-command-policy');
+const validationRunner = require('./validation-runner');
+const completionGate = require('./completion-gate');
 const { redactSensitiveText, redactArtifactValue } = require('../lib/redaction');
 const executionEnvelopes = require('./execution-envelopes');
 
@@ -22,6 +24,79 @@ function writeText(file, content) { ensureDir(path.dirname(file)); fs.writeFileS
 function writeJson(file, data) { writeText(file, `${JSON.stringify(data, null, 2)}\n`); }
 function readJson(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
 function safeRead(file) { return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''; }
+
+function runRef(...parts) {
+  return parts.join('/');
+}
+
+function readJsonIfExists(file, fallback = null) {
+  return fs.existsSync(file) ? readJson(file) : fallback;
+}
+
+function resolvedClarifications(reviewResult) {
+  const rulings = Array.isArray(reviewResult && reviewResult.clarificationRulings)
+    ? reviewResult.clarificationRulings
+    : [];
+  return rulings.map((ruling) => ({
+    id: ruling.id,
+    status: ruling.decision === 'confirm-assumption' ? 'resolved' : 'open',
+    decision: ruling.decision,
+  }));
+}
+
+function sliceCompletionGateInput(runDir, slice, reviewResult) {
+  const sliceDir = path.join(runDir, 'slices', slice.id);
+  const validation = readJsonIfExists(path.join(sliceDir, 'validation.json'), {});
+  const changedFiles = readJsonIfExists(path.join(sliceDir, 'changed-files.json'), []);
+  const changedFilesGate = readJsonIfExists(path.join(sliceDir, 'changed-files-gate.json'), {});
+  const evidenceRefs = [
+    runRef('slices', slice.id, 'handoff.json'),
+    runRef('slices', slice.id, 'diff.patch'),
+    runRef('slices', slice.id, 'changed-files-gate.json'),
+    runRef('slices', slice.id, 'validation.json'),
+    runRef('slices', slice.id, 'review.json'),
+  ];
+  const evidenceFiles = evidenceRefs.map((ref) => path.join(runDir, ...ref.split('/')));
+  const material = Array.isArray(changedFiles) && changedFiles.length > 0;
+  return {
+    scope: 'slice',
+    risk: slice.risk,
+    review: reviewResult,
+    validation: {
+      status: validation.status,
+      evidenceRef: runRef('slices', slice.id, 'validation.json'),
+    },
+    material,
+    effects: material
+      ? { state: 'committed', refs: [runRef('slices', slice.id, 'diff.patch')] }
+      : { state: 'none', refs: [] },
+    evidence: {
+      complete: evidenceFiles.every((file) => fs.existsSync(file)) && changedFilesGate.ok === true,
+      refs: evidenceRefs,
+    },
+    clarifications: resolvedClarifications(reviewResult),
+    revisions: Array.isArray(reviewResult.contractRevisions) ? reviewResult.contractRevisions : [],
+    blockers: [],
+  };
+}
+
+function blockSliceAfterReview(ctx, state, statePath, runDir, slice, reason, gate, driftEntries, revisions) {
+  const gatePath = path.join(runDir, 'slices', slice.id, 'completion-gate.json');
+  if (gate) writeJson(gatePath, gate);
+  let next = transitionSlice(state, slice.id, pipelineState.SLICE_STATES.BLOCKED, {
+    actor: 'review-provider',
+    reason,
+  });
+  let q = queueModule.loadQueue(runDir);
+  q = queueModule.moveToBlocked(q, slice.id, reason);
+  queueModule.saveQueue(runDir, q);
+  let locks = locksModule.loadLocks(runDir);
+  locks = locksModule.releaseSliceLocks(locks, slice);
+  locksModule.saveLocks(runDir, locks);
+  writeJson(statePath, next);
+  ctx.log(`[GATE] slice ${slice.id} blocked after review: ${reason}`);
+  return { state: next, drift: driftEntries || [], revisions: revisions || [] };
+}
 
 function recordProviderRun(state, record) {
   if (!Array.isArray(state.providerRuns)) state.providerRuns = [];
@@ -570,6 +645,7 @@ function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
       'review-result.schema.json',
       `pipeline slice review ${slice.id}`
     );
+    review.assertCanonicalReview(reviewParsed);
   } catch (error) {
     writeJson(path.join(runDir, 'slices', slice.id, 'review.parse-error.json'), {
       message: error.message,
@@ -600,6 +676,23 @@ function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
   const driftEntries = [];
 
   if (approved && revisions.length === 0) {
+    const gate = completionGate.evaluateCompletionGate(
+      sliceCompletionGateInput(runDir, slice, reviewParsed)
+    );
+    writeJson(path.join(runDir, 'slices', slice.id, 'completion-gate.json'), gate);
+    if (!gate.ok) {
+      return blockSliceAfterReview(
+        ctx,
+        next,
+        statePath,
+        runDir,
+        slice,
+        `slice completion gate rejected: ${gate.reasons.join('; ')}`,
+        gate,
+        [],
+        []
+      );
+    }
     next = transitionSlice(next, slice.id, pipelineState.SLICE_STATES.REVIEWED, {
       actor: 'review-provider',
       reason: 'slice review approved',
@@ -615,7 +708,7 @@ function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
     locks = locksModule.markCompletedOwner(locks, slice);
     locksModule.saveLocks(runDir, locks);
     writeJson(statePath, next);
-    return { state: next, drift: [], revisions: [] };
+    return { state: next, drift: [], revisions: [], completionGate: gate };
   }
 
   for (let index = 0; index < revisions.length; index += 1) {
@@ -673,34 +766,31 @@ function runSliceReviewProvider(ctx, state, statePath, runDir, options, slice) {
     let q = queueModule.loadQueue(runDir);
     q = queueModule.moveToRejected(q, slice.id);
     queueModule.saveQueue(runDir, q);
+    let locks = locksModule.loadLocks(runDir);
+    locks = locksModule.releaseSliceLocks(locks, slice);
+    locksModule.saveLocks(runDir, locks);
     writeJson(statePath, next);
     ctx.log(`[WARN] slice ${slice.id} triggered ${driftEntries.length} revision(s); run entered contract-conflict.`);
     return { state: next, drift: driftEntries, revisions };
   }
 
-  next = transitionSlice(next, slice.id, pipelineState.SLICE_STATES.REVIEWED, {
-    actor: 'review-provider',
-    reason: 'slice review accepted local revision',
-  });
-  next = transitionSlice(next, slice.id, pipelineState.SLICE_STATES.COMPLETED, {
-    actor: 'review-provider',
-    reason: 'slice review completed with local revision',
-  });
-  next = {
-    ...next,
-    pipeline: {
-      ...next.pipeline,
-      lastDriftReportAt: ctx.nowIso(),
-    },
-  };
-  let q = queueModule.loadQueue(runDir);
-  q = queueModule.moveToCompleted(q, slice.id);
-  queueModule.saveQueue(runDir, q);
-  let locks = locksModule.loadLocks(runDir);
-  locks = locksModule.markCompletedOwner(locks, slice);
-  locksModule.saveLocks(runDir, locks);
-  writeJson(statePath, next);
-  return { state: next, drift: driftEntries, revisions };
+  const reason = revisions.length > 0
+    ? `slice review proposed ${revisions.length} unresolved contract revision(s)`
+    : `slice review decision=${reviewParsed.decision}`;
+  const gate = completionGate.evaluateCompletionGate(
+    sliceCompletionGateInput(runDir, slice, reviewParsed)
+  );
+  return blockSliceAfterReview(
+    ctx,
+    next,
+    statePath,
+    runDir,
+    slice,
+    reason,
+    gate,
+    driftEntries,
+    revisions
+  );
   });
   });
 }
@@ -710,12 +800,158 @@ function collectSlicesByState(state, target) {
   return Object.keys(state.pipeline.sliceStates).filter((id) => state.pipeline.sliceStates[id] === target);
 }
 
+function uniqueRefs(values) {
+  return [...new Set(values.filter((value) => typeof value === 'string' && value.trim()))];
+}
+
+function integrationValidationRefs(validation) {
+  const refs = [validation && validation.artifactRef];
+  for (const command of (validation && Array.isArray(validation.commands) ? validation.commands : [])) {
+    if (command.stdout && command.stdout.ref) refs.push(command.stdout.ref);
+    if (command.stderr && command.stderr.ref) refs.push(command.stderr.ref);
+  }
+  return uniqueRefs(refs);
+}
+
+function integrationPipelineSummary(queue, slices) {
+  return {
+    requiredSlices: slices.map((slice) => slice.id),
+    completedSlices: [...queue.completed],
+    pendingSlices: [...queue.pending, ...queue.ready],
+    runningSlices: [...queue.running],
+    blockedSlices: queue.blocked.map((entry) => entry.sliceId),
+  };
+}
+
+function integrationMaterialEvidence(runDir, slices) {
+  const materialSliceIds = slices
+    .filter((slice) => {
+      const changedFiles = readJsonIfExists(
+        path.join(runDir, 'slices', slice.id, 'changed-files.json'),
+        []
+      );
+      return Array.isArray(changedFiles) && changedFiles.length > 0;
+    })
+    .map((slice) => slice.id);
+  return {
+    material: materialSliceIds.length > 0,
+    refs: materialSliceIds.map((sliceId) => runRef('slices', sliceId, 'diff.patch')),
+  };
+}
+
+function integrationCompletionGateInput(runDir, contract, slices, queue, reviewResult, validation) {
+  const validationRefs = integrationValidationRefs(validation);
+  const sliceGateRefs = slices.map((slice) => runRef('slices', slice.id, 'completion-gate.json'));
+  const reviewRefs = reviewResult ? ['integration-review.json'] : [];
+  const evidenceRefs = uniqueRefs([...validationRefs, ...sliceGateRefs, ...reviewRefs]);
+  const materialEvidence = integrationMaterialEvidence(runDir, slices);
+  const evidenceFilesExist = evidenceRefs.length > 0 && evidenceRefs.every((ref) => (
+    fs.existsSync(path.join(runDir, ...ref.split('/')))
+  ));
+  const sliceGatesPass = slices.every((slice) => {
+    const gate = readJsonIfExists(path.join(runDir, 'slices', slice.id, 'completion-gate.json'));
+    return gate && gate.ok === true;
+  });
+  return {
+    scope: 'integration',
+    risk: contract.riskLevel,
+    review: reviewResult,
+    validation: {
+      status: validation && validation.status,
+      evidenceRefs: validationRefs,
+    },
+    material: materialEvidence.material,
+    effects: materialEvidence.material
+      ? { state: 'committed', refs: materialEvidence.refs }
+      : { state: 'none', refs: [] },
+    evidence: {
+      complete: evidenceFilesExist && sliceGatesPass,
+      refs: evidenceRefs,
+    },
+    clarifications: resolvedClarifications(reviewResult),
+    revisions: reviewResult && Array.isArray(reviewResult.contractRevisions)
+      ? reviewResult.contractRevisions
+      : [],
+    blockers: queue.blocked.map((entry) => ({
+      id: entry.sliceId,
+      status: 'open',
+      reason: entry.reason,
+    })),
+    pipeline: integrationPipelineSummary(queue, slices),
+  };
+}
+
+function runIntegrationValidation(ctx, state, runDir, options, commands) {
+  const runner = typeof ctx.runIntegrationValidation === 'function'
+    ? ctx.runIntegrationValidation
+    : validationRunner.runValidationCommands;
+  const configuredTimeout = ctx.providerTimeoutMs(options);
+  const runnerOptions = {
+    workdir: ctx.resolveWorkdir(options),
+    runDir,
+    attemptId: `integration-${ctx.logStamp()}-${Array.isArray(state.providerRuns) ? state.providerRuns.length : 0}`,
+  };
+  if (Number.isFinite(configuredTimeout) && configuredTimeout > 0) {
+    runnerOptions.timeoutMs = Math.min(
+      validationRunner.MAX_TIMEOUT_MS,
+      Math.max(1, Math.floor(configuredTimeout))
+    );
+  }
+  return runner(commands, runnerOptions);
+}
+
 function runIntegrationReviewProvider(ctx, state, statePath, runDir, options) {
   const contract = globalContract.loadGlobalContract(runDir);
   if (!contract) throw new Error('integration review: global contract not found');
   const slices = slicePlanner.loadAllSlices(runDir);
   const aggregated = review.aggregateIntegrationValidationCommands(contract, slices);
-  const prompt = slicePlanner.buildIntegrationReviewPrompt(contract, slices, { aggregatedValidation: aggregated });
+  const queue = queueModule.loadQueue(runDir);
+  let validation;
+  try {
+    validation = runIntegrationValidation(ctx, state, runDir, options, aggregated);
+  } catch (error) {
+    const errorArtifact = {
+      schemaVersion: 'integration-validation-error-v1',
+      status: 'failed',
+      artifactRef: 'integration-validation.error.json',
+      message: error.message,
+      generatedAt: ctx.nowIso(),
+    };
+    writeJson(path.join(runDir, errorArtifact.artifactRef), errorArtifact);
+    const gate = completionGate.evaluateCompletionGate(integrationCompletionGateInput(
+      runDir,
+      contract,
+      slices,
+      queue,
+      null,
+      errorArtifact
+    ));
+    writeJson(path.join(runDir, 'integration-completion-gate.json'), gate);
+    writeJson(statePath, state);
+    ctx.log(`[GATE] integration validation could not run: ${error.message}`);
+    return state;
+  }
+
+  if (!validation || validation.status !== 'passed') {
+    const gate = completionGate.evaluateCompletionGate(integrationCompletionGateInput(
+      runDir,
+      contract,
+      slices,
+      queue,
+      null,
+      validation || { status: 'failed', artifactRef: 'integration-validation.json', commands: [] }
+    ));
+    writeJson(path.join(runDir, 'integration-completion-gate.json'), gate);
+    writeJson(statePath, state);
+    ctx.log(`[GATE] integration validation status=${validation && validation.status ? validation.status : 'missing'}; reviewer was not called.`);
+    return state;
+  }
+
+  const prompt = slicePlanner.buildIntegrationReviewPrompt(contract, slices, {
+    executedValidation: aggregated,
+    validationArtifactPath: validation.artifactRef,
+    validationStatus: validation.status,
+  });
   writeText(path.join(runDir, 'prompts', 'integration-review.md'), prompt);
 
   const { record, result, runtimeOutput, attempt } = callClaudeStructured(
@@ -735,6 +971,7 @@ function runIntegrationReviewProvider(ctx, state, statePath, runDir, options) {
       'review-result.schema.json',
       'pipeline integration review'
     );
+    review.assertCanonicalReview(reviewParsed);
   } catch (error) {
     writeJson(path.join(runDir, 'integration-review.parse-error.json'), {
       message: error.message,
@@ -755,21 +992,26 @@ function runIntegrationReviewProvider(ctx, state, statePath, runDir, options) {
 
   return ctx.providerPostAcceptanceStep('state-transition', () => {
   let next = recordProviderRun(state, record);
-  if (review.reviewApproved(reviewParsed)) {
+  const gate = completionGate.evaluateCompletionGate(integrationCompletionGateInput(
+    runDir,
+    contract,
+    slices,
+    queue,
+    reviewParsed,
+    validation
+  ));
+  writeJson(path.join(runDir, 'integration-completion-gate.json'), gate);
+  if (gate.ok) {
     next = transitionRun(next, pipelineState.RUN_STATES.COMPLETED, {
       actor: 'review-provider',
-      reason: 'integration review approved',
+      reason: 'integration completion gate passed',
     });
     writeJson(statePath, next);
-    ctx.log(`[OK] integration review approved; run ${state.runId} completed.`);
+    ctx.log(`[OK] integration completion gate passed; run ${state.runId} completed.`);
     return next;
   }
-  next = transitionRun(next, pipelineState.RUN_STATES.EXECUTING_SLICES, {
-    actor: 'review-provider',
-    reason: 'integration review requested follow-up',
-  });
   writeJson(statePath, next);
-  ctx.log(`[WARN] integration review decision=${reviewParsed.decision || 'unknown'}; run returns to executing-slices for follow-up.`);
+  ctx.log(`[GATE] integration completion denied: ${gate.reasons.join('; ')}`);
   return next;
   });
   });
