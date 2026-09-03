@@ -453,7 +453,11 @@ Claude legacy SessionStart hook 会注入 caveman 规则；如需关闭 Claude �
 /sprint --goal "<目标>" --max-iter 3 --until "npm test" <需求>
 ```
 
-终止优先级（确定性优先）：`--until` 命令 exit 0 或迭代达 `--max-iter`（默认 3，硬上限）即停，**优先于** LLM 目标达成自评（仅 advisory，可提前停、不可越天花板）。`--goal` 单独使用不开启自主——自主循环必须显式叠加 `--auto`。`--runtime current|both`（默认 current；both 委托 agent-loop 编排器，本版本仅文档化）。三者正交可组合。完整协议见 `user-level/commands/sprint.md` 的「Goal Loop 协议」段。
+终止优先级（确定性优先）：`--until` 命令 exit 0 或迭代达 `--max-iter`（默认 3，硬上限）即停，**优先于** LLM 目标达成自评（仅 advisory，可提前停、不可越天花板）。`--goal` 单独使用不开启自主——自主循环必须显式叠加 `--auto`。`--runtime current|both` 默认 current；both 是外部编排兼容入口，当前回退 current。三者正交可组合。完整协议见 `user-level/commands/sprint.md` 的「Goal Loop 协议」段。
+
+### Sprint 运行时可移植性
+
+`/sprint` 默认由**当前宿主**执行，不要求同时安装 Codex 与 Claude Code：只有 Codex 就由 Codex 闭环，只有 Claude Code 就由 Claude Code 闭环；两者都没有但当前运行在其他框架时，由该框架按实际 capability 执行。缺失或 OAuth 过期的非当前 provider 不是 Sprint blocker。`/agent-loop` 是用户显式选择的可选外部编排 backend；它的 preflight 失败只影响该 backend，不应把 Plan 卡住并要求登录某个固定厂商。完整决策矩阵与 partial-effects 安全边界见 `user-level/commands/sprint.md` 的「运行时可移植性契约」。
 
 ### Obsidian 集成（可选）
 ```powershell

@@ -19,6 +19,8 @@ When the command instructions below mention `/agent-loop`, interpret that as thi
 
 v7 保留 v6 的冻结 spec 主路径，同时把 Codex 与 Claude Code 的原生能力放进同一个可审计控制面：
 
+`/agent-loop` 是一个**可选执行后端**，不是 `/sprint` 的前置条件；任一 adapter 不可用都不会成为默认 `/sprint --runtime current` 的前置条件。不得因为需求中出现 Harness、Transcript 或 provider 品牌名等领域词就自动选择 `/agent-loop`；只有用户显式调用本命令，或显式选择已通过 preflight 的外部编排 backend，才进入以下双 provider 路径。
+
 1. Tech Persistence orchestrator 是默认且唯一的 scheduler/state owner；每个阶段只有一个 writer。
 2. Claude Code 只负责需求分析、技术设计、任务拆解和只读复审；默认保留 `print` adapter，`bare` 必须显式启用或由 enforce router 选择。
 3. 人类 review 后 freeze spec；Codex 默认通过 `exec` adapter 按冻结 spec 实现，并产出 diff、validation、handoff。

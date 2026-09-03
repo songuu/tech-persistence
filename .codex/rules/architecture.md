@@ -17,6 +17,15 @@
 
 ## 决策列表
 
+### ADR-041: Sprint 按宿主能力执行，品牌 provider 只作为显式可选后端 (2026-09-03)
+
+- **状态**：已采纳
+- **上下文**：`/sprint` 默认语义已经是 `--runtime current`，但命令文档仍把并行实现、复审和计划中的 `both` 描述为 Claude/Codex 固定分工，导致执行者可能在当前宿主完全可用时，因为未选中的 Claude OAuth 过期或 Codex 未安装而停在 Plan。用户环境还可能只有一个 provider，或由其他 Harness/Agent 框架托管。
+- **决策**：Sprint 核心只依赖当前可执行宿主，并按阶段 capability 决定 spawn、inline、串行或显式 backend 委托；provider 品牌不是 capability。`/agent-loop` 保持独立、显式选择的可选后端，需求文本出现 Harness/Transcript/provider 名称不构成选择信号。非当前 provider 不可用不阻塞 Sprint；detached runner 没有任何候选时只阻塞具体阶段并报告缺失 capability。副作用前可换到满足策略的候选，partial/committed effects 后继续执行既有 same-provider resume/reconciliation 规则，禁止切换 writer。
+- **原因**：把方法论编排与 provider transport 解耦，才能同时覆盖仅 Codex、仅 Claude Code、其他宿主和双 provider 环境，又不削弱 ADR-037 的 writer/effect 安全边界。
+- **备选**：把 Claude 登录作为 Sprint 全局前置；要求所有用户安装两套 CLI；根据需求里出现的 “Harness” 自动进入 `/agent-loop`。这些方案把部署偶然性提升为产品架构约束，并会产生与截图一致的错误阻塞。
+- **影响**：`--runtime current` 始终在当前宿主闭环；`both` 暂作兼容入口并回退 current，直到 agent-loop 有 goal-budget 承接 seam。跨 provider 独立复审不可用时必须标记 assurance 降级，但不能把流程伪装成多 provider，也不能把非当前 provider 的认证失败当成恢复条件。
+
 ### ADR-034: Gate B-1 cohort 排除使用 authority-owned 不可变 tombstone (2026-09-01)
 - **状态**：已采纳（机制已落地；未对真实 run 执行排除）
 - **上下文**：expected-sample marker 让中断 run 不会因缺 Receipt 而静默消失，但永久把明确放弃或评估前被替代的 run 记为错误，也会让 cohort 生命周期无法收敛。若 provider 或普通运维脚本可在看到结果后排除样本，则 Gate B-1 分母可被操纵。

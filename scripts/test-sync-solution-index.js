@@ -102,6 +102,31 @@ test('upsertSolutionSection replaces existing bounded section', () => {
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
+test('upsertSolutionSection preserves managed comments after the solution index', () => {
+  const repo = makeRepo();
+  writeSolution(repo, '2026-05-18-a.md', 'title: "A"\ndate: 2026-05-18\ntags: [solution, alpha]', '# A\n\n## Problem\n\nAlpha problem.');
+  const entries = collectSolutions(repo);
+  const standardsMarker = '<!-- tech-persistence:project-standards:start -->';
+  const before = [
+    '# Claude',
+    '',
+    SECTION_ANCHOR,
+    BEGIN_MARKER,
+    '- old',
+    END_MARKER,
+    standardsMarker,
+    '## Project standards routing',
+    'keep',
+    '',
+  ].join('\n');
+
+  const after = upsertSolutionSection(before, entries);
+  assert.ok(after.includes(standardsMarker));
+  assert.ok(after.indexOf(END_MARKER) < after.indexOf(standardsMarker));
+  assert.ok(after.indexOf(standardsMarker) < after.indexOf('## Project standards routing'));
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
 test('upsertSolutionSection inserts technical sediment section when missing', () => {
   const repo = makeRepo();
   writeSolution(repo, '2026-05-18-a.md', 'title: "A"\ndate: 2026-05-18\ntags: [solution, alpha]', '# A\n\n## Problem\n\nAlpha problem.');

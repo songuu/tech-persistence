@@ -168,10 +168,10 @@
 > Refresh with `node scripts/sync-solution-index.js --all`.
 
 - [2026-09-03] [windows/codex/claude] Windows 插件安装器的 CLI 能力对齐与事务恢复 — Windows 执行 powershell -ExecutionPolicy Bypass -File .\install-all.ps1 -All 时，Claude 插件安装报 unknown option '--yes'，Codex 安装则因 PATH 中的旧 CLI 缺少 plugin add/list 命令而失败。失败后的安装事务还会停在 rollback-failed。 → `docs/solutions/2026-09-03-windows-plugin-installer-cli-parity.md`
+- [2026-09-03] [sprint/runtime/provider] Sprint 运行时不能绑定固定 Provider — /sprint 在当前宿主本可继续执行时，因为另一个可选 provider（例如 Claude Code）的安装、登录或 OAuth 状态异常而停在 Plan，并要求用户登录该固定品牌。实际环境可能只有 Codex、只有 Claude Code、两者都没有但存在其他可执行框架，或根本没有可用执行宿主。 → `docs/solutions/2026-09-03-sprint-runtime-portability.md`
 - [2026-09-03] [harness/transcript/linux] Harness 生产资格中的 OS 能力与 Transcript 消费边界 — 受控 Linux 上的任务可以入队，但 provider 启动或 Transcript 最终同步会停滞；单独的模型 canary、旧 Transcript timer 绿色和 HTTP 200 都不能证明登录任务全链路完成。 → `docs/solutions/2026-09-03-harness-production-qualification-boundaries.md`
 - [2026-09-02] [postgres/authorization/concurrency] 持久任务授权必须固定策略行，并证明真实锁等待 — 任务创建和入队即使使用 READ COMMITTED、全局 advisory lock 和数据库内身份校验，仍可能与不使用同一锁的管理员撤权产生竞争。成功路径测试通过不能证明撤权路径安全。 → `docs/solutions/2026-09-02-task-authorization-row-locks.md`
 - [2026-09-02] [harness/transcript/security] Harness 接线不能用 canary、路径或数据库计数替代真实工作流证据 — 独立外部 runtime canary、手工 transcript 导入成功，曾被扩大解释为 Harness/Transcript 已完整接入。实际主 dispatch、自动采集、增长 cursor 和 worker 均存在缺口。 → `docs/solutions/2026-09-02-harness-wiring-evidence-boundaries.md`
-- [2026-09-02] [authentication/postgres/security] 认证请求必须限制未完成业务，而非只限制连接 — 连接数限制不能约束客户端断开后仍在等待 PostgreSQL 的业务请求。认证服务还需要验证事务快照、接收期限和关闭失败，而不仅是登录成功/失败。 → `docs/solutions/2026-09-02-auth-business-admission-and-shutdown.md`
 
 <!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->
 <!-- tech-persistence:project-standards:start -->

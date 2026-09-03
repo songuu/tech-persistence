@@ -165,7 +165,7 @@ function assertNativeContracts() {
   }
 
   const sprint = readSkill('sprint');
-  for (const reference of ['bootstrap.md', 'resume.md', 'goal-loop.md', 'figma.md']) {
+  for (const reference of ['bootstrap.md', 'resume.md', 'goal-loop.md', 'figma.md', 'runtime-portability.md']) {
   assert(Buffer.byteLength(sprint, 'utf8') < 4096, 'native sprint SKILL.md must stay below 4 KiB');
   assert.match(sprint, /只加载当前 Phase/);
   assert.match(sprint, /不得[^\n]*(?:预热|预读)[^\n]*未来 Phase/);

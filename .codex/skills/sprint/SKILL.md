@@ -32,7 +32,7 @@ When the command instructions below mention `/sprint`, interpret that as this `$
 /sprint resume --auto    ← 恢复并启用自动审查
 ```
 
-`--goal` 的修饰参数：`--max-iter N`（默认 3，循环硬上限）、`--until "<shell 命令>"`（命令 exit 0 即终止）、`--runtime current|both`（默认 current；both 仅文档化未实装）。
+`--goal` 的修饰参数：`--max-iter N`（默认 3，循环硬上限）、`--until "<shell 命令>"`（命令 exit 0 即终止）、`--runtime current|both`（默认 current；both 是兼容入口，当前仍回退 current）。
 
 `--caveman` / `--auto` / `--goal` 三者正交，可任意组合：`/sprint --goal "<目标>" --caveman --auto <需求>`。**`--goal` 单独使用不开启自主**——自主循环必须显式叠加 `--auto`。
 
@@ -55,7 +55,16 @@ $sprint resume --auto
 - `--goal "<目标>"`：目标驱动循环。目标成为一等被追踪对象（写入 sprint 文档 frontmatter，注入每个 Phase 作为 north-star），think→plan→work→review→compound 循环可重入直到目标达成或触发终止。详见下方「Goal Loop 协议」。**`--goal` 不改变 gate 行为**——单独使用时人工 gate 全保留，自主须叠加 `--auto`。
 - `--max-iter N`：循环硬上限，默认 3。无论 LLM 是否判定达成，迭代数到达 N 必停。
 - `--until "<shell 命令>"`：确定性终止条件。每轮收尾经 Bash 真实执行该命令，exit 0 即终止循环（ground truth，优先于 LLM 自评）。
-- `--runtime current|both`：执行运行时。`current`（默认）在当前运行时内闭环；`both` 委托 agent-loop 编排器跨运行时执行——**本版本仅文档化语义，未实装**（见下方「Goal Loop 协议 → 运行时选择」）。
+- `--runtime current|both`：执行运行时。`current`（默认）由当前可执行宿主闭环；`both` 只有在用户显式选择且 backend preflight 通过时才可委托，否则按 `current` 继续。
+
+## 运行时可移植性契约
+
+- `/sprint` 默认只依赖**当前可执行宿主**，不把 Codex、Claude Code 或 `/agent-loop` 当作全局前置条件。
+- 只有 Codex 时由 Codex 闭环；只有 Claude Code 时由 Claude Code 闭环；Codex 和 Claude Code 都不可用但当前是其他框架时，由该宿主按实际 capability 执行。
+- 非当前 provider 缺失、OAuth 过期或 CLI 未安装，不得阻塞当前 Sprint。需求里出现 Harness、Transcript 或 provider 品牌名，也不得触发隐式 backend 切换。
+- 当前宿主支持原生 spawn 时可分派 Phase 内任务；不支持时 inline/串行执行并报告独立性降级，不把降级伪装成多 provider review。
+- 只有用户显式选择外部编排 backend 时才运行对应 preflight；失败只影响该 backend，回退当前宿主，不得默认要求用户登录某个固定厂商。
+- provider 在副作用前失败可换到满足能力和策略的候选；存在 partial effects 后禁止切换 writer，只能恢复同一 provider 或进入 reconciliation。
 
 ## 项目文档贯穿全流程
 
@@ -233,7 +242,7 @@ Phase 5 Compound 收尾
 ### 运行时选择
 
 - `--runtime current`（默认）：在当前运行时内完成整个目标循环。
-- `--runtime both`：委托 agent-loop 编排器跨运行时执行（spec 与实现分属不同 provider）。**本版本仅文档化语义，未实装**：agent-loop 现无 `--max-iter` / goal-budget 可承接委托，需另设计 seam。传入 `--runtime both` 时按 `current` 执行并提示该限制。
+- `--runtime both`：兼容入口，表示尝试显式委托可用的外部 backend，不表示必须同时安装两个固定 provider。当前仍按 `current` 执行并提示 goal-budget seam 限制。
 
 ## 执行流程
 
@@ -277,7 +286,7 @@ Caveman mode 输出只展示任务表和验证策略；完整方案写入 sprint
 
 ### Phase 3: Work (含自动 checkpoint)
 
-> 同批 `[P]` task 在支持 Agent spawn 的 runtime 下通过 `/work` 的 **Worker spawn 协议**真并行实施（用 Agent tool 的 `isolation: "worktree"` 隔离）；Codex CLI 端保留 batch fallback。详见 `work.md` 的「Worker spawn 协议」段。
+> 同批 `[P]` task 在当前 runtime 支持原生 Agent spawn 时真并行实施；不支持时由当前宿主 batch/inline 执行。详见 `work.md` 的「Worker spawn 协议」段。
 
 ```
 Phase 3/5: Work
@@ -336,7 +345,7 @@ Next: Task N+1
 
 ### Phase 4: Review (暂停确认)
 
-> 支持 Agent spawn 的 runtime 下 `/review` 通过 **Spawn 协议**真并行 spawn 5 reviewer 子进程（按 risk-aware dispatch matrix 选定子集），共享 4 status 返回契约（DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED）。任一 reviewer 报 `BLOCKED` 即使 `--auto` 也强制人工 gate。Codex CLI 端保留 inline 5 视角 fallback。详见 `review.md` 的「Spawn 协议」段。
+> 当前 runtime 支持原生 Agent spawn 时，`/review` 按 risk-aware matrix 并行 reviewer；不支持时由当前宿主 inline 执行相同视角并标记独立性降级。任一 reviewer 报 `BLOCKED` 仍强制人工 gate。
 
 ```
 Phase 4/5: Review
@@ -618,4 +627,3 @@ deadcode_until:
 ## 不适用
 - 小 bug / 已知根因 bug → 隐式 `/work` bug 分支直接修 → 回归测试 → /compound
 - 探索调研 → 自由对话 → /learn
-

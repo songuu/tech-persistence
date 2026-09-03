@@ -177,6 +177,17 @@ function renderSolutionSection(entries, options = {}) {
 function findSectionBounds(lines) {
   const startIdx = lines.findIndex((line) => line.trim() === SECTION_ANCHOR);
   if (startIdx < 0) return null;
+
+  const managedEndIdx = lines.findIndex(
+    (line, index) => index >= startIdx && line.trim() === END_MARKER
+  );
+  if (managedEndIdx >= 0) {
+    return { startIdx, endIdx: managedEndIdx + 1 };
+  }
+
+  // Legacy sections may predate managed markers. Keep their original
+  // heading-bounded replacement behavior without consuming comments that
+  // follow a modern END marker (for example project-standards routing).
   let endIdx = lines.length;
   for (let i = startIdx + 1; i < lines.length; i += 1) {
     if (/^#{1,3}\s/.test(lines[i])) {

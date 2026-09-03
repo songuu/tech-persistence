@@ -19,7 +19,7 @@ description: "全流程冲刺：think→plan→work→review→compound，含上
 /sprint resume --auto    ← 恢复并启用自动审查
 ```
 
-`--goal` 的修饰参数：`--max-iter N`（默认 3，循环硬上限）、`--until "<shell 命令>"`（命令 exit 0 即终止）、`--runtime current|both`（默认 current；both 仅文档化未实装）。
+`--goal` 的修饰参数：`--max-iter N`（默认 3，循环硬上限）、`--until "<shell 命令>"`（命令 exit 0 即终止）、`--runtime current|both`（默认 current；both 是兼容入口，当前仍回退 current）。
 
 `--caveman` / `--auto` / `--goal` 三者正交，可任意组合：`/sprint --goal "<目标>" --caveman --auto <需求>`。**`--goal` 单独使用不开启自主**——自主循环必须显式叠加 `--auto`。
 
@@ -42,7 +42,27 @@ $sprint resume --auto
 - `--goal "<目标>"`：目标驱动循环。目标成为一等被追踪对象（写入 sprint 文档 frontmatter，注入每个 Phase 作为 north-star），think→plan→work→review→compound 循环可重入直到目标达成或触发终止。详见下方「Goal Loop 协议」。**`--goal` 不改变 gate 行为**——单独使用时人工 gate 全保留，自主须叠加 `--auto`。
 - `--max-iter N`：循环硬上限，默认 3。无论 LLM 是否判定达成，迭代数到达 N 必停。
 - `--until "<shell 命令>"`：确定性终止条件。每轮收尾经 Bash 真实执行该命令，exit 0 即终止循环（ground truth，优先于 LLM 自评）。
-- `--runtime current|both`：执行运行时。`current`（默认）在当前运行时内闭环；`both` 委托 agent-loop 编排器跨运行时执行——**本版本仅文档化语义，未实装**（见下方「Goal Loop 协议 → 运行时选择」）。
+- `--runtime current|both`：执行运行时。`current`（默认）由当前可执行宿主闭环，不绑定厂商；`both` 是计划中的外部编排兼容入口，只有在用户显式选择且 backend preflight 通过时才可委托，否则按 `current` 继续（见下方「Goal Loop 协议 → 运行时选择」）。
+
+## 运行时可移植性契约
+
+`/sprint` 是方法论编排，不是 Codex、Claude Code 或 `/agent-loop` 的别名。默认唯一硬依赖是：当前会话存在一个能够读写目标工作区、调用必要工具并返回结果的**当前可执行宿主**。宿主可以是 Codex、Claude Code、其他 Agent/Harness，或不暴露这两个品牌名的框架。
+
+| 可用环境 | `/sprint` 行为 |
+|----------|----------------|
+| 只有 Codex | 由 Codex 在当前会话完成 Think→Plan→Work→Review→Compound；没有 Claude Code 只会降低“跨 provider 独立复审”保证，不阻塞阶段推进 |
+| 只有 Claude Code | 由 Claude Code 在当前会话完成全流程；没有 Codex 不得阻塞 Work |
+| Codex 和 Claude Code 都可用 | 默认仍由当前宿主闭环；只有用户显式选择外部编排，且各阶段 capability/preflight 通过后，才委托 `/agent-loop` |
+| Codex 和 Claude Code 都不可用，但当前是其他框架 | 由该当前宿主执行；按能力使用其原生 subagent/tool，不把品牌名当 capability |
+| 没有任何可执行宿主（仅 detached runner） | 只阻塞确实没有候选的具体阶段，报告缺少的 capability 与可配置 adapter；不得虚构执行，也不得默认要求用户登录某个固定厂商 |
+
+强制规则：
+
+- 非当前 provider 缺失、OAuth 过期或 CLI 未安装，不得成为当前 `/sprint` 的阻塞项。
+- 需求里出现 Harness、Transcript、Claude、Codex 等名词只描述任务域，不代表用户选择了某个执行 backend；不得据此自动切换 `/agent-loop`。
+- 某阶段优先按 capability（如 `repo-read`、`workspace-write`、structured output、独立身份）选执行方式。当前宿主不支持并行 spawn 时，退化为同宿主串行/inline 执行，并明确独立性保证降低。
+- 仅当用户显式选择外部编排，或当前宿主确实无法满足该阶段的硬 capability，才做 provider preflight。preflight 失败只影响该 backend/阶段，并回退当前宿主；非用户指定的 provider 不触发登录要求。
+- provider 在任何副作用前失败时，可选择另一个满足能力且通过策略的候选；存在 partial effects 后禁止切换 writer，必须恢复同一 provider 或进入 reconciliation。
 
 ## 项目文档贯穿全流程
 
@@ -219,8 +239,8 @@ Phase 5 Compound 收尾
 
 ### 运行时选择
 
-- `--runtime current`（默认）：在当前运行时内完成整个目标循环。
-- `--runtime both`：委托 agent-loop 编排器跨运行时执行（spec 与实现分属不同 provider）。**本版本仅文档化语义，未实装**：agent-loop 现无 `--max-iter` / goal-budget 可承接委托，需另设计 seam。传入 `--runtime both` 时按 `current` 执行并提示该限制。
+- `--runtime current`（默认）：在当前可执行宿主内完成整个目标循环；运行时身份由宿主决定，不由 `/sprint` 猜测。
+- `--runtime both`：保留为兼容入口，语义是“尝试显式委托可用的外部编排 backend”，不是“必须同时安装 Codex 与 Claude Code”。当前 agent-loop 仍无 `--max-iter` / goal-budget 承接 seam，因此本版本按 `current` 执行并提示限制；不得为了满足 `both` 自动要求登录某个固定 provider。
 
 ## 执行流程
 
@@ -264,7 +284,7 @@ Caveman mode 输出只展示任务表和验证策略；完整方案写入 sprint
 
 ### Phase 3: Work (含自动 checkpoint)
 
-> 同批 `[P]` task 在 Claude Code runtime 下通过 `/work` 的 **Worker spawn 协议**真并行实施（用 Agent tool 的 `isolation: "worktree"` 隔离）；Codex CLI 端保留 batch fallback。详见 `work.md` 的「Worker spawn 协议」段。
+> 同批 `[P]` task 在支持原生 Agent spawn 的当前运行时下通过 `/work` 的 **Worker spawn 协议**真并行实施（支持时用 worktree 隔离）；不支持 spawn 的运行时退化为同宿主 batch/inline 执行。详见 `work.md` 的「Worker spawn 协议」段。
 
 ```
 Phase 3/5: Work
@@ -323,7 +343,7 @@ Next: Task N+1
 
 ### Phase 4: Review (暂停确认)
 
-> Claude Code runtime 下 `/review` 通过 **Spawn 协议**真并行 spawn 5 reviewer 子进程（按 risk-aware dispatch matrix 选定子集），共享 4 status 返回契约（DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED）。任一 reviewer 报 `BLOCKED` 即使 `--auto` 也强制人工 gate。Codex CLI 端保留 inline 5 视角 fallback。详见 `review.md` 的「Spawn 协议」段。
+> 支持原生 Agent spawn 的当前运行时下，`/review` 通过 **Spawn 协议**并行 reviewer（按 risk-aware dispatch matrix 选定子集），共享 4 status 返回契约（DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED）。任一 reviewer 报 `BLOCKED` 即使 `--auto` 也强制人工 gate；不支持 spawn 时由当前宿主 inline 执行相同审查视角并标记独立性降级。详见 `review.md` 的「Spawn 协议」段。
 
 ```
 Phase 4/5: Review
