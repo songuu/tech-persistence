@@ -459,6 +459,8 @@ Claude legacy SessionStart hook 会注入 caveman 规则；如需关闭 Claude �
 
 `/sprint` 默认由**当前宿主**执行，不要求同时安装 Codex 与 Claude Code：只有 Codex 就由 Codex 闭环，只有 Claude Code 就由 Claude Code 闭环；两者都没有但当前运行在其他框架时，由该框架按实际 capability 执行。缺失或 OAuth 过期的非当前 provider 不是 Sprint blocker。`/agent-loop` 是用户显式选择的可选外部编排 backend；它的 preflight 失败只影响该 backend，不应把 Plan 卡住并要求登录某个固定厂商。完整决策矩阵与 partial-effects 安全边界见 `user-level/commands/sprint.md` 的「运行时可移植性契约」。
 
+`/sprint evidence`（Codex：`$sprint evidence`）可只读汇总当前/指定 Sprint 的 Harness provider run、Acceptance Receipt、Transcript 捕获/ack 和 PostgreSQL 独立 reader 回读。摘要分别给出 `harnessUsed`、`transcriptCaptured`、`transcriptSynced`、`sprintTranscriptBound`，不会把本地但未绑定的会话记录误报为 Sprint Transcript；加 `--json` 可获得 `sprint-runtime-evidence-v1` 结构化结果。
+
 ### Obsidian 集成（可选）
 ```powershell
 .\install.ps1 -Obsidian          # Claude vault (~/.claude/homunculus)

@@ -30,6 +30,8 @@ When the command instructions below mention `/sprint`, interpret that as this `$
 /sprint resume           ← 从最近的 checkpoint 恢复
 /sprint resume --caveman ← 从 compact handoff 优先恢复
 /sprint resume --auto    ← 恢复并启用自动审查
+/sprint evidence         ← 只读汇总 Harness / Transcript / PostgreSQL 证据
+/sprint evidence --json  ← 输出 sprint-runtime-evidence-v1
 ```
 
 `--goal` 的修饰参数：`--max-iter N`（默认 3，循环硬上限）、`--until "<shell 命令>"`（命令 exit 0 即终止）、`--runtime current|both`（默认 current；both 是兼容入口，当前仍回退 current）。
@@ -46,6 +48,8 @@ $sprint --goal "<目标>" <需求描述>
 $sprint --goal "<目标>" --auto <需求描述>
 $sprint resume --caveman
 $sprint resume --auto
+$sprint evidence
+$sprint evidence --json
 ```
 
 ## 可选参数
@@ -65,6 +69,10 @@ $sprint resume --auto
 - 当前宿主支持原生 spawn 时可分派 Phase 内任务；不支持时 inline/串行执行并报告独立性降级，不把降级伪装成多 provider review。
 - 只有用户显式选择外部编排 backend 时才运行对应 preflight；失败只影响该 backend，回退当前宿主，不得默认要求用户登录某个固定厂商。
 - provider 在副作用前失败可换到满足能力和策略的候选；存在 partial effects 后禁止切换 writer，只能恢复同一 provider 或进入 reconciliation。
+
+## Runtime Evidence 汇总
+
+`/sprint evidence` 只读执行项目 `scripts/sprint-evidence.js`（plugin 安装时使用 plugin `scripts/` 副本），不会 bootstrap 或推进 Sprint。它分别输出 `harnessUsed`、`transcriptCaptured`、`transcriptSynced`、`sprintTranscriptBound`；没有 active Sprint 的宿主 transcript 必须标为 `unbound-*`，不能冒充 Sprint 证据。PG 只允许 reader URL，并验证 `transaction_read_only=true`；不得输出密码或带口令 URL。历史计划用 `/sprint evidence --plan docs/plans/<sprint>.md --json`。
 
 ## 项目文档贯穿全流程
 

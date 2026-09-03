@@ -82,6 +82,7 @@ const utilityScripts = [
   'sync-codex-transcripts.js',
   'codex-transcript-outbox.js',
   'codex-active-sprint-state.js',
+  'sprint-evidence.js',
   'sync-solution-index.js',
   'update-codex-marketplace.js',
   'skill-eval-results.js',

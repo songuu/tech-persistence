@@ -165,7 +165,7 @@ function assertNativeContracts() {
   }
 
   const sprint = readSkill('sprint');
-  for (const reference of ['bootstrap.md', 'resume.md', 'goal-loop.md', 'figma.md', 'runtime-portability.md']) {
+  for (const reference of ['bootstrap.md', 'resume.md', 'goal-loop.md', 'figma.md', 'runtime-portability.md', 'evidence.md']) {
   assert(Buffer.byteLength(sprint, 'utf8') < 4096, 'native sprint SKILL.md must stay below 4 KiB');
   assert.match(sprint, /只加载当前 Phase/);
   assert.match(sprint, /不得[^\n]*(?:预热|预读)[^\n]*未来 Phase/);
@@ -173,6 +173,7 @@ function assertNativeContracts() {
   assert.match(sprint, /references\/resume\.md/);
   assert.match(sprint, /references\/goal-loop\.md/);
   assert.match(sprint, /references\/figma\.md/);
+  assert.match(sprint, /references\/evidence\.md/);
   assert.match(sprint, /(?:仅|active)[^\n]*(?:恢复|recovery)/);
   assert.match(sprint, /仅[^\n]*goal|goal[^\n]*输入/i);
   assert.match(sprint, /仅[^\n]*Figma|Figma[^\n]*输入/i);
@@ -409,6 +410,7 @@ function assertProjectionContracts() {
   );
   assert.deepStrictEqual(fs.readFileSync(pluginLib), fs.readFileSync(sourceLib));
   assert(fs.existsSync(path.join(pluginRoot, 'scripts', 'codex-active-sprint-state.js')));
+  assert(fs.existsSync(path.join(pluginRoot, 'scripts', 'sprint-evidence.js')));
 
   const temporaryWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-managed-sprint-cli-'));
   try {

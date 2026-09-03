@@ -14,6 +14,7 @@ description: Codex-native sprint state machine with phase-local loading and tran
 - 仅 active/recovery/resume 读 `references/resume.md`；非 resume 的 `missing-pointer` 必读 `references/bootstrap.md`。
 - 仅 goal 输入读 `references/goal-loop.md`；仅 Figma 输入读 `references/figma.md`。
 - Provider/runtime 路由必须读 `references/runtime-portability.md`。
+- 仅 `evidence` 子命令读 `references/evidence.md`；它只汇总证据，不启动或推进 Sprint。
 
 ## 状态工具
 

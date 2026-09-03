@@ -17,6 +17,8 @@ description: "全流程冲刺：think→plan→work→review→compound，含上
 /sprint resume           ← 从最近的 checkpoint 恢复
 /sprint resume --caveman ← 从 compact handoff 优先恢复
 /sprint resume --auto    ← 恢复并启用自动审查
+/sprint evidence         ← 只读汇总 Harness / Transcript / PostgreSQL 证据
+/sprint evidence --json  ← 输出可供脚本判定的结构化证据
 ```
 
 `--goal` 的修饰参数：`--max-iter N`（默认 3，循环硬上限）、`--until "<shell 命令>"`（命令 exit 0 即终止）、`--runtime current|both`（默认 current；both 是兼容入口，当前仍回退 current）。
@@ -33,6 +35,8 @@ $sprint --goal "<目标>" <需求描述>
 $sprint --goal "<目标>" --auto <需求描述>
 $sprint resume --caveman
 $sprint resume --auto
+$sprint evidence
+$sprint evidence --json
 ```
 
 ## 可选参数
@@ -63,6 +67,25 @@ $sprint resume --auto
 - 某阶段优先按 capability（如 `repo-read`、`workspace-write`、structured output、独立身份）选执行方式。当前宿主不支持并行 spawn 时，退化为同宿主串行/inline 执行，并明确独立性保证降低。
 - 仅当用户显式选择外部编排，或当前宿主确实无法满足该阶段的硬 capability，才做 provider preflight。preflight 失败只影响该 backend/阶段，并回退当前宿主；非用户指定的 provider 不触发登录要求。
 - provider 在任何副作用前失败时，可选择另一个满足能力且通过策略的候选；存在 partial effects 后禁止切换 writer，必须恢复同一 provider 或进入 reconciliation。
+
+## Runtime Evidence 汇总
+
+`/sprint evidence` 是独立的只读核证子命令，不会新建 Sprint，也不会推进 phase。它统一读取 active pointer/指定历史 plan、Sprint Acceptance binding、provider run、外部 Receipt、Harness transcript ack，以及当前宿主 Transcript 的 PostgreSQL 独立 reader 回读，并输出四个互不替代的结论：
+
+```text
+harnessUsed=<true|false>
+transcriptCaptured=<true|false>
+transcriptSynced=<true|false>
+sprintTranscriptBound=<true|false>
+```
+
+执行器从已加载 skill 的 plugin root 或当前项目的 `scripts/sprint-evidence.js` 定位 helper；仅接受非链接普通文件。默认输出人类可读摘要，`--json` 输出 `sprint-runtime-evidence-v1`。对已完成或历史 Sprint 可用：
+
+```text
+/sprint evidence --plan docs/plans/<sprint>.md --json
+```
+
+判定保持失败闭合：Acceptance 只有绑定时是 `acceptance-bound`，不能算实际 Harness 执行；只有 provider run/权威 Receipt 才令 `harnessUsed=true`。当前宿主 Transcript 在没有 active Sprint 时显示 `unbound-local` 或 `unbound-synced`，不能归到任一 Sprint。`queued`、`partial`、`postgres-pending`、`postgres-unavailable` 均不能算完整同步。PostgreSQL 只允许 reader URL，并验证 `transaction_read_only=true`；摘要不输出密码、token 或带口令 URL。
 
 ## 项目文档贯穿全流程
 

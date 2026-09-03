@@ -17,6 +17,15 @@
 
 ## 决策列表
 
+### ADR-042: Sprint 运行证据必须从可验证 provenance 只读汇总 (2026-09-03)
+
+- **状态**：已采纳
+- **上下文**：普通 `/sprint` 输出、provider 自报或“本机存在 transcript”都不能回答该 Sprint 是否真实使用 Harness、Transcript 是否完整持久化并与 Sprint 绑定；把这些信号折成单一“已接入”会重现 false completion。
+- **决策**：提供只读 `/sprint evidence` 汇总，以 active/指定 plan 为关联锚点，分别验证 Acceptance binding、provider envelope/Receipt、Harness transcript ack、宿主原始 Transcript 和 PostgreSQL reader exact readback；输出 `harnessUsed`、`transcriptCaptured`、`transcriptSynced`、`sprintTranscriptBound` 四个独立 verdict。没有 active Sprint 的宿主记录只能是 `unbound-*`。命令不 bootstrap、不推进 pointer、不消费 outbox、不写 ack/数据库；PostgreSQL 连接必须为只读身份并实测 `transaction_read_only=true`。
+- **原因**：执行、捕获、持久化、关联是不同事实，只有保留分层 provenance 才能让用户定位“没用 Harness”“只排队”“已同步但未绑定”等不同缺口，并与现有 Acceptance/Transcript authority 边界一致。
+- **备选**：在 `/sprint` 结束文本中自报；只检查文件/数据库是否存在；只输出一个 `integrated=true`。这些方案分别信任执行者、无法证明归属，或掩盖部分完成。
+- **影响**：evidence helper 缺失、artifact 非普通文件、binding 漂移、ack 不完整、PG 不可达或 readback 不一致都失败闭合，不得声明完整接入；输出不得包含 secret-bearing URL。
+
 ### ADR-041: Sprint 按宿主能力执行，品牌 provider 只作为显式可选后端 (2026-09-03)
 
 - **状态**：已采纳
