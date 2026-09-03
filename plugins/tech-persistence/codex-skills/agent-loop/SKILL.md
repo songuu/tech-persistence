@@ -88,6 +88,9 @@ $agent-loop self-test
 - spec、implementation、review prompt 都通过 stdin 或 artifact 文件传输，避免 Windows argv 过长。
 - provider 原始输出必须先归一化为 canonical spec / handoff / review，再驱动状态机。
 - CLI 的 schema 参数只是 provider 侧约束；即使显式 `--skip-cli-schema`，orchestrator 仍会使用本地、无依赖 schema 校验器拒绝空对象、缺字段、额外字段和非法枚举。
+- 本地 schema 校验器会解析 schema root 内的 `$defs` fragment 引用；网络 URI、文件路径、循环引用、越界 fragment 与超深引用一律 fail closed。
+- Classic、pipeline slice 与 pipeline integration 共用同一个 Completion Gate。`approved` 不能单独完成 run；`compliant=false`、未解决 revision/blocker、证据不完整、required slice 未完成或 validation 未通过都会生成失败 gate receipt 并阻断终态。
+- Pipeline integration validation 在 review 前由 orchestrator 以 `shell:false` 和受限命令策略真实执行；review prompt 只引用 `integration-validation.json` 及日志引用，不把“待执行命令列表”当成通过证据。
 - capability 只有在 declared、observed=true、policy 三者同时允许时才生效；`unknown` 永不授权。
 - task envelope、route decision、capability snapshot、result envelope 与 acceptance 必须 hash 绑定；duplicate/tamper 直接拒绝。
 - fallback 永远只读；存在 partial/committed effects 时禁止把 writer 切到另一个 runtime。
@@ -98,6 +101,7 @@ $agent-loop self-test
 - managed provider 只注入最小控制环境；Codex lifecycle hooks 仅在显式 `TP_AGENT_RUN_DIR` 下写 evidence，不推进状态、不写 Memory、不修改权限。
 - 如果 provider 或 schema 预检失败，先运行 `doctor`，不要手工绕过状态机。
 - 修改 orchestrator 后运行 `self-test`，它不调用外部 provider，只验证 codec / normalizer / schema 基础契约。
+- 修改 completion/review/validation 路径后，还要运行 structured-output、review contract、completion gate、pipeline review 与 integration validation focused tests；随后重建并校验 plugin projection。
 
 ## 执行规则
 
@@ -260,6 +264,9 @@ node scripts/agent-orchestrator.js goal-release --run <runId> --reason "<可选�
 - `review.json`: 验收复审（normalized）。
 - `review.raw.json`: provider 原始 review 输出。
 - `review.parse-error.json`: review JSON 解析失败时记录原始 stdout/stderr 文件位置。
+- `acceptance-contract.json`: freeze 时生成的 canonical 验收契约。
+- `acceptance-receipts/**`: 按 contractHash + subjectHash 保存的 immutable shadow Receipt；批 1 不参与完成判定。
+- `acceptance-shadow.json` / `acceptance-evidence-index.json`: latest shadow 投影与证据索引。provider assessment 和未封存的工作区 validation/log 不具备 verified authority；command validation 只有在 reviewer 前封存且 reviewer 后安全重跑才可 verified；`artifact:<workdir-relative-path>` 在 freeze 封存基线，并于 reviewer 后受限读回、封存 digest。
 - `preflight.json`: 本机 provider/schema/workdir 预检。
 - `contracts/<stage>.<timestamp>.{task,route,capabilities,result,acceptance}.json`: 每次 provider attempt 的不可变控制与验收记录；同一 task 的 accepted canonical result 另存为 hash 命名文件。
 - `contracts/<stage>.<timestamp>.effects.json`: provider 失败时的前后 worktree snapshot、partial-effects 判定与 hash 证据；`state.json.providerRecovery` 保存 native/restart/reconcile 恢复决策和 opaque runtime refs。
@@ -276,6 +283,7 @@ node scripts/agent-orchestrator.js goal-release --run <runId> --reason "<可选�
 - review provider 只对照冻结 spec，不新增产品范围；同时兼任 spec-writer，对 implementer 提的 open clarification 逐条裁决。
 - implementer 遇 spec 歧义不阻塞：记录假设 + 问题到 `handoff.clarifications[]`，orchestrator append 进 `clarifications.md`，由下一个 gate 异步裁决（刻意不引入双向 runtime 实时通道）。
 - orchestrator 负责状态、日志、重试、恢复、diff 和 validation。
+- shadow Acceptance 只接受 runtime-owned authority；command adapter 使用 pre-review seal、post-review command 重跑与单 subject binding。artifact adapter 只接受 `artifact:<workdir-relative-path>` + canonical expected，freeze 基线后做有界、拒绝 link/逃逸的 post-review 读回，并要求 reviewer 前后 workspace snapshot 稳定、路径命中 reviewer 前由 harness 捕获且由 accepted subject evidence 绑定的 changed-files effect scope：缺失 failed，新建或 digest 变化 passed，未变化/scope 不匹配/reviewer 漂移/不安全 unknown。其他 Oracle 尚保持 unknown。External store 只保证路径位于 provider workspace 外，不自行建立 OS ACL/独立账号；宿主未限制 provider 时不能把该路径隔离当作完整 authority。`acceptance-shadow-report.js` 只消费外部 expected-sample/Receipt ledger，且 `requires-review` 不代表 Gate 通过。
 - orchestrator 是默认唯一 scheduler/state owner；host 原生 agent、hooks、MCP 和 adapter 都不能绕过它推进状态。
 - 状态转换必须发生在 result acceptance 之后；相同幂等键的冲突结果必须进入 resume/reconcile，不能覆盖 accepted result。
 - 跨 runtime review 只能消费只读 provider handoff；fallback 不获得写权限。
@@ -311,7 +319,7 @@ slice-pending → slice-ready → slice-frozen → slice-implementing → slice-
 
 ### 不可变契约
 
-- `.agent-runs/<runId>/global-contract.json` 是全局契约。`contractHash` 只对 `goal/nonGoals/globalAcceptance/architectureConstraints/runtimeTargets` 做 canonical 排序 + sha256。`blockingQuestions`、`riskLevel` 不进 hash。
+- `.agent-runs/<runId>/global-contract.json` 是全局契约。`contractHash` 对 `goal/nonGoals/globalAcceptance/acceptanceContract/architectureConstraints/runtimeTargets` 做 canonical 排序 + sha256。`blockingQuestions`、`riskLevel` 不进 hash。
 - `.agent-runs/<runId>/slices/<sliceId>/slice.json` 是 slice 契约。slice hash 绑定 global contract hash 与 slice 关键字段。
 - frozen 后不允许人工编辑，所有契约字段变化必须通过 `contract-revision` 走 drift detector。
 

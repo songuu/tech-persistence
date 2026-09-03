@@ -7,7 +7,7 @@ const path = require("node:path");
 const { collectProjectModel } = require("./lib/project-model");
 const { normalizeBasePath, renderSitePages } = require("./templates/render-site");
 
-const REQUIRED_ASSETS = ["styles.css", "app.js", "mark.svg"];
+const REQUIRED_ASSETS = ["styles.css", "app.js", "tasks.js", "mark.svg"];
 
 function isInside(parentPath, candidatePath) {
   const relative = path.relative(parentPath, candidatePath);

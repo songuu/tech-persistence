@@ -529,7 +529,7 @@ git diff --check
 - `--pipeline --auto` 不会自动 freeze reconciliation slice。
 - 灰区对象（既非强制 gate 也非 safe）默认走人工 gate 并写入 `auto-skipped[]`。
 - `resume --resolve accept-revision` 与 `reject-revision` 分别回到 `executing-slices`。
-- `contractHash` canonical 范围只包含 goal/nonGoals/globalAcceptance/architectureConstraints/runtimeTargets，修改 `blockingQuestions` 不会改变 hash。
+- `contractHash` canonical 范围包含 goal/nonGoals/globalAcceptance/acceptanceContract/architectureConstraints/runtimeTargets（`acceptanceContract` 于 2026-09-01 的 P1 shadow acceptance 批次加入），修改 `blockingQuestions` 不会改变 hash。
 - integration review 未通过时不能进入 `completed`。
 
 ### 验证边界

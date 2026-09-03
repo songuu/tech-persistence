@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/runtime-transcript-outbox-job.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["version", "runtime", "adapterId", "sessionId", "sourcePathHash", "fileIdentityHash", "observedSize", "positionKind", "jobHash"],
+  "properties": {
+    "version": { "const": "runtime-transcript-outbox/v3" },
+    "runtime": { "type": "string", "minLength": 1 }, "adapterId": { "type": "string", "minLength": 1 },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "sourcePathHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "fileIdentityHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "observedSize": { "type": "integer", "minimum": 0 }, "positionKind": { "enum": ["line", "ordinal"] },
+    "jobHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}

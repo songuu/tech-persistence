@@ -73,7 +73,14 @@ if (expectedClaudeSkills.length !== expectedSkills.length + expectedCommandSkill
 const utilityScripts = [
   'configure-shared-homunculus.js',
   'agent-orchestrator.js',
+  'acceptance-postgres-authority.js',
+  'acceptance-authority-os-boundary.js',
   'native-runtime-canary.js',
+  'external-runtime-transport.js',
+  'promote-external-runtime.js',
+  'sync-runtime-transcripts.js',
+  'sync-codex-transcripts.js',
+  'codex-transcript-outbox.js',
   'codex-active-sprint-state.js',
   'sync-solution-index.js',
   'update-codex-marketplace.js',
@@ -3547,9 +3554,19 @@ function copyCodexHooks() {
     copyTextFile(path.join(repoRoot, 'scripts', name), path.join(targetDir, name), false);
   });
   const hookLibCount = copyHookLibs(targetDir, { includeCodexOnly: true });
+  const sprintBridgeDependencies = fs.readdirSync(path.join(repoRoot, 'scripts', 'agent-orchestrator'))
+    .filter((name) => name.endsWith('.js'))
+    .sort();
+  const bridgeTarget = path.join(targetDir, 'agent-orchestrator');
+  ensureDir(bridgeTarget);
+  sprintBridgeDependencies.forEach((name) => copyTextFile(
+    path.join(repoRoot, 'scripts', 'agent-orchestrator', name),
+    path.join(bridgeTarget, name),
+    false
+  ));
   writeTextFile(path.join(targetDir, 'run-hook.js'), codexRunHookJs);
   writeTextFile(path.join(targetDir, 'run-hook.cmd'), runHookCmd);
-  return hookScripts.length + hookLibCount + 3;
+  return hookScripts.length + hookLibCount + sprintBridgeDependencies.length + 3;
 }
 
 function copyHomunculusTemplate() {

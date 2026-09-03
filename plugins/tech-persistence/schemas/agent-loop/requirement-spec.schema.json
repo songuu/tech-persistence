@@ -35,6 +35,20 @@
         }
       }
     },
+    "acceptanceContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criteria"],
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/criterion"
+          }
+        }
+      }
+    },
     "technicalDesign": {
       "type": "object",
       "additionalProperties": true,
@@ -79,6 +93,7 @@
           "description",
           "dependencies",
           "risk",
+          "criterionIds",
           "doneCriteria"
         ],
         "properties": {
@@ -92,6 +107,12 @@
           "risk": {
             "type": "string",
             "enum": ["L0", "L1", "L2", "L3", "L4"]
+          },
+          "criterionIds": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/criterionId" }
           },
           "doneCriteria": {
             "type": "array",
@@ -119,6 +140,34 @@
     "humanReviewChecklist": {
       "type": "array",
       "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "criterionId": { "type": "string", "pattern": "^ac-[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "oracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "procedure", "expected"],
+      "properties": {
+        "type": { "type": "string", "enum": ["command", "artifact", "readback", "independent-review", "user-confirmation"] },
+        "procedure": { "type": "string", "minLength": 1, "description": "For artifact Oracle use artifact:<workdir-relative-path>; unsupported or unsafe locators remain unknown." },
+        "expected": { "type": "string", "minLength": 1 }
+      },
+      "oneOf": [
+        { "properties": { "type": { "const": "command" }, "expected": { "const": "exit code is zero" } } },
+        { "properties": { "type": { "enum": ["artifact", "readback", "independent-review", "user-confirmation"] } } }
+      ]
+    },
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "sourceRefs", "oracle"],
+      "properties": {
+        "id": { "$ref": "#/$defs/criterionId" },
+        "statement": { "type": "string", "minLength": 1 },
+        "sourceRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "oracle": { "$ref": "#/$defs/oracle" }
+      }
     }
   }
 }

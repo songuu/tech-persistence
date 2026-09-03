@@ -3103,3 +3103,5 @@ html:not(.js) .catalog-card {
     forced-color-adjust: none;
   }
 }
+
+.task-console{max-width:960px}.task-panel{border:1px solid rgba(116,255,205,.2);background:rgba(5,24,20,.78);border-radius:20px;padding:clamp(20px,4vw,38px)}.task-panel form{display:grid;gap:16px}.task-panel label{display:grid;gap:8px;color:#d9f5eb}.task-panel input,.task-panel select,.task-panel textarea{width:100%;box-sizing:border-box;border:1px solid rgba(116,255,205,.25);border-radius:10px;background:#071713;color:#f0fff9;padding:12px;font:inherit}.task-toolbar,.task-list-heading,.task-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}.task-create{margin:24px 0}.task-list{display:grid;gap:12px}.task-card{border:1px solid rgba(116,255,205,.14);border-radius:14px;padding:16px;background:rgba(1,12,10,.65)}.task-card h4{margin:0 0 8px}.task-card p{white-space:pre-wrap;overflow-wrap:anywhere}.task-state{font-family:monospace;color:#74ffcd}.task-actions{justify-content:flex-start;flex-wrap:wrap;margin-top:12px}[role=alert]{color:#ff9e9e;min-height:1.4em}

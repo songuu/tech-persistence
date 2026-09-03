@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry durable Harness transcript outbox every minute
+
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=60s
+RandomizedDelaySec=10s
+Unit=tech-persistence-transcripts.service
+
+[Install]
+WantedBy=timers.target

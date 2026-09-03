@@ -10,6 +10,7 @@
     "dependsOn",
     "ownedFiles",
     "readFiles",
+    "criterionIds",
     "risk",
     "acceptanceCriteria",
     "doneCriteria",
@@ -37,6 +38,11 @@
     "readFiles": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "criterionIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^ac-[a-z0-9]+(?:-[a-z0-9]+)*$" }
     },
     "risk": {
       "type": "string",

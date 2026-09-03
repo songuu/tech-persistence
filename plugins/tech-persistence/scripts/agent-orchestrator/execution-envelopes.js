@@ -13,6 +13,7 @@ const {
   redactArtifactValue,
   redactSensitiveText,
 } = require('../lib/redaction');
+const acceptance = require('../lib/acceptance-contract');
 
 const HASH_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const CONTINUATION_POLICIES = Object.freeze(['continue', 'pause', 'stop']);
@@ -513,6 +514,38 @@ function createResultEnvelope(input = {}) {
   };
 }
 
+function acceptanceSubjectForResult(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    throw new Error('result envelope is required for acceptance subject');
+  }
+  const { hash, idempotencyKey, ...core } = result;
+  if (typeof hash !== 'string' || !HASH_PATTERN.test(hash) || stableHash(core) !== hash) {
+    throw new Error('result envelope hash does not match acceptance subject');
+  }
+  if (typeof idempotencyKey !== 'string' || idempotencyKey.trim() === '') {
+    throw new Error('result envelope idempotency key is required');
+  }
+  return canonicalize(core);
+}
+
+function createAcceptanceReceiptProjection(input = {}) {
+  const contract = acceptance.assertAcceptanceContract(input.contract);
+  const receipt = acceptance.assertAcceptanceReceipt(input.receipt, { contract });
+  const counts = { passed: 0, failed: 0, unknown: 0 };
+  for (const result of receipt.results) counts[result.status] += 1;
+  return canonicalize({
+    mode: 'shadow',
+    contractRef: nonEmptyString(input.contractRef, 'acceptance contractRef'),
+    contractHash: contract.contractHash,
+    receiptRef: nonEmptyString(input.receiptRef, 'acceptance receiptRef'),
+    receiptHash: receipt.receiptHash,
+    subjectRef: receipt.subjectRef,
+    subjectHash: receipt.subjectHash,
+    overallStatus: receipt.overallStatus,
+    counts,
+  });
+}
+
 function createProviderHandoff(input = {}) {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('provider handoff input must be an object');
@@ -625,6 +658,14 @@ function validateNativeEvidence(result, route, errors) {
         || result.runtimeRefs.codexThread.trim() === '') {
       errors.push('codex native thread ref is missing');
     }
+  } else if (native.runtime === 'openai-compatible') {
+    if (native.terminalEvent !== 'chat.completion' || native.terminalStatus !== 'stop'
+        || route.intent !== 'read-only' || route.writer !== null
+        || typeof result.runtimeRefs.externalSession !== 'string'
+        || typeof result.runtimeRefs.externalRequest !== 'string'
+        || typeof result.runtimeRefs.completionId !== 'string') {
+      errors.push('external read-only terminal evidence is invalid');
+    }
   } else {
     errors.push('native runtime is unsupported');
   }
@@ -713,6 +754,8 @@ function validateResultForAcceptance(task, result, route, options = {}) {
 }
 
 module.exports = {
+  acceptanceSubjectForResult,
+  createAcceptanceReceiptProjection,
   createAgentAssignment,
   createAgentInvocation,
   validateAgentInvocation,

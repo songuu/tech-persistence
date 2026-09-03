@@ -5,24 +5,34 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const crypto = require('crypto');
+const { stableHash } = require('./lib/self-learning-canonical');
 const { redactSensitiveText, redactArtifactValue } = require('./lib/redaction');
 const policyGates = require('./agent-orchestrator/policy-gates');
 const validationCommandPolicy = require('./agent-orchestrator/validation-command-policy');
 const providerProfiles = require('./agent-orchestrator/provider-profiles');
 const runtimeAdapters = require('./agent-orchestrator/runtime-adapters');
 const nativeExecutionControl = require('./agent-orchestrator/native-execution-control');
+const externalRuntimeConfig = require('./agent-orchestrator/external-runtime-config');
+const externalRuntimeInvocation = require('./agent-orchestrator/external-runtime-invocation');
 const goalLease = require('./agent-orchestrator/goal-lease');
 const executionEnvelopes = require('./agent-orchestrator/execution-envelopes');
 const runLock = require('./agent-orchestrator/run-lock');
 const controlStore = require('./agent-orchestrator/control-store');
 const providerLifecycle = require('./agent-orchestrator/provider-lifecycle');
 const structuredOutput = require('./agent-orchestrator/structured-output');
+const acceptanceEvaluator = require('./agent-orchestrator/acceptance-evaluator');
+const freezeReceipt = require('./agent-orchestrator/freeze-receipt');
+const validationRunner = require('./agent-orchestrator/validation-runner');
 const operatorReviewPacket = require('./agent-orchestrator/operator-review-packet');
 const turnTransaction = require('./agent-orchestrator/turn-transaction');
 const schedulerControl = require('./agent-orchestrator/scheduler-control');
 const turnBudget = require('./agent-orchestrator/turn-budget');
 const { resolveBaseDir } = require('./lib/runtime-paths');
 const { detectStableProjectIdentity } = require('./lib/project-identity');
+const {
+  PRIVATE_DATABASE_ENV_PATTERN,
+  withoutPrivateDatabaseCredentials,
+} = require('./lib/private-runtime-env');
 
 const pipeline = require('./agent-orchestrator/pipeline');
 const pipelineState = require('./agent-orchestrator/pipeline-state');
@@ -248,11 +258,37 @@ function resolveRunsDir(workdir, options) {
 
 function goalLeaseStoreOptions(options, providerRoot) {
   const controlRoot = optionValue(options, 'control-root');
+  const postgresEnvFile = optionValue(options, 'acceptance-postgres-env-file');
+  const postgresBrokerPath = optionValue(options, 'acceptance-postgres-broker');
+  const readbackBrokerPath = optionValue(options, 'acceptance-readback-broker');
+  const independentReviewBrokerPath = optionValue(
+    options,
+    'acceptance-independent-review-broker'
+  );
+  const userConfirmationBrokerPath = optionValue(
+    options,
+    'acceptance-user-confirmation-broker'
+  );
   return {
     ...(controlRoot === undefined || controlRoot === true
       ? {}
       : { controlRoot: String(controlRoot) }),
     ...(providerRoot ? { providerRoot: path.resolve(providerRoot) } : {}),
+    ...(postgresEnvFile === undefined || postgresEnvFile === true
+      ? {}
+      : { postgresEnvFile: path.resolve(String(postgresEnvFile)) }),
+    ...(postgresBrokerPath === undefined || postgresBrokerPath === true
+      ? {}
+      : { postgresBrokerPath: path.resolve(String(postgresBrokerPath)) }),
+    ...(readbackBrokerPath === undefined || readbackBrokerPath === true
+      ? {}
+      : { readbackBrokerPath: path.resolve(String(readbackBrokerPath)) }),
+    ...(independentReviewBrokerPath === undefined || independentReviewBrokerPath === true
+      ? {}
+      : { independentReviewBrokerPath: path.resolve(String(independentReviewBrokerPath)) }),
+    ...(userConfirmationBrokerPath === undefined || userConfirmationBrokerPath === true
+      ? {}
+      : { userConfirmationBrokerPath: path.resolve(String(userConfirmationBrokerPath)) }),
   };
 }
 
@@ -560,22 +596,208 @@ function claudeProviderEnv() {
   return {};
 }
 
+function providerProcessEnv(overrides = {}, inherited = process.env, isolation = null) {
+  const environment = withoutPrivateDatabaseCredentials(inherited, overrides);
+  if (!isolation || isolation.enabled !== true) return environment;
+  environment.HOME = isolation.identity.home;
+  environment.XDG_CONFIG_HOME = path.join(isolation.identity.home, '.config');
+  environment.XDG_CACHE_HOME = path.join(isolation.identity.home, '.cache');
+  environment.XDG_DATA_HOME = path.join(isolation.identity.home, '.local', 'share');
+  for (const key of [
+    'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'USER', 'LOGNAME',
+    'SSH_AUTH_SOCK', 'GPG_AGENT_INFO',
+  ]) delete environment[key];
+  for (const key of Object.keys(environment)) {
+    if (key.startsWith('SUDO_')) delete environment[key];
+  }
+  return environment;
+}
+
+function positiveIdentityInteger(value, label) {
+  if (!/^[1-9][0-9]*$/.test(String(value || ''))) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed > 2_147_483_647) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function assertRootOwnedLauncherPath(launcher, lstatSync) {
+  const normalized = path.posix.normalize(launcher);
+  const segments = normalized.split('/').filter(Boolean);
+  const ancestors = ['/'];
+  let current = '';
+  for (const segment of segments.slice(0, -1)) {
+    current += `/${segment}`;
+    ancestors.push(current);
+  }
+  for (const ancestor of ancestors) {
+    const stat = lstatSync(ancestor);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error(`provider launcher path ancestor must be a regular non-link directory: ${ancestor}`);
+    }
+    if (stat.uid !== 0) {
+      throw new Error(`provider launcher path ancestor must be root-owned: ${ancestor}`);
+    }
+    if ((stat.mode & 0o022) !== 0) {
+      throw new Error(`provider launcher path ancestor must not be writable by group or others: ${ancestor}`);
+    }
+  }
+}
+
+function verifyProviderOsIsolation(isolation, dependencies = {}) {
+  if (!isolation || isolation.enabled !== true) return;
+  const lstatSync = dependencies.lstatSync || fs.lstatSync;
+  const hashFile = dependencies.hashFile || ((file) => (
+    `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`
+  ));
+  const launcher = isolation.identity.launcher;
+  const launcherStat = lstatSync(launcher);
+  if (!launcherStat.isFile() || launcherStat.isSymbolicLink()
+      || launcherStat.uid !== 0 || (launcherStat.mode & 0o022) !== 0) {
+    throw new Error('provider isolation launcher permissions changed during provider execution');
+  }
+  assertRootOwnedLauncherPath(launcher, lstatSync);
+  if (hashFile(launcher) !== isolation.identity.launcherDigest) {
+    throw new Error('provider isolation launcher changed during provider execution');
+  }
+}
+
+function resolveProviderOsIsolation(options, launch, args, dependencies = {}) {
+  const uidValue = optionValue(options, 'provider-uid');
+  const gidValue = optionValue(options, 'provider-gid');
+  if (uidValue === undefined && gidValue === undefined) {
+    if (boolOption(options, 'require-provider-os-isolation')) {
+      throw new Error('provider OS isolation is required but provider UID/GID are not configured');
+    }
+    return { enabled: false, launch, args: [...(launch.argsPrefix || []), ...args] };
+  }
+  if (uidValue === undefined || gidValue === undefined) {
+    throw new Error('provider OS isolation requires both provider-uid and provider-gid');
+  }
+  const platform = dependencies.platform || process.platform;
+  if (platform === 'win32') {
+    throw new Error('provider UID/GID isolation is not supported on Windows');
+  }
+  if (launch.shell === true) {
+    throw new Error('provider OS isolation requires a shell-free provider launch');
+  }
+  const uid = positiveIdentityInteger(uidValue, 'provider-uid');
+  const gid = positiveIdentityInteger(gidValue, 'provider-gid');
+  const currentUid = dependencies.currentUid === undefined
+    ? (typeof process.getuid === 'function' ? process.getuid() : null)
+    : dependencies.currentUid;
+  if (currentUid === uid) {
+    throw new Error('provider UID must differ from the harness authority UID');
+  }
+  const setprivValue = optionValue(options, 'provider-setpriv-path') || '/usr/bin/setpriv';
+  if (!path.posix.isAbsolute(String(setprivValue))) {
+    throw new Error('provider-setpriv-path must be absolute');
+  }
+  const providerHomeValue = optionValue(options, 'provider-home');
+  if (!providerHomeValue || !path.posix.isAbsolute(String(providerHomeValue))) {
+    throw new Error('provider-home must be an absolute path');
+  }
+  const lstatSync = dependencies.lstatSync || fs.lstatSync;
+  const realpathSync = dependencies.realpathSync || fs.realpathSync.native;
+  const setprivStat = lstatSync(String(setprivValue));
+  if (!setprivStat.isFile() || setprivStat.isSymbolicLink()) {
+    throw new Error('provider setpriv launcher must be a regular non-link file');
+  }
+  if (setprivStat.uid !== 0) throw new Error('provider setpriv launcher must be root-owned');
+  if ((setprivStat.mode & 0o022) !== 0) {
+    throw new Error('provider setpriv launcher must not be writable by group or others');
+  }
+  const setpriv = realpathSync(String(setprivValue));
+  assertRootOwnedLauncherPath(setpriv, lstatSync);
+  const homeStat = lstatSync(String(providerHomeValue));
+  if (!homeStat.isDirectory() || homeStat.isSymbolicLink()) {
+    throw new Error('provider-home must be a regular non-link directory');
+  }
+  if (homeStat.uid !== uid) throw new Error('provider-home must be owned by provider UID');
+  if ((homeStat.mode & 0o022) !== 0) {
+    throw new Error('provider-home must not be writable by group or others');
+  }
+  const home = realpathSync(String(providerHomeValue));
+  const hashFile = dependencies.hashFile || ((file) => (
+    `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`
+  ));
+  const finalArgs = [
+    '--reuid', String(uid),
+    '--regid', String(gid),
+    '--clear-groups',
+    '--',
+    launch.command,
+    ...(launch.argsPrefix || []),
+    ...args,
+  ];
+  return {
+    enabled: true,
+    launch: { command: setpriv, argsPrefix: [], shell: false },
+    args: finalArgs,
+    identity: {
+      uid,
+      gid,
+      home,
+      launcher: setpriv,
+      launcherDigest: hashFile(setpriv),
+    },
+  };
+}
+
 function runProcess(label, launchOrCommand, args, settings) {
   const launch = typeof launchOrCommand === 'string'
     ? resolveProviderLaunch(launchOrCommand)
     : launchOrCommand;
-  const finalArgs = [...(launch.argsPrefix || []), ...args];
-  const timeoutMs = settings.timeoutMs || 30 * 60 * 1000;
+  const externalTransport = settings.runtime === 'openai-compatible';
+  let runtimeConfig = null;
+  let transcriptInput = null;
+  let transcriptRequest = null;
+  if (externalTransport) {
+    const transportPath = path.resolve(__dirname, 'external-runtime-transport.js');
+    if (launch.command !== process.execPath || launch.shell || args.length !== 1 || args[0] !== transportPath
+        || launch.resolvedFrom !== 'checked-in-transport') throw new Error('external runtime must use the fixed authority transport');
+    externalRuntimeConfig.protectedPath(transportPath, settings.cwd);
+    runtimeConfig = externalRuntimeConfig.configured(settings.options, settings.cwd);
+    const input = JSON.parse(settings.stdin);
+    if (!runtimeConfig || input.baseUrl !== runtimeConfig.baseUrl || input.model !== runtimeConfig.model) throw new Error('external transport configuration mismatch');
+    transcriptInput = { sessionId: input.sessionId, requestId: input.requestId, taskHash: settings.taskEnvelopeHash,
+      routeHash: settings.routeDecisionHash, modelHash: externalRuntimeConfig.sha256(input.model), requestBytes: settings.stdin, startedAt: nowIso() };
+    // A durable request precedes dispatch. If capture fails, no untracked request is sent.
+    transcriptRequest = require('./lib/runtime-transcript-spool').captureEvent(runtimeConfig.spoolRoot, transcriptInput, 'request');
+  }
+  // This child is trusted protocol code, not model-selected executable code. The model server
+  // runs under the separate provider identity; never give the transport inherited credentials.
+  const isolation = externalTransport ? { enabled: false, launch, args } : resolveProviderOsIsolation(
+    settings.options || {},
+    launch,
+    args,
+    settings.osIsolationDependencies || {}
+  );
+  const effectiveLaunch = isolation.launch;
+  const finalArgs = isolation.args;
+  const timeoutMs = externalTransport ? Math.min(settings.timeoutMs || Infinity, runtimeConfig.timeoutMs + 5000) : (settings.timeoutMs || 30 * 60 * 1000);
   const startedAt = nowIso();
-  const result = spawnSync(launch.command, finalArgs, {
+  const runner = settings.spawnSyncImpl || spawnSync;
+  const result = runner(effectiveLaunch.command, finalArgs, {
     cwd: settings.cwd,
     encoding: 'utf8',
-    env: settings.env ? { ...process.env, ...settings.env } : process.env,
+    env: externalTransport ? (process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot } : {}) : providerProcessEnv(settings.env || {}, process.env, isolation),
     input: settings.stdin,
     maxBuffer: MAX_BUFFER,
     shell: launch.shell === true,
     timeout: timeoutMs,
   });
+  let isolationVerificationError = null;
+  if (isolation.enabled) {
+    try {
+      verifyProviderOsIsolation(isolation, settings.osIsolationDependencies || {});
+    } catch (error) {
+      isolationVerificationError = error;
+    }
+  }
   const finishedAt = nowIso();
 
   if (settings.stdoutFile) writeText(settings.stdoutFile, result.stdout || '');
@@ -609,6 +831,9 @@ function runProcess(label, launchOrCommand, args, settings) {
         : null),
     taskEnvelopeHash: settings.taskEnvelopeHash || null,
     routeDecisionHash: settings.routeDecisionHash || null,
+    providerOsIsolation: isolation.enabled
+      ? { ...isolation.identity, verifiedAfterExecution: isolationVerificationError === null }
+      : null,
     promptHash: settings.stdin ? ('sha256:' + crypto.createHash('sha256').update(settings.stdin).digest('hex')) : null,
     executionFingerprint: providerProfiles.hash({ phase: settings.phase || null, providerKey: settings.providerKey || null, adapter: settings.adapter || null, command: launch.requested || launch.command, args: finalArgs, prompt: settings.stdin || '', schemaPath: settings.schemaPath || null }),
     schemaPath: settings.schemaPath || null,
@@ -616,6 +841,17 @@ function runProcess(label, launchOrCommand, args, settings) {
     timeoutMs,
     envOverrides: settings.env || null,
   };
+  if (externalTransport) {
+    record.externalBoundary = { kind: 'loopback-http', authorityTransport: true, configHash: runtimeConfig.configHash };
+    try {
+      record.transcript = { status: 'queued', ...require('./lib/runtime-transcript-spool').captureEvent(runtimeConfig.spoolRoot,
+        { ...transcriptInput, finishedAt, succeeded: result.status === 0 && !result.error,
+          responseBytes: result.stdout || result.stderr || 'transport-failed' }, 'terminal') };
+    } catch {
+      // The request remains durable and discoverable. DB/outbox failure never rewinds provider work.
+      record.transcript = { status: 'capture-incomplete', requestJobHash: transcriptRequest.jobHash };
+    }
+  }
 
   function failWithRecord(message, kind) {
     let failure = null;
@@ -638,6 +874,10 @@ function runProcess(label, launchOrCommand, args, settings) {
       error.providerRecovery = failure.providerRecovery;
     }
     throw error;
+  }
+
+  if (isolationVerificationError) {
+    failWithRecord(isolationVerificationError.message, 'provider-os-isolation-integrity');
   }
 
   if (result.error && result.error.code === 'ETIMEDOUT') {
@@ -687,9 +927,15 @@ function extractProviderEnvelopeError(stdoutText) {
   return null;
 }
 
+function normalizeReadOnlyOutput(input) {
+  return input.adapter === 'openai-compatible-chat'
+    ? externalRuntimeInvocation.normalizeOutput(input)
+    : runtimeAdapters.normalizeClaudeOutput(input);
+}
+
 function runValidatedCommand(label, decision, settings) {
   const startedAt = nowIso();
-  const result = spawnSync(decision.argv[0], decision.argv.slice(1), { cwd: settings.cwd, encoding: 'utf8', maxBuffer: MAX_BUFFER, shell: false, timeout: settings.timeoutMs || 30 * 60 * 1000 });
+  const result = spawnSync(decision.argv[0], decision.argv.slice(1), { cwd: settings.cwd, encoding: 'utf8', env: providerProcessEnv(), maxBuffer: MAX_BUFFER, shell: false, timeout: settings.timeoutMs || 30 * 60 * 1000 });
   const finishedAt = nowIso();
   if (settings.stdoutFile) writeText(settings.stdoutFile, result.stdout || '');
   if (settings.stderrFile) writeText(settings.stderrFile, result.stderr || '');
@@ -701,6 +947,7 @@ function runShell(label, command, settings) {
   const result = spawnSync(command, {
     cwd: settings.cwd,
     encoding: 'utf8',
+    env: providerProcessEnv(),
     maxBuffer: MAX_BUFFER,
     shell: true,
     timeout: settings.timeoutMs || 30 * 60 * 1000,
@@ -936,6 +1183,21 @@ function normalizeSpec(rawSpec) {
       || rawPlan.acceptance
     ),
   };
+  const rawAcceptanceContract = coalesce(
+    raw.acceptanceContract,
+    rawPlan.acceptanceContract,
+    null
+  );
+  const normalizedCriteria = rawAcceptanceContract && Array.isArray(rawAcceptanceContract.criteria)
+    ? rawAcceptanceContract.criteria
+    : requirementSpec.acceptanceCriteria.map((statement, index) => {
+      const sourceRef = `spec.json#/requirementSpec/acceptanceCriteria/${index}`;
+      return {
+        id: `ac-${stableHash({ statement, sourceRef }).slice(7, 23)}`,
+        statement,
+      };
+    });
+  const allowedCriterionIds = normalizedCriteria.map((criterion) => String(criterion.id));
 
   const technicalDesign = {
     approach: String(rawDesign.approach || rawDesign.summary || raw.approach || rawPlan.approach || ''),
@@ -948,19 +1210,30 @@ function normalizeSpec(rawSpec) {
 
   const taskBreakdown = toArray(rawTasks).map((task, index) => {
     const source = task && typeof task === 'object' ? task : { title: String(task || '') };
+    const doneCriteria = stringArray(source.doneCriteria || source.acceptanceCriteria || source.acceptance);
+    const explicitCriterionIds = stringArray(source.criterionIds);
+    const matchedCriterionIds = normalizedCriteria
+      .filter((criterion) => doneCriteria.includes(String(criterion.statement)))
+      .map((criterion) => String(criterion.id));
     return {
       id: String(source.id || `T${String(index + 1).padStart(2, '0')}`),
       title: String(source.title || source.name || source.summary || `Task ${index + 1}`),
       description: String(source.description || source.details || source.summary || ''),
       dependencies: stringArray(source.dependencies || source.dependsOn),
       risk: normalizeRisk(source.risk),
-      doneCriteria: stringArray(source.doneCriteria || source.acceptanceCriteria || source.acceptance),
+      criterionIds: explicitCriterionIds.length > 0
+        ? explicitCriterionIds
+        : (matchedCriterionIds.length > 0 ? matchedCriterionIds : (index === 0 ? allowedCriterionIds : [])),
+      doneCriteria,
       suggestedValidation: stringArray(source.suggestedValidation || source.validation),
     };
   });
 
   return {
     requirementSpec,
+    ...(rawAcceptanceContract && Array.isArray(rawAcceptanceContract.criteria)
+      ? { acceptanceContract: { criteria: rawAcceptanceContract.criteria } }
+      : {}),
     technicalDesign,
     taskBreakdown,
     assumptions: stringArray(raw.assumptions || rawPlan.assumptions),
@@ -975,10 +1248,13 @@ function normalizeRisk(value) {
   return ['L0', 'L1', 'L2', 'L3', 'L4'].includes(risk) ? risk : 'L2';
 }
 
-function normalizeHandoff(rawHandoff) {
+function normalizeHandoff(rawHandoff, defaultCriterionIds = []) {
   const raw = rawHandoff && typeof rawHandoff === 'object' ? rawHandoff : {};
   return {
     summary: String(raw.summary || raw.result || raw.message || ''),
+    criterionIds: stringArray(raw.criterionIds).length > 0
+      ? stringArray(raw.criterionIds)
+      : stringArray(defaultCriterionIds),
     changedFiles: stringArray(raw.changedFiles || raw.files),
     validation: stringArray(raw.validation || raw.validations || raw.tests),
     risks: stringArray(raw.risks || raw.warnings),
@@ -987,7 +1263,7 @@ function normalizeHandoff(rawHandoff) {
   };
 }
 
-function normalizeReview(rawReview) {
+function normalizeReview(rawReview, defaultCriterionIds = []) {
   const raw = rawReview && typeof rawReview === 'object' ? rawReview : {};
   const issues = toArray(raw.issues || raw.findings);
   const warnings = toArray(raw.warnings);
@@ -1025,8 +1301,12 @@ function normalizeReview(rawReview) {
     decision,
     compliant: decision === 'approved',
     summary,
+    criterionIds: stringArray(raw.criterionIds).length > 0
+      ? stringArray(raw.criterionIds)
+      : stringArray(defaultCriterionIds),
     findings: allFindings,
     followUpTasks: stringArray(raw.followUpTasks || raw.followUp || raw.requiredChanges),
+    contractRevisions: Array.isArray(raw.contractRevisions) ? raw.contractRevisions : [],
     clarificationRulings: normalizeClarificationRulings(raw.clarificationRulings || raw.rulings),
   };
 }
@@ -1064,6 +1344,32 @@ function validateSpec(spec) {
   if (spec.requirementSpec && !Array.isArray(spec.requirementSpec.acceptanceCriteria)) {
     errors.push('requirementSpec.acceptanceCriteria must be an array');
   }
+  const allowedCriterionIds = new Set(
+    spec.acceptanceContract && Array.isArray(spec.acceptanceContract.criteria)
+      ? spec.acceptanceContract.criteria.map((criterion) => criterion.id)
+      : spec.requirementSpec.acceptanceCriteria.map((statement, index) => {
+        const sourceRef = `spec.json#/requirementSpec/acceptanceCriteria/${index}`;
+        return `ac-${stableHash({ statement, sourceRef }).slice(7, 23)}`;
+      })
+  );
+  const coveredCriterionIds = new Set();
+  for (const task of spec.taskBreakdown || []) {
+    if (!Array.isArray(task.criterionIds) || task.criterionIds.length === 0) {
+      errors.push(`task ${task.id || '<unknown>'} must own at least one criterionId`);
+      continue;
+    }
+    for (const criterionId of task.criterionIds) {
+      if (!allowedCriterionIds.has(criterionId)) {
+        errors.push(`task ${task.id || '<unknown>'} references unknown criterionId ${criterionId}`);
+      }
+      coveredCriterionIds.add(criterionId);
+    }
+  }
+  for (const criterionId of allowedCriterionIds) {
+    if (!coveredCriterionIds.has(criterionId)) {
+      errors.push(`acceptance criterion ${criterionId} is not owned by any task`);
+    }
+  }
   return errors;
 }
 
@@ -1075,6 +1381,24 @@ function statusFromReview(review, completionGate = { ok: true }) {
   return 'needs-followup';
 }
 
+function acceptanceEnforcementStatus(state, acceptanceShadow) {
+  if (!state || state.acceptanceProtocol !== freezeReceipt.ACCEPTANCE_PROTOCOL) return null;
+  if (!acceptanceShadow || acceptanceShadow.status !== 'written' || !acceptanceShadow.receipt) {
+    return 'blocked';
+  }
+  if (acceptanceShadow.receipt.overallStatus === 'passed') return 'passed';
+  if (acceptanceShadow.receipt.overallStatus === 'failed') return 'needs-followup';
+  return 'blocked';
+}
+
+function completionGateValidationEvidence(gate) {
+  return {
+    status: gate && gate.ok === true ? 'passed' : 'failed',
+    source: 'review-result-and-completion-gate',
+    evidenceRef: 'completion-gate.json',
+  };
+}
+
 function buildSpecPrompt(requirement, options) {
   return [
     'You are the analysis and design provider in Tech Persistence agent-loop v7.',
@@ -1084,6 +1408,7 @@ function buildSpecPrompt(requirement, options) {
     '',
     'Architecture principles:',
     '- The analysis provider owns requirementSpec, technicalDesign, and taskBreakdown.',
+    '- Every task must declare criterionIds[] using only acceptanceContract criterion ids; every criterion must have at least one task owner.',
     '- The implementation provider must not reinterpret requirements.',
     '- Human review freezes the spec before implementation.',
     '- The review provider checks implementation against the frozen spec.',
@@ -1171,6 +1496,9 @@ function buildReviewPrompt(state, runDir) {
     'You are also the spec-writer: rule on any open clarifications raised by the implementer.',
     'Review the implementation strictly against the frozen spec and technical design.',
     'Do not add new product requirements. Return JSON only and match the review schema.',
+    'decision MUST be approved, changes_requested, or blocked.',
+    'approved requires compliant=true and empty findings[], followUpTasks[], and contractRevisions[].',
+    'changes_requested or blocked requires compliant=false. Never approve unresolved work or a revise-spec ruling.',
     'If the diff context is truncated, inspect the repository files directly.',
     clarificationGuidance,
     `Run id: ${state.runId}`,
@@ -1307,13 +1635,17 @@ function buildClaudeProviderInvocation(
   prompt,
   schemaName,
   workdir = resolveWorkdir(options),
-  resumeRefs = {}
+  resumeRefs = {},
+  artifacts = []
 ) {
+  if (providerProfiles.profile(options, providerKey).runtime === 'openai-compatible') {
+    return externalRuntimeInvocation.buildInvocation(options, providerKey, runDir, prompt, schemaPath(schemaName), workdir, artifacts);
+  }
   const policy = nativeAdapterPolicy(options);
   const selectedSchemaPath = boolOption(options, 'skip-cli-schema')
     ? null
     : schemaPath(schemaName);
-  return runtimeAdapters.buildClaudeInvocation({
+  return runtimeAdapters.buildProviderInvocation('claude', {
     launch: providerLaunch(options, providerKey),
     mode: policy.claude,
     cwd: workdir,
@@ -1349,7 +1681,7 @@ function buildCodexProviderInvocation(
   const selectedSchemaPath = boolOption(options, 'skip-cli-schema')
     ? null
     : schemaPath('agent-handoff.schema.json');
-  return runtimeAdapters.buildCodexInvocation({
+  return runtimeAdapters.buildProviderInvocation('codex', {
     launch: providerLaunch(options, 'implementation'),
     mode: policy.codex,
     cwd: workdir,
@@ -1714,6 +2046,7 @@ function prepareProviderAttempt(state, runDir, options, input) {
   goalLease.validateGoalLeaseForDispatch(currentLease, {
     ...goalDispatchContext,
     providerRuntime: stageControl.profile.runtime,
+    providerIntent: stageControl.task.intent,
   });
   const activeRecovery = nativeExecutionControl.validateProviderRecovery(
     state.providerRecovery,
@@ -1780,6 +2113,7 @@ function prepareProviderAttempt(state, runDir, options, input) {
       dispatchContext: {
         ...goalDispatchContext,
         providerRuntime: stageControl.profile.runtime,
+        providerIntent: stageControl.task.intent,
       },
     },
   };
@@ -1847,7 +2181,9 @@ function acceptProviderAttempt(state, attempt, input) {
     acceptanceHash: providerProfiles.hash(outcome.acceptance),
     errorsHash: providerProfiles.hash(outcome.acceptance.errors || []),
   });
-  if (turnValidation.sourceStatus !== 'passed') {
+  const canPersistRejectedReadOnlyOutcome = input.allowFailedValidation === true
+    && outcome.result.effects.state === 'none';
+  if (turnValidation.sourceStatus !== 'passed' && !canPersistRejectedReadOnlyOutcome) {
     const error = new Error(
       `provider validation ${turnValidation.sourceStatus} for ${attempt.prefix}; material result requires passed validation before durable-writeback`
     );
@@ -1955,6 +2291,7 @@ function currentGitSha(workdir) {
 }
 
 function reviewProviderRef(options) {
+  if (providerProfiles.profile(options, 'review').runtime === 'openai-compatible') return 'openai-compatible:review:openai-compatible-chat';
   const policy = nativeAdapterPolicy(options);
   return `claude:review:claude-${policy.claude}`;
 }
@@ -2197,7 +2534,7 @@ function runSpecProvider(state, statePath, runDir, options) {
 
   return runProviderPostProcess(attempt, record, { result }, () => {
     const runtimeOutput = providerStep('output-normalization', () => (
-      runtimeAdapters.normalizeClaudeOutput({
+      normalizeReadOnlyOutput({
         stdout: result.stdout || '',
         adapter: invocation.adapter,
       })
@@ -2224,9 +2561,7 @@ function runSpecProvider(state, statePath, runDir, options) {
     const accepted = providerStep('acceptance', () => acceptProviderAttempt(state, attempt, {
       status: runtimeOutput.status,
       effects: { state: 'none', refs: [] },
-      runtimeRefs: {
-        claudeSession: runtimeOutput.runtimeRefs.sessionId,
-      },
+      runtimeRefs: externalRuntimeInvocation.runtimeRefs(runtimeOutput),
       runtimeResult: runtimeOutput,
       evidence: {
         stdoutHash: providerProfiles.hash(result.stdout || ''),
@@ -2262,6 +2597,26 @@ function freezeRun(options, positionals) {
   if (!fs.existsSync(path.join(runDir, 'spec.json'))) {
     throw new Error('Cannot freeze before spec.json exists');
   }
+  const frozenSpec = readJson(path.join(runDir, 'spec.json'));
+  const acceptanceContract = acceptanceEvaluator.recordAcceptanceContract({
+    kind: 'spec',
+    workdir: state.workdir,
+    runDir,
+    source: frozenSpec,
+    controlStoreOptions: goalLeaseStoreOptions(options, state.workdir),
+  });
+  if (acceptanceContract.status !== 'written') {
+    throw new Error(`Cannot freeze acceptance contract: ${acceptanceContract.error}`);
+  }
+  if (acceptanceContract.status === 'written') {
+    state.files.acceptanceContract = 'acceptance-contract.json';
+  }
+  freezeReceipt.recordFreezeReceipt(runDir, {
+    scopeRef: 'classic',
+    contractHash: acceptanceContract.contract.contractHash,
+    frozenPayload: frozenSpec,
+  }, goalLeaseStoreOptions(options, state.workdir));
+  state.acceptanceProtocol = freezeReceipt.ACCEPTANCE_PROTOCOL;
   state.status = 'frozen';
   state.specFrozenAt = nowIso();
   state.specFrozenBy = optionValue(options, 'reviewer') || process.env.USER || process.env.USERNAME || 'human';
@@ -2473,7 +2828,11 @@ function runImplementationProvider(state, statePath, runDir, options) {
       });
       throw error;
     }
-    const handoff = providerStep('output-normalization', () => normalizeHandoff(rawHandoff));
+    const frozenCriterionIds = readJson(path.join(runDir, 'acceptance-contract.json'))
+      .criteria.map((criterion) => criterion.id);
+    const handoff = providerStep('output-normalization', () => (
+      normalizeHandoff(rawHandoff, frozenCriterionIds)
+    ));
     providerStep('artifact', () => {
       writeJson(path.join(runDir, 'handoff.json'), handoff);
       writeText(path.join(runDir, 'handoff.md'), renderHandoff(handoff));
@@ -2931,41 +3290,151 @@ function sliceTextByBytes(value, maxBytes) {
   return buffer.subarray(0, maxBytes).toString('utf8');
 }
 
-function writeValidation(workdir, runDir, options) {
+function writeValidation(workdir, runDir, options, settings = {}) {
   const commands = optionValues(options, 'validation-command');
+  const artifactName = settings.artifactName || 'validation.json';
+  const logPrefix = settings.logPrefix || 'validation';
   if (commands.length === 0) {
-    writeJson(path.join(runDir, 'validation.json'), {
+    const artifact = {
       status: 'skipped',
       reason: 'No --validation-command provided',
       commands: [],
-    });
-    return;
+    };
+    writeJson(path.join(runDir, artifactName), artifact);
+    return artifact;
   }
 
-  const results = commands.map((command, index) => {
-    const label = `validation-${index + 1}`;
-    const stdoutFile = path.join(runDir, 'logs', `${label}.stdout.log`);
-    const stderrFile = path.join(runDir, 'logs', `${label}.stderr.log`);
-    const result = runShell(label, command, { cwd: workdir, stdoutFile, stderrFile });
+  let execution;
+  let results;
+  if (settings.enforcePolicy) {
+    execution = validationRunner.runValidationCommands(commands, {
+      workdir,
+      runDir,
+      artifactName,
+      logPrefix,
+      attemptId: `${logPrefix.slice(0, 40)}-${Date.now()}`,
+    });
+    results = execution.commands.map((command) => ({
+      command: command.command,
+      exitCode: command.exitStatus,
+      status: command.status,
+      stdoutFile: command.stdout ? command.stdout.ref : null,
+      stderrFile: command.stderr ? command.stderr.ref : null,
+      startedAt: command.startedAt,
+      finishedAt: command.finishedAt,
+    }));
+  } else {
+    results = commands.map((command, index) => {
+      const label = `${logPrefix}-${index + 1}`;
+      const stdoutFile = path.join(runDir, 'logs', `${label}.stdout.log`);
+      const stderrFile = path.join(runDir, 'logs', `${label}.stderr.log`);
+      const result = runShell(label, command, { cwd: workdir, stdoutFile, stderrFile });
+      return {
+        command: result.command,
+        exitCode: result.status,
+        status: result.status === 0 ? 'passed' : 'failed',
+        stdoutFile: path.relative(runDir, stdoutFile),
+        stderrFile: path.relative(runDir, stderrFile),
+        startedAt: result.startedAt,
+        finishedAt: result.finishedAt,
+      };
+    });
+    execution = {
+      status: results.every((result) => result.exitCode === 0) ? 'passed' : 'failed',
+    };
+  }
+  const artifact = {
+    status: execution.status === 'blocked' ? 'failed' : execution.status,
+    commands: results,
+  };
+  writeJson(path.join(runDir, artifactName), artifact);
+  return artifact;
+}
+
+function classicClarificationStatuses(runDir, review) {
+  const entries = clarifications.readClarifications(runDir);
+  const rulings = normalizeClarificationRulings(review && review.clarificationRulings);
+  const rulingById = new Map(rulings.map((ruling) => [ruling.id, ruling]));
+  const knownIds = new Set(entries.map((entry) => entry.id));
+  const statuses = entries.map((entry) => {
+    const ruling = rulingById.get(entry.id);
+    const decision = ruling ? ruling.decision : entry.decision;
+    const resolved = decision === 'confirm-assumption'
+      || (entry.status === 'ruled' && decision !== 'revise-spec');
     return {
-      command: result.command,
-      exitCode: result.status,
-      status: result.status === 0 ? 'passed' : 'failed',
-      stdoutFile: path.relative(runDir, stdoutFile),
-      stderrFile: path.relative(runDir, stderrFile),
-      startedAt: result.startedAt,
-      finishedAt: result.finishedAt,
+      id: entry.id,
+      status: resolved ? 'resolved' : 'open',
+      decision: decision || null,
     };
   });
+  for (const ruling of rulings) {
+    if (!knownIds.has(ruling.id)) {
+      statuses.push({ id: ruling.id, status: 'open', decision: ruling.decision, reason: 'unknown clarification id' });
+    }
+  }
+  return statuses;
+}
 
-  writeJson(path.join(runDir, 'validation.json'), {
-    status: results.every((result) => result.exitCode === 0) ? 'passed' : 'failed',
-    commands: results,
-  });
+function classicCompletionGateInput(runDir, spec, review) {
+  const validation = readJson(path.join(runDir, 'validation.json'));
+  const changedFiles = readJson(path.join(runDir, 'changed-files.json'));
+  const material = Array.isArray(changedFiles) && changedFiles.length > 0;
+  const evidenceRefs = [
+    'handoff.json',
+    'diff.patch',
+    'changed-files.json',
+    'validation.json',
+    'review.json',
+    'provider-handoff.json',
+  ];
+  if (fs.existsSync(path.join(runDir, clarifications.CLARIFICATIONS_FILE))) {
+    evidenceRefs.push(clarifications.CLARIFICATIONS_FILE);
+  }
+  return {
+    scope: 'classic',
+    spec,
+    review,
+    validation: {
+      ...validation,
+      evidenceRef: 'validation.json',
+    },
+    material,
+    effects: material
+      ? { state: 'committed', refs: ['diff.patch'] }
+      : { state: 'none', refs: [] },
+    evidence: {
+      complete: evidenceRefs.every((ref) => fs.existsSync(path.join(runDir, ref))),
+      refs: evidenceRefs,
+    },
+    clarifications: classicClarificationStatuses(runDir, review),
+    revisions: Array.isArray(review.contractRevisions) ? review.contractRevisions : [],
+    blockers: [],
+  };
 }
 
 function runReviewProvider(state, statePath, runDir, options) {
   validateProviderHandoffBundle(state, runDir, options);
+  const validationWorkspaceSnapshot = captureWorktreeSnapshot(state.workdir, runDir);
+  const artifactEffectRefsHash = providerProfiles.hash(
+    acceptanceEvaluator.artifactEffectRefs(runDir, '.')
+  );
+  let validationSeal = null;
+  try {
+    validationSeal = acceptanceEvaluator.sealClassicValidationEvidence({
+      workdir: state.workdir,
+      runDir,
+      contract: readJson(path.join(runDir, 'acceptance-contract.json')),
+      validation: readJson(path.join(runDir, 'validation.json')),
+      workspaceSnapshot: validationWorkspaceSnapshot,
+      controlStoreOptions: goalLeaseStoreOptions(options, state.workdir),
+    });
+  } catch (error) {
+    writeJson(path.join(runDir, 'acceptance-validation-seal.error.json'), {
+      schemaVersion: 'acceptance-shadow-error-v1',
+      status: 'error',
+      message: redactSensitiveText(error && error.message ? error.message : String(error)),
+    });
+  }
   const prompt = buildReviewPrompt(state, runDir);
   writeText(path.join(runDir, 'prompts', 'review.md'), prompt);
   const providerLogStamp = logStamp();
@@ -2978,7 +3447,8 @@ function runReviewProvider(state, statePath, runDir, options) {
     prompt,
     'review-result.schema.json',
     state.workdir,
-    providerResumeRefs(state, 'claude', 'review', 'review')
+    providerResumeRefs(state, 'claude', 'review', 'review'),
+    ['diff.patch', 'handoff.json', 'validation.json', 'spec.json']
   );
   const attempt = prepareProviderAttempt(state, runDir, options, {
     stage: 'review',
@@ -3018,13 +3488,16 @@ function runReviewProvider(state, statePath, runDir, options) {
 
   return runProviderPostProcess(attempt, record, { result }, () => {
     const runtimeOutput = providerStep('output-normalization', () => (
-      runtimeAdapters.normalizeClaudeOutput({
+      normalizeReadOnlyOutput({
         stdout: result.stdout || '',
         adapter: invocation.adapter,
       })
     ));
     let rawReview;
     let review;
+    const currentWorkspaceSnapshot = captureWorktreeSnapshot(state.workdir, runDir);
+    const reviewChangedWorkspace = providerProfiles.hash(currentWorkspaceSnapshot)
+      !== providerProfiles.hash(validationWorkspaceSnapshot);
     try {
       rawReview = providerStep('structured-output-parse', () => (
         runtimeOutput.payload === undefined
@@ -3036,7 +3509,12 @@ function runReviewProvider(state, statePath, runDir, options) {
         'review-result.schema.json',
         'classic review result'
       );
-      review = providerStep('output-normalization', () => normalizeReview(rawReview));
+      const frozenCriterionIds = readJson(path.join(runDir, 'acceptance-contract.json'))
+        .criteria.map((criterion) => criterion.id);
+      review = providerStep('output-normalization', () => (
+        normalizeReview(rawReview, frozenCriterionIds)
+      ));
+      reviewModule.assertCanonicalReview(review);
     } catch (error) {
       writeJson(path.join(runDir, 'review.parse-error.json'), {
         message: error.message,
@@ -3050,10 +3528,10 @@ function runReviewProvider(state, statePath, runDir, options) {
       writeJson(path.join(runDir, 'review.raw.json'), rawReview);
       writeJson(path.join(runDir, 'review.json'), review);
     });
-    const completionGate = providerStep('validation', () => policyGates.canCompleteRun({
-      validation: readJson(path.join(runDir, 'validation.json')),
-      spec: readJson(path.join(runDir, 'spec.json')),
-    }));
+    const completionGate = providerStep('validation', () => {
+      const spec = readJson(path.join(runDir, 'spec.json'));
+      return policyGates.canCompleteRun(classicCompletionGateInput(runDir, spec, review));
+    });
     providerStep('artifact', () => writeJson(
       path.join(runDir, 'completion-gate.json'),
       completionGate
@@ -3062,21 +3540,64 @@ function runReviewProvider(state, statePath, runDir, options) {
     const accepted = providerStep('acceptance', () => acceptProviderAttempt(state, attempt, {
       status: runtimeOutput.status,
       effects: { state: 'none', refs: [] },
-      runtimeRefs: {
-        claudeSession: runtimeOutput.runtimeRefs.sessionId,
-      },
+      runtimeRefs: externalRuntimeInvocation.runtimeRefs(runtimeOutput),
       runtimeResult: runtimeOutput,
       evidence: {
         reviewHash: providerProfiles.hash(review),
         completionGateHash: providerProfiles.hash(completionGate),
+        artifactEffectRefsHash,
+        artifactReviewStable: !reviewChangedWorkspace,
       },
-      validation: {
-        status: 'passed',
-        source: 'review-result-and-completion-gate',
-        evidenceRef: 'completion-gate.json',
-      },
+      validation: completionGateValidationEvidence(completionGate),
+      allowFailedValidation: true,
       payload: review,
     }));
+    try {
+      const postReviewValidation = writeValidation(state.workdir, runDir, options, {
+        artifactName: 'acceptance-post-review-validation.json',
+        logPrefix: 'acceptance-post-review-validation',
+        enforcePolicy: true,
+      });
+      validationSeal = acceptanceEvaluator.sealClassicValidationEvidence({
+        workdir: state.workdir,
+        runDir,
+        contract: readJson(path.join(runDir, 'acceptance-contract.json')),
+        validation: postReviewValidation,
+        artifactRef: 'acceptance-post-review-validation.json',
+        workspaceSnapshot: captureWorktreeSnapshot(state.workdir, runDir),
+        controlStoreOptions: goalLeaseStoreOptions(options, state.workdir),
+      });
+      if (reviewChangedWorkspace) {
+        writeJson(path.join(runDir, 'acceptance-review-workspace-drift.json'), {
+          schemaVersion: 'acceptance-review-workspace-drift-v1',
+          revalidated: true,
+        });
+      }
+    } catch (error) {
+      validationSeal = null;
+      writeJson(path.join(runDir, 'acceptance-validation-seal.error.json'), {
+        schemaVersion: 'acceptance-shadow-error-v1',
+        status: 'error',
+        message: redactSensitiveText(error && error.message ? error.message : String(error)),
+      });
+    }
+    try {
+      record.acceptanceShadow = acceptanceEvaluator.recordShadowAcceptance({
+        workdir: state.workdir,
+        runDir,
+        relativeDir: '.',
+        controlStoreOptions: goalLeaseStoreOptions(options, state.workdir),
+        validationSeal,
+        subjectRef: accepted.result.ref,
+        subject: executionEnvelopes.acceptanceSubjectForResult(accepted.result),
+        createProjection: executionEnvelopes.createAcceptanceReceiptProjection,
+      });
+    } catch (error) {
+      record.acceptanceShadow = {
+        status: 'error',
+        error: redactSensitiveText(error && error.message ? error.message : String(error)),
+      };
+    }
     record.resultEnvelopeHash = accepted.result.hash;
     record.acceptance = accepted.acceptance;
     record.runtimeRefs = accepted.result.runtimeRefs;
@@ -3087,6 +3608,9 @@ function runReviewProvider(state, statePath, runDir, options) {
       state.files.completionGate = 'completion-gate.json';
       recordReviewRulings(state, runDir, review);
       state.status = statusFromReview(review, completionGate);
+      const acceptanceStatus = acceptanceEnforcementStatus(state, record.acceptanceShadow);
+      if (acceptanceStatus && acceptanceStatus !== 'passed') state.status = acceptanceStatus;
+      state.acceptanceStatus = acceptanceStatus || 'legacy';
       if (state.status === 'needs-followup' || state.status === 'blocked') {
         writeFollowUpTask(runDir, review);
       }
@@ -3145,6 +3669,7 @@ function buildPipelineCtx() {
     turnBudgetPolicyFromOptions,
     resolveWorkdir,
     resolveRunsDir,
+    goalLeaseStoreOptions,
     readRequirement,
     dateStamp,
     slugify,
@@ -3175,12 +3700,13 @@ function buildPipelineCtx() {
     currentGitSha,
     buildNativeExecutionPlan,
     orchestrationOwner: nativeExecutionControl.orchestrationOwner,
-    normalizeClaudeOutput: runtimeAdapters.normalizeClaudeOutput,
+    normalizeClaudeOutput: normalizeReadOnlyOutput,
     normalizeCodexOutput: runtimeAdapters.normalizeCodexOutput,
     hashArtifact: providerProfiles.hash,
     isGitRepository,
     writeGitDiff,
     listChangedFiles,
+    captureWorktreeSnapshot,
     ensureCleanWorktree,
     extractJsonValue,
     parseJsonFromText,
@@ -3225,7 +3751,7 @@ function buildPreflightReport(workdir, options, runDir) {
         : 'not a git repository; pass --skip-git-repo-check to allow a no-diff run',
     });
 
-  if (isWindows()) {
+  if (isWindows() && ['spec', 'review'].some(key => (!boolOption(options, 'spec-only') || key === 'spec') && providerProfiles.profile(options, key).runtime === 'claude')) {
     const gitBash = resolveClaudeGitBash();
     add('claudeGitBash', Boolean(gitBash.path), gitBash.path
       ? { path: gitBash.path, source: gitBash.source }
@@ -3234,6 +3760,14 @@ function buildPreflightReport(workdir, options, runDir) {
 
   for (const key of ['spec', 'implementation', 'review']) {
     try {
+      if (boolOption(options, 'spec-only') && key !== 'spec') { add(`${key}Provider`, true, { deferred: 'spec-only' }); continue; }
+      if (providerProfiles.profile(options, key).runtime === 'openai-compatible') {
+        const config = externalRuntimeConfig.configured(options, workdir);
+        add(`${key}Provider`, true, { adapter: 'openai-compatible-chat', configHash: config.configHash,
+          capabilityEvidence: { source: 'authority-canary-probe', observedAt: config.canary.finishedAt,
+            runtimeObserved: { stdin: true, 'structured-output': true, 'bounded-context': true } } });
+        continue;
+      }
       const launch = providerLaunch(options, key);
       add(`${key}Provider`, true, {
         requested: providerCommandSpec(options, key),
@@ -3246,6 +3780,19 @@ function buildPreflightReport(workdir, options, runDir) {
     } catch (error) {
       add(`${key}Provider`, false, error.message);
     }
+  }
+
+  try {
+    const isolation = resolveProviderOsIsolation(
+      options,
+      boolOption(options, 'spec-only') ? { command: process.execPath, argsPrefix: [], shell: false } : providerLaunch(options, 'implementation'),
+      []
+    );
+    add('providerOsIsolation', true, isolation.enabled
+      ? isolation.identity
+      : 'disabled; use --require-provider-os-isolation in authority deployments');
+  } catch (error) {
+    add('providerOsIsolation', false, error.message);
   }
 
   add('codexHandoffSchemaStrict', schemaHasStrictObjects(readJson(schemaPath('agent-handoff.schema.json'))), 'agent-handoff.schema.json');
@@ -3319,6 +3866,7 @@ function formatDetail(value) {
 }
 
 function runStart(options, positionals) {
+  if (boolOption(options, 'spec-only') && (boolOption(options, 'auto') || boolOption(options, 'pipeline'))) throw new Error('spec-only cannot be combined with auto or pipeline');
   if (boolOption(options, 'pipeline')) {
     pipeline.startPipelineRun(buildPipelineCtx(), options, positionals);
     return;
@@ -3344,6 +3892,7 @@ function runStart(options, positionals) {
   }
   const executionPolicy = nativeExecutionControl.executionPolicy(options);
   const state = newState(workdir, runDir, runId, requirement);
+  state.providers = Object.fromEntries(['spec', 'implementation', 'review'].map(key => [key, providerProfiles.profile(options, key).runtime]));
   state.orchestrationOwner = executionPolicy.orchestrationOwner;
   state.executionPolicy = executionPolicy;
   state.turnBudgetPolicy = turnBudgetPolicyFromOptions(options);
@@ -3420,6 +3969,15 @@ function runResume(options, positionals) {
   if (state.mode === 'pipeline') {
     pipeline.resumePipelineRun(buildPipelineCtx(), effectiveOptions, positionals);
     return;
+  }
+  if (state.acceptanceProtocol === freezeReceipt.ACCEPTANCE_PROTOCOL) {
+    const frozenSpec = readJson(path.join(runDir, 'spec.json'));
+    const acceptanceContract = readJson(path.join(runDir, 'acceptance-contract.json'));
+    freezeReceipt.verifyFreezeReceipt(runDir, {
+      scopeRef: 'classic',
+      contractHash: acceptanceContract.contractHash,
+      frozenPayload: frozenSpec,
+    }, goalLeaseStoreOptions(effectiveOptions, state.workdir));
   }
   return runLock.withRunLock(
     runDir,
@@ -4057,6 +4615,21 @@ function runSelfTest() {
   const normalizedReview = normalizeReview(wrappedReview);
   assertSelfTest('review passed alias normalizes to approved', normalizedReview.decision, 'approved');
   assertSelfTest('approved review maps to completed', statusFromReview(normalizedReview), 'completed');
+  const normalizedRevisionReview = normalizeReview({
+    decision: 'changes_requested',
+    compliant: false,
+    findings: [],
+    followUpTasks: ['apply the frozen-contract revision'],
+    contractRevisions: [{
+      revisionId: 'rev-classic-selftest',
+      fields: { goal: 'revised goal' },
+      rationale: 'exercise classic revision preservation',
+    }],
+  });
+  assertSelfTest('classic review preserves contract revisions',
+    normalizedRevisionReview.contractRevisions.length, 1);
+  assertSelfTest('failed completion gate cannot claim passed turn validation',
+    completionGateValidationEvidence({ ok: false }).status, 'failed');
 
   const handoffClarifications = normalizeHandoff({
     summary: 's',
@@ -4139,6 +4712,19 @@ function runSelfTest() {
   assertSelfTest(
     'external control root is not exposed to provider environments',
     controlRootLeaked,
+    false
+  );
+  const privateDatabaseEnvironment = providerProcessEnv(
+    { ACCEPTANCE_POSTGRES_READ_URL: 'must-not-be-reintroduced' },
+    {
+      PATH: process.env.PATH || '',
+      ACCEPTANCE_POSTGRES_WRITE_URL: 'must-not-leak',
+      TRANSCRIPTS_POSTGRES_READ_URL: 'must-not-leak',
+    }
+  );
+  assertSelfTest(
+    'private PostgreSQL credentials are stripped from provider processes',
+    Object.keys(privateDatabaseEnvironment).some((key) => PRIVATE_DATABASE_ENV_PATTERN.test(key)),
     false
   );
 
@@ -4364,7 +4950,23 @@ function runPipelineSelfTests() {
     architectureConstraints: ['c'], runtimeTargets: ['claude-code', 'codex'],
     riskLevel: 'L2', blockingQuestions: ['totally different'],
   });
-  assertSelfTest('contractHash excludes blockingQuestions', contractA.contractHash, contractB.contractHash);
+  assertSelfTest(
+    'contractHash includes blockingQuestions',
+    contractA.contractHash !== contractB.contractHash,
+    true
+  );
+  const contractRiskChanged = globalContractModule.normalizeGlobalContract({
+    ...contractA,
+    riskLevel: 'L4',
+  });
+  assertSelfTest('contractHash includes riskLevel',
+    contractA.contractHash !== contractRiskChanged.contractHash, true);
+  const contractValidationChanged = globalContractModule.normalizeGlobalContract({
+    ...contractA,
+    integrationValidationCommands: ['npm test'],
+  });
+  assertSelfTest('contractHash includes integrationValidationCommands',
+    contractA.contractHash !== contractValidationChanged.contractHash, true);
 
   const contractSorted = globalContractModule.normalizeGlobalContract({
     goal: 'g', nonGoals: ['b', 'a'], globalAcceptance: ['a'],
@@ -4558,8 +5160,9 @@ function runPipelineSelfTests() {
 
 function runProviderIntegrationSelfTests() {
   const providers = require('./agent-orchestrator/pipeline-providers');
-  const tmpBase = path.join(os.tmpdir(), `agent-loop-selftest-${process.pid}-${Date.now()}`);
-  const mockWorkdir = path.join(tmpBase, 'workdir');
+  const fixtureRoot = path.join(os.tmpdir(), `agent-loop-selftest-${process.pid}-${Date.now()}`);
+  const mockWorkdir = path.join(fixtureRoot, 'workdir');
+  const tmpBase = path.join(mockWorkdir, '.runs', 'selftest');
   fs.mkdirSync(path.join(tmpBase, 'prompts'), { recursive: true });
   fs.mkdirSync(path.join(tmpBase, 'logs'), { recursive: true });
   fs.mkdirSync(path.join(tmpBase, 'slices'), { recursive: true });
@@ -4628,6 +5231,18 @@ function runProviderIntegrationSelfTests() {
       goal: 'Mock provider integration goal',
       nonGoals: ['no implementation in this self-test'],
       globalAcceptance: ['providers wire through ctx'],
+      acceptanceContract: {
+        criteria: [{
+          id: 'ac-provider-integration',
+          statement: 'providers wire through ctx',
+          sourceRefs: ['global-contract.json#/globalAcceptance/0'],
+          oracle: {
+            type: 'independent-review',
+            procedure: 'Review the provider integration fixture.',
+            expected: 'A criterion-bound independent reviewer decision is passed.',
+          },
+        }],
+      },
       architectureConstraints: ['mock only'],
       runtimeTargets: ['claude-code', 'codex'],
       riskLevel: 'L1',
@@ -4668,6 +5283,7 @@ function runProviderIntegrationSelfTests() {
         dependsOn: [],
         ownedFiles: ['mock.txt'],
         readFiles: [],
+        criterionIds: ['ac-provider-integration'],
         risk: 'L1',
         acceptanceCriteria: ['mock ok'],
         doneCriteria: ['mock done'],
@@ -4772,9 +5388,131 @@ function runProviderIntegrationSelfTests() {
   assertSelfTest('provider integration: approved slice marked completed', reviewOutcome.state.pipeline.sliceStates['slice-001'], 'slice-completed');
   assertSelfTest('provider integration: completed-owner lock', JSON.parse(fs.readFileSync(path.join(tmpBase, 'locks.json'), 'utf8')).files['mock.txt'].status, 'completed-owner');
 
+  const integrationReadyState = pipelineState.transitionRun(
+    reviewOutcome.state,
+    pipelineState.RUN_STATES.INTEGRATION_READY,
+    { source: 'self-test', reason: 'all required slices completed' }
+  );
+  writeJson(statePath, integrationReadyState);
+  mockCtx.runIntegrationValidation = (commands, runnerOptions) => {
+    commands.forEach((_command, index) => {
+      writeText(path.join(runnerOptions.runDir, 'logs', `integration-validation-${index}.stdout.log`), 'passed\n');
+      writeText(path.join(runnerOptions.runDir, 'logs', `integration-validation-${index}.stderr.log`), '');
+    });
+    const artifact = {
+      schemaVersion: 'integration-validation-v1',
+      attemptId: runnerOptions.attemptId,
+      status: 'passed',
+      artifactRef: 'integration-validation.json',
+      commands: commands.map((command, index) => ({
+        index,
+        command,
+        status: 'passed',
+        stdout: { ref: `logs/integration-validation-${index}.stdout.log` },
+        stderr: { ref: `logs/integration-validation-${index}.stderr.log` },
+      })),
+    };
+    writeJson(path.join(runnerOptions.runDir, 'integration-validation.json'), artifact);
+    return artifact;
+  };
+  mockCtx._stdoutQueue.push(reviewApprovedRaw);
+  const integrationOutcome = providers.runIntegrationReviewProvider(
+    mockCtx,
+    integrationReadyState,
+    statePath,
+    tmpBase,
+    {}
+  );
+  assertSelfTest('provider integration: integration validation artifact written',
+    fs.existsSync(path.join(tmpBase, 'integration-validation.json')), true);
+  assertSelfTest('provider integration: completion gate artifact written',
+    fs.existsSync(path.join(tmpBase, 'integration-completion-gate.json')), true);
+  assertSelfTest('provider integration: passing integration completion gate',
+    readJson(path.join(tmpBase, 'integration-completion-gate.json')).ok, true);
+  assertSelfTest('provider integration: approved integration marked completed',
+    integrationOutcome.status, 'completed');
+
+  const failedValidationState = pipelineState.transitionRun(
+    reviewOutcome.state,
+    pipelineState.RUN_STATES.INTEGRATION_READY,
+    { source: 'self-test', reason: 'exercise failed integration validation' }
+  );
+  writeJson(statePath, failedValidationState);
+  mockCtx.runIntegrationValidation = (_commands, runnerOptions) => {
+    const artifact = {
+      schemaVersion: 'integration-validation-v1',
+      attemptId: runnerOptions.attemptId,
+      status: 'failed',
+      artifactRef: 'integration-validation.json',
+      commands: [{
+        index: 0,
+        command: 'git diff --check',
+        status: 'failed',
+        stdout: { ref: 'logs/integration-validation-failed.stdout.log' },
+        stderr: { ref: 'logs/integration-validation-failed.stderr.log' },
+      }],
+    };
+    writeJson(path.join(runnerOptions.runDir, 'integration-validation.json'), artifact);
+    return artifact;
+  };
+  const callsBeforeFailedValidation = calls;
+  const failedValidationOutcome = providers.runIntegrationReviewProvider(
+    mockCtx,
+    failedValidationState,
+    statePath,
+    tmpBase,
+    {}
+  );
+  assertSelfTest('provider integration: failed validation does not call reviewer',
+    calls, callsBeforeFailedValidation);
+  assertSelfTest('provider integration: failed validation remains integration-ready',
+    failedValidationOutcome.status, 'integration-ready');
+  assertSelfTest('provider integration: failed validation cannot pass completion gate',
+    readJson(path.join(tmpBase, 'integration-completion-gate.json')).ok, false);
+
   stateObj = stateBeforeApprovedReview;
   writeJson(statePath, stateObj);
   pipelineQueue.saveQueue(tmpBase, pipelineQueue.moveToRunning(pipelineQueue.emptyQueue(), slice.id));
+  locksModule.saveLocks(tmpBase, locksModule.claimAll(locksModule.emptyLocks(), slice));
+  mockCtx._stdoutQueue.push(JSON.stringify({
+    decision: 'changes_requested',
+    compliant: false,
+    findings: [{ severity: 'P1', message: 'follow-up required' }],
+    followUpTasks: ['revise the implementation without changing the frozen contract'],
+    contractRevisions: [],
+  }));
+  const followUpOutcome = providers.runSliceReviewProvider(mockCtx, stateObj, statePath, tmpBase, {}, slice);
+  assertSelfTest('provider integration: changes-requested slice is blocked',
+    followUpOutcome.state.pipeline.sliceStates['slice-001'], 'slice-blocked');
+  const followUpQueue = pipelineQueue.loadQueue(tmpBase);
+  assertSelfTest('provider integration: changes-requested slice enters blocked queue',
+    followUpQueue.blocked[0].sliceId, slice.id);
+  assertSelfTest('provider integration: changes-requested slice releases locks',
+    locksModule.loadLocks(tmpBase).files['mock.txt'].status, 'released');
+
+  stateObj = stateBeforeApprovedReview;
+  writeJson(statePath, stateObj);
+  pipelineQueue.saveQueue(tmpBase, pipelineQueue.moveToRunning(pipelineQueue.emptyQueue(), slice.id));
+  locksModule.saveLocks(tmpBase, locksModule.claimAll(locksModule.emptyLocks(), slice));
+  mockCtx._stdoutQueue.push(JSON.stringify({
+    decision: 'blocked',
+    compliant: false,
+    findings: [{ severity: 'P0', message: 'required external evidence is unavailable' }],
+    followUpTasks: ['obtain the missing evidence before retrying review'],
+    contractRevisions: [],
+  }));
+  const blockedOutcome = providers.runSliceReviewProvider(mockCtx, stateObj, statePath, tmpBase, {}, slice);
+  assertSelfTest('provider integration: blocked review cannot complete slice',
+    blockedOutcome.state.pipeline.sliceStates['slice-001'], 'slice-blocked');
+  assertSelfTest('provider integration: blocked review enters blocked queue',
+    pipelineQueue.loadQueue(tmpBase).blocked[0].sliceId, slice.id);
+  assertSelfTest('provider integration: blocked review releases locks',
+    locksModule.loadLocks(tmpBase).files['mock.txt'].status, 'released');
+
+  stateObj = stateBeforeApprovedReview;
+  writeJson(statePath, stateObj);
+  pipelineQueue.saveQueue(tmpBase, pipelineQueue.moveToRunning(pipelineQueue.emptyQueue(), slice.id));
+  locksModule.saveLocks(tmpBase, locksModule.claimAll(locksModule.emptyLocks(), slice));
   const reviewBreakingRaw = JSON.stringify({
     decision: 'changes_requested',
     compliant: false,
@@ -4979,7 +5717,7 @@ function runProviderIntegrationSelfTests() {
   fs.rmSync(rejectBase, { recursive: true, force: true });
   fs.rmSync(rejectControlRoot, { recursive: true, force: true });
 
-  fs.rmSync(tmpBase, { recursive: true, force: true });
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
 }
 
 function buildMockCtx(workdir) {
@@ -4993,6 +5731,7 @@ function buildMockCtx(workdir) {
     turnBudget,
     resolveWorkdir: () => workdir,
     resolveRunsDir: () => workdir,
+    goalLeaseStoreOptions: (_options, providerRoot) => ({ providerRoot }),
     readRequirement: () => 'mock requirement',
     dateStamp,
     slugify,
@@ -5079,6 +5818,7 @@ function buildMockCtx(workdir) {
     isGitRepository: () => false,
     writeGitDiff: () => '',
     listChangedFiles: () => [],
+    captureWorktreeSnapshot,
     ensureCleanWorktree: () => {},
     extractJsonValue: (text) => JSON.parse(text),
     parseJsonFromText: (text) => JSON.parse(text),
@@ -5129,6 +5869,16 @@ Options:
   --workdir <path>              Repository root. Defaults to cwd.
   --runs-dir <path>             Run directory under workdir. Defaults to .agent-runs.
   --control-root <path>         External authoritative control root. Advanced/testing override.
+  --acceptance-postgres-env-file <path>  Mirror finalized shadow Receipts to PostgreSQL with independent readback.
+  --acceptance-postgres-broker <path>    Fixed broker entrypoint; must be outside the provider workspace.
+  --acceptance-readback-broker <path>    Fixed criterion readback broker; must be outside the provider workspace.
+  --acceptance-independent-review-broker <path>  Fixed per-criterion reviewer broker outside the provider workspace.
+  --acceptance-user-confirmation-broker <path>  Fixed native user-control reader broker outside the provider workspace.
+  --provider-uid <uid>          Linux provider account UID; requires --provider-gid and --provider-home.
+  --provider-gid <gid>          Linux provider account primary GID; supplementary groups are cleared.
+  --provider-home <path>        Provider-owned private HOME used for Claude/Codex credentials and caches.
+  --provider-setpriv-path <path> Root-owned non-writable setpriv binary. Defaults to /usr/bin/setpriv.
+  --require-provider-os-isolation  Fail preflight/provider launch unless UID/GID isolation is configured.
   --run-id <id>                 Stable run id.
   --auto                        Auto-evaluate safe gates. Classic: freeze spec only when self-check passes.
   --auto-evaluate               Alias for --auto.
@@ -5140,11 +5890,15 @@ Options:
   --revision <id>               Revision id for --resolve accept/reject.
   --reason <text>               Optional human reason for --resolve reject-revision.
   --unblock <sliceId>           Move a blocked slice back to ready.
+  --retry-acceptance           Retry a blocked v1 integration Receipt after evidence or implementation changes.
   --allow-dirty                 Allow implementation in a dirty git worktree.
   --validation-command <cmd>    Shell command to run after implementation. Repeatable.
   --claude-command <cmd>        Override spec/review provider command.
   --codex-command <cmd>         Override implementation provider command.
   --spec-command <cmd>          Override spec provider command.
+  --external-stages <spec,review> Explicit read-only stages served by the external adapter.
+  --external-runtime-config <path> Protected authority config binding endpoint/model/promotion/canary.
+  --spec-only                    Preflight and execute only the initial classic spec stage (no auto).
   --implementation-command <cmd> Override implementation provider command.
   --review-command <cmd>        Override review provider command.
   --skip-cli-schema             Do not pass CLI schema flags.
@@ -5239,5 +5993,9 @@ module.exports = {
   collectGitDiff,
   listChangedFiles,
   normalizeTurnValidation,
+  providerProcessEnv,
+  resolveProviderOsIsolation,
+  runProcess,
+  writeValidation,
   worktreeFileFingerprint,
 };

@@ -29,6 +29,9 @@ const { detectStableProjectIdentity } = require('./lib/project-identity');
 const {
   adaptClaudeHookEvent,
 } = require('./lib/behavior-events');
+const {
+  parseAcceptanceConfirmationControl,
+} = require('./lib/acceptance-user-confirmation-control');
 const { hashObject } = require('./lib/self-learning-canonical');
 const { loadSelfLearningPolicy } = require('./lib/self-learning-service');
 const { getOrAppendPromptReceipt, resolveStoreDir } = require('./lib/self-learning-store');
@@ -278,7 +281,12 @@ function capturePromptBehavior(payload, options = {}) {
   if (payload.hook_event_name && payload.hook_event_name !== 'UserPromptSubmit') {
     return { status: 'skipped', reason: 'unsupported-hook-event' };
   }
-  if (!extractPrompt(payload)) return { status: 'skipped', reason: 'missing-prompt' };
+  const prompt = extractPrompt(payload);
+  if (!prompt) return { status: 'skipped', reason: 'missing-prompt' };
+  const promptControl = parseAcceptanceConfirmationControl(prompt);
+  if (promptControl.status === 'invalid') {
+    return { status: 'skipped', reason: promptControl.reason };
+  }
   let sessionId;
   try {
     sessionId = promptSessionId(payload, options);

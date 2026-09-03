@@ -10,6 +10,7 @@
     "decision",
     "reason",
     "evidenceRefs",
+    "evidenceLayers",
     "freshness",
     "boundary",
     "nextSafeAction",
@@ -40,6 +41,18 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 256
+      }
+    },
+    "evidenceLayers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local", "artifact", "runtime", "user", "production"],
+      "properties": {
+        "local": { "$ref": "#/$defs/evidenceLayer" },
+        "artifact": { "$ref": "#/$defs/evidenceLayer" },
+        "runtime": { "$ref": "#/$defs/evidenceLayer" },
+        "user": { "$ref": "#/$defs/evidenceLayer" },
+        "production": { "$ref": "#/$defs/evidenceLayer" }
       }
     },
     "freshness": {
@@ -226,6 +239,14 @@
           }
         }
       ]
+    }
+  },
+  "$defs": {
+    "evidenceLayer": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 }
     }
   }
 }

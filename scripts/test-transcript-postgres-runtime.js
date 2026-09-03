@@ -109,14 +109,22 @@ test('compose pins PostgreSQL and keeps the service on loopback with bounded res
   assert.match(compose, /postgres_admin_password:/);
   assert.match(compose, /transcript_reader_password:/);
   assert.match(compose, /transcript_writer_password:/);
+  assert.match(compose, /acceptance_reader_password:/);
+  assert.match(compose, /acceptance_writer_password:/);
 });
 
 test('init assets create least-privilege roles and append-only transcript evidence tables', () => {
   const roles = fs.readFileSync(path.join(INIT_ROOT, '00-create-roles.sh'), 'utf8');
   const schema = fs.readFileSync(path.join(INIT_ROOT, '10-transcripts.sql'), 'utf8');
+  const acceptanceSchema = fs.readFileSync(
+    path.join(INIT_ROOT, '20-acceptance-authority.sql'),
+    'utf8'
+  );
 
   assert.match(roles, /CREATE ROLE transcript_reader LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS/);
   assert.match(roles, /CREATE ROLE transcript_writer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS/);
+  assert.match(roles, /CREATE ROLE acceptance_reader LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS/);
+  assert.match(roles, /CREATE ROLE acceptance_writer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS/);
   assert.match(roles, /REVOKE ALL ON DATABASE tech_persistence FROM PUBLIC/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS public\.transcripts/);
   assert.match(schema, /transcript_id text PRIMARY KEY/);
@@ -154,6 +162,14 @@ test('init assets create least-privilege roles and append-only transcript eviden
   assert.doesNotMatch(schema, /GRANT[^;]*DELETE[^;]*transcript_writer/i);
   assert.doesNotMatch(schema, /GRANT\s+UPDATE[^;]*public\.transcript_events/i);
   assert.doesNotMatch(schema, /GRANT\s+CREATE[^;]*transcript_(?:reader|writer)/i);
+  assert.match(acceptanceSchema, /CREATE TABLE IF NOT EXISTS public\.acceptance_authority_records/);
+  assert.match(acceptanceSchema, /PRIMARY KEY \(authority_scope, record_kind, record_key\)/);
+  assert.match(acceptanceSchema, /GRANT SELECT ON TABLE public\.acceptance_authority_records TO acceptance_reader/);
+  assert.match(acceptanceSchema, /GRANT INSERT ON TABLE public\.acceptance_authority_records TO acceptance_writer/);
+  assert.match(acceptanceSchema, /GRANT SELECT \([\s\S]*record_hash[\s\S]*\) ON TABLE public\.acceptance_authority_records TO acceptance_writer/);
+  assert.doesNotMatch(acceptanceSchema, /GRANT[^;]*(?:UPDATE|DELETE|TRUNCATE)[^;]*acceptance_writer/i);
+  assert.match(acceptanceSchema, /BEFORE UPDATE OR DELETE ON public\.acceptance_authority_records/);
+  assert.match(acceptanceSchema, /'authority-canary'/);
 });
 
 test('Windows tunnel launcher fails closed and keeps SSH forwarding encrypted and noninteractive', () => {
@@ -215,20 +231,22 @@ test('Windows tunnel installer makes the limited scheduled task directly own har
   assert.match(script, /Start-ScheduledTask -TaskName \$TaskName/);
 });
 
-test('prepare creates three private secrets and client URLs without replacing them', async () => {
+test('prepare creates five private secrets and distinct client URLs without replacing them', async () => {
   await withRuntime((runtime) => {
     const { postgresRoot, dataDir } = runtime;
     const first = prepareRuntime({ ...runtime, randomBytes: deterministicRandomBytes() });
-    assert.strictEqual(first.createdSecrets.length, 3);
+    assert.strictEqual(first.createdSecrets.length, 5);
     assert.strictEqual(first.port, DEFAULT_POSTGRES_PORT);
 
     const secretPaths = [
       path.join(postgresRoot, 'secrets', 'postgres-admin-password'),
       path.join(postgresRoot, 'secrets', 'transcript-reader-password'),
       path.join(postgresRoot, 'secrets', 'transcript-writer-password'),
+      path.join(postgresRoot, 'secrets', 'acceptance-reader-password'),
+      path.join(postgresRoot, 'secrets', 'acceptance-writer-password'),
     ];
     const firstSecrets = secretPaths.map((file) => fs.readFileSync(file, 'utf8'));
-    assert.strictEqual(new Set(firstSecrets).size, 3);
+    assert.strictEqual(new Set(firstSecrets).size, 5);
     assert(firstSecrets.every((value) => value.trim().length >= 40));
 
     const envFile = path.join(postgresRoot, '.env.transcripts');
@@ -240,6 +258,8 @@ test('prepare creates three private secrets and client URLs without replacing th
     assert.strictEqual(parsed.TRANSCRIPTS_POSTGRES_SSL, 'false');
     assert.match(parsed.TRANSCRIPTS_POSTGRES_READ_URL, /^postgresql:\/\/transcript_reader:/);
     assert.match(parsed.TRANSCRIPTS_POSTGRES_WRITE_URL, /^postgresql:\/\/transcript_writer:/);
+    assert.match(parsed.ACCEPTANCE_POSTGRES_READ_URL, /^postgresql:\/\/acceptance_reader:/);
+    assert.match(parsed.ACCEPTANCE_POSTGRES_WRITE_URL, /^postgresql:\/\/acceptance_writer:/);
     assert(parsed.TRANSCRIPTS_POSTGRES_READ_URL.endsWith('@127.0.0.1:55433/tech_persistence'));
 
     const second = prepareRuntime({
@@ -301,6 +321,32 @@ test('prepare fails closed before generating credentials when data exists and a 
     );
     assert(!fs.existsSync(path.join(secretsDir, 'transcript-reader-password')));
     assert(!fs.existsSync(path.join(postgresRoot, '.env.transcripts')));
+  });
+});
+
+test('prepare upgrades a complete legacy transcript cluster with only the two new acceptance secrets', async () => {
+  await withRuntime((runtime) => {
+    const { postgresRoot, dataDir } = runtime;
+    const secretsDir = path.join(postgresRoot, 'secrets');
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(secretsDir, { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'PG_VERSION'), '17\n');
+    for (const [name, value] of [
+      ['postgres-admin-password', 'legacy-admin'],
+      ['transcript-reader-password', 'legacy-reader'],
+      ['transcript-writer-password', 'legacy-writer'],
+    ]) {
+      fs.writeFileSync(path.join(secretsDir, name), `${value}\n`);
+    }
+
+    const prepared = prepareRuntime({ ...runtime, randomBytes: deterministicRandomBytes() });
+    assert.deepStrictEqual(
+      [...prepared.createdSecrets].sort(),
+      ['acceptance-reader-password', 'acceptance-writer-password']
+    );
+    const parsed = parseEnv(fs.readFileSync(path.join(postgresRoot, '.env.transcripts'), 'utf8'));
+    assert.match(parsed.ACCEPTANCE_POSTGRES_READ_URL, /^postgresql:\/\/acceptance_reader:/);
+    assert.match(parsed.ACCEPTANCE_POSTGRES_WRITE_URL, /^postgresql:\/\/acceptance_writer:/);
   });
 });
 
@@ -424,14 +470,19 @@ test('up/status/down use the injected Docker runner and never require a real dae
     runCli(['status'], { ...runtime, spawnSyncImpl });
     runCli(['down'], { ...runtime, spawnSyncImpl });
 
-    assert.strictEqual(calls.length, 3);
-    assert.deepStrictEqual(calls.map((call) => call.command), ['docker', 'docker', 'docker']);
+    assert.strictEqual(calls.length, 5);
+    assert.deepStrictEqual(calls.map((call) => call.command), ['docker', 'docker', 'docker', 'docker', 'docker']);
     assert.deepStrictEqual(
       calls[0].args.slice(-5),
       ['up', '-d', '--wait', '--wait-timeout', '120']
     );
-    assert.strictEqual(calls[1].args.at(-1), 'ps');
-    assert.strictEqual(calls[2].args.at(-1), 'down');
+    assert.deepStrictEqual(
+      calls[1].args.slice(-5),
+      ['exec', '-T', 'tech-persistence-postgres', '/bin/sh', '/docker-entrypoint-initdb.d/00-create-roles.sh']
+    );
+    assert(calls[2].args.some((arg) => arg.endsWith('/docker-entrypoint-initdb.d/20-acceptance-authority.sql')));
+    assert.strictEqual(calls[3].args.at(-1), 'ps');
+    assert.strictEqual(calls[4].args.at(-1), 'down');
     for (const call of calls) {
       assert.strictEqual(call.options.shell, false);
       assert(call.args.includes('--env-file'));

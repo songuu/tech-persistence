@@ -792,7 +792,9 @@ function legacyFilePath(value) {
 }
 
 function safeLegacyRef(runDir, file) {
-  const relative = path.relative(path.resolve(runDir), path.resolve(file));
+  const resolvedRun = fs.existsSync(runDir) ? fs.realpathSync.native(runDir) : path.resolve(runDir);
+  const resolvedFile = fs.existsSync(file) ? fs.realpathSync.native(file) : path.resolve(file);
+  const relative = path.relative(resolvedRun, resolvedFile);
   if (relative !== ''
       && relative !== '..'
       && !relative.startsWith('..' + path.sep)

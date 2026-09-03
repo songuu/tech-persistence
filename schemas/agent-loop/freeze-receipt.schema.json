@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/freeze-receipt.schema.json",
+  "title": "Agent Loop Freeze Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "acceptanceProtocol", "runLocator", "scopeRef", "contractHash", "frozenPayloadHash"],
+  "properties": {
+    "schemaVersion": { "const": "agent-loop-freeze-receipt-v1" },
+    "acceptanceProtocol": { "const": "v1" },
+    "runLocator": { "type": "string", "minLength": 1 },
+    "scopeRef": { "type": "string", "pattern": "^(classic|global|slice:[a-z0-9-]+)(?:@[a-f0-9]{64})?$" },
+    "contractHash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "frozenPayloadHash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "fixture": "synthetic-redacted",
+  "adapterIds": ["claude-print", "claude-bare", "codex-exec", "codex-app-server"],
+  "forbidden": ["dynamic-module-path", "raw-secret", "raw-transcript"]
+}

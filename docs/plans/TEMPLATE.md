@@ -17,7 +17,13 @@
 - ...
 
 ### 成功标准
+<!-- acceptance-contract:start -->
 - [ ] ...
+<!-- acceptance-contract:end -->
+
+> 新 Sprint 在 `plan → work` 前必须把此区块与一个已 freeze 的 Agent Harness v1
+> `AcceptanceContract` 绑定；`review → compound` 前必须读回同一合同的 authority-owned
+> `passed` Receipt。区块内文案一旦绑定即不可静默改写。
 
 ### 风险和假设
 - ...

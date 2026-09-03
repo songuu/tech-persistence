@@ -26,6 +26,12 @@ const {
   validateIdentifier,
 } = require('./lib/self-learning-canonical');
 const {
+  NATIVE_CONTROL_PREFIX,
+  MAX_NATIVE_CONTROL_BYTES,
+  parseCanonicalNativeControl,
+  normalizeAcceptanceConfirmationSemantic,
+} = require('./lib/acceptance-user-confirmation-control');
+const {
   createBehaviorEvent,
   deriveBehaviorEventIdentity,
   journalActorForEvent,
@@ -46,9 +52,9 @@ const {
 } = require('./lib/self-learning-store');
 
 const MAX_HOOK_INPUT_BYTES = 64 * 1024;
-const MAX_CONTROL_INPUT_BYTES = 4096;
+const MAX_CONTROL_INPUT_BYTES = MAX_NATIVE_CONTROL_BYTES;
 const MAX_SUMMARY_CHARS = 1200;
-const CODEX_CONTROL_PREFIX = 'TP_SELF_LEARNING_CONTROL_V1:';
+const CODEX_CONTROL_PREFIX = NATIVE_CONTROL_PREFIX;
 const CANDIDATE_ID_PATTERN = /^lc-[a-f0-9]{32}$/;
 const SUPPORTED_EVENTS = new Set([
   'UserPromptSubmit',
@@ -245,26 +251,9 @@ function isBoundedRememberBody(value) {
  * trailing prose, and invisible whitespace fail closed under one simple rule.
  */
 function parseCodexControlEnvelope(prompt) {
-  if (typeof prompt !== 'string' || !prompt.startsWith(CODEX_CONTROL_PREFIX)) {
-    return { status: 'ordinary' };
-  }
-  if (Buffer.byteLength(prompt, 'utf8') > MAX_CONTROL_INPUT_BYTES) {
-    return invalidControl('control-envelope-too-large');
-  }
-  const encoded = prompt.slice(CODEX_CONTROL_PREFIX.length);
-  let semantic;
-  try {
-    semantic = JSON.parse(encoded);
-  } catch {
-    return invalidControl('control-json-invalid');
-  }
-  try {
-    if (canonicalStringify(semantic) !== encoded) {
-      return invalidControl('control-json-noncanonical');
-    }
-  } catch {
-    return invalidControl('control-json-invalid');
-  }
+  const decoded = parseCanonicalNativeControl(prompt);
+  if (decoded.status === 'ordinary' || decoded.status === 'invalid') return decoded;
+  const semantic = decoded.semantic;
 
   try {
     if (semantic.action === 'approve') {
@@ -285,6 +274,9 @@ function parseCodexControlEnvelope(prompt) {
         details: { ...semantic },
         semantic: { ...semantic },
       };
+    }
+    if (semantic.action === 'confirm-acceptance') {
+      return normalizeAcceptanceConfirmationSemantic(semantic);
     }
     if (semantic.action === 'feedback') {
       assertExactKeys(semantic, ['accepted', 'action', 'summary'], 'feedback control');
@@ -471,6 +463,10 @@ function buildCodexBehaviorEvent(payload, authority, occurredAt, promptControl =
 
 function approvalControlMatchesLiveShadow(promptControl, journal, projectId = null) {
   if (!promptControl || promptControl.event_type !== 'user.approval') return true;
+  // Acceptance confirmation is only an explicit native user event here. The
+  // acceptance broker later proves that its four-hash binding matches the live
+  // Contract and subject before it can become verified evidence.
+  if (promptControl.semantic.action === 'confirm-acceptance') return true;
   const projection = buildCandidateProjection(journal);
   const current = projection.candidates.find(
     (candidate) => candidate.candidate_id === promptControl.semantic.candidate_id

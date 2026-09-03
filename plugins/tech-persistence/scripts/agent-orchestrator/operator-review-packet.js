@@ -140,6 +140,13 @@ function buildOperatorReviewPacket(input = {}) {
     evidenceWait: source.evidenceWait,
   });
 
+  const layerSource = objectOrEmpty(source.evidenceLayers);
+  const evidenceLayers = Object.fromEntries(
+    ['local', 'artifact', 'runtime', 'user', 'production'].map((layer) => [
+      layer,
+      normalizeReferenceList(layerSource[layer], MAX_EVIDENCE_REFS, MAX_EVIDENCE_REF_LENGTH),
+    ])
+  );
   return {
     schemaVersion: SCHEMA_VERSION,
     // This is a compact operator projection, never an approval or execution grant.
@@ -159,6 +166,7 @@ function buildOperatorReviewPacket(input = {}) {
       MAX_EVIDENCE_REFS,
       MAX_EVIDENCE_REF_LENGTH
     ),
+    evidenceLayers,
     freshness: normalizeFreshness(source.freshness),
     boundary: normalizeBoundary(source.boundary),
     nextSafeAction: boundedPublicText(

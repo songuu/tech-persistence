@@ -1,0 +1,1 @@
+{"schema_version":"1.0","timestamp":"2026-09-02T04:50:26.295Z","skill":"plan","source":"manual-session-evidence","failure_step":"l4-identity-and-provider-authorization","input_excerpt":"Authenticated task creation/execution scope approved; existing login private-source review denied by auto-review; model presence confirmed from safe config summary only."}

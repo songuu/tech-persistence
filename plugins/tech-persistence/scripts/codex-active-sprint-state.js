@@ -12,10 +12,11 @@ const {
 
 const COMMAND_OPTIONS = Object.freeze({
   status: new Set(),
-  init: new Set(['plan', 'restore-phase', 'next', 'now']),
-  advance: new Set(['expected', 'to', 'next', 'now']),
+  init: new Set(['plan', 'restore-phase', 'next', 'now', 'acceptance-protocol']),
+  advance: new Set(['expected', 'to', 'next', 'now', 'control-root']),
   block: new Set(['expected', 'reason', 'next', 'now']),
   complete: new Set(['expected']),
+  'bind-acceptance': new Set(['run-dir', 'control-root']),
 });
 
 function usage() {
@@ -24,6 +25,7 @@ function usage() {
     '  codex-active-sprint-state.js status',
     '  codex-active-sprint-state.js init --plan <docs/plans/*.md> [--restore-phase <phase>] --next <action>',
     '  codex-active-sprint-state.js advance --expected <phase> --to <phase> --next <action>',
+    '  codex-active-sprint-state.js bind-acceptance --run-dir <v1-run-dir> --control-root <authority-root>',
     '  codex-active-sprint-state.js block --expected <phase> --reason <reason> --next <action>',
     '  codex-active-sprint-state.js complete --expected compound',
   ].join('\n');
@@ -70,6 +72,7 @@ function main(argv = process.argv.slice(2), cwd = process.cwd()) {
       restorePhase: options['restore-phase'],
       next: options.next,
       now: options.now,
+      acceptanceProtocol: options['acceptance-protocol'] || 'v1',
     });
   }
   if (command === 'advance') {
@@ -80,6 +83,7 @@ function main(argv = process.argv.slice(2), cwd = process.cwd()) {
       toPhase: options.to,
       next: options.next,
       now: options.now,
+      controlRoot: options['control-root'],
     });
   }
   if (command === 'block') {
@@ -90,6 +94,22 @@ function main(argv = process.argv.slice(2), cwd = process.cwd()) {
       reason: options.reason,
       next: options.next,
       now: options.now,
+    });
+  }
+  if (command === 'bind-acceptance') {
+    requireOptions(command, options, ['run-dir', 'control-root']);
+    const active = readActiveSprint(cwd);
+    if (!active.active || active.acceptanceProtocol !== 'v1') {
+      throw sprintStateError(
+        'SPRINT_ACCEPTANCE_REQUIRED',
+        'bind-acceptance requires an active v1 sprint'
+      );
+    }
+    return require('./lib/codex-sprint-acceptance').bindSprintAcceptance({
+      cwd,
+      plan: active.plan,
+      runDir: options['run-dir'],
+      controlRoot: options['control-root'],
     });
   }
   requireOptions(command, options, ['expected']);

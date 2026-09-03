@@ -16,6 +16,8 @@ const reconciliation = require('./reconciliation');
 const providers = require('./pipeline-providers');
 const runLock = require('./run-lock');
 const nativeExecutionControl = require('./native-execution-control');
+const acceptanceEvaluator = require('./acceptance-evaluator');
+const freezeReceipt = require('./freeze-receipt');
 
 const { RUN_STATES, SLICE_STATES } = state;
 
@@ -183,6 +185,41 @@ function uniqueStrings(values) {
   return [...new Set((Array.isArray(values) ? values : []).filter(Boolean).map(String))];
 }
 
+function changedCriterionIds(previousContract, nextContract) {
+  const previous = new Map((previousContract?.criteria || []).map((item) => [item.id, JSON.stringify(item)]));
+  const next = new Map((nextContract?.criteria || []).map((item) => [item.id, JSON.stringify(item)]));
+  return [...new Set([...previous.keys(), ...next.keys()])]
+    .filter((id) => previous.get(id) !== next.get(id));
+}
+
+function criterionImpact(runDir, contract, changedIds) {
+  const slices = slicePlanner.listSliceIds(runDir).map((id) => slicePlanner.loadSlice(runDir, id)).filter(Boolean);
+  const owners = new Map();
+  for (const slice of slices) for (const id of slice.criterionIds || []) {
+    if (!owners.has(id)) owners.set(id, []);
+    owners.get(id).push(slice.id);
+  }
+  for (const id of contract.integrationCriterionIds || []) {
+    if (!owners.has(id)) owners.set(id, []);
+    owners.get(id).push('integration');
+  }
+  const unmapped = changedIds.filter((id) => !owners.has(id) || owners.get(id).length !== 1);
+  if (unmapped.length > 0) {
+    throw new Error(`contract revision impact is incomplete; full run replan required for: ${unmapped.join(', ')}`);
+  }
+  const impacted = new Set(changedIds.flatMap((id) => owners.get(id)).filter((id) => id !== 'integration'));
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    for (const slice of slices) {
+      if (!impacted.has(slice.id) && (slice.dependsOn || []).some((id) => impacted.has(id))) {
+        impacted.add(slice.id); expanded = true;
+      }
+    }
+  }
+  return [...impacted].sort();
+}
+
 function markSlicesSuperseded(runDir, stateObj, q, sliceIds, revisionId) {
   let nextState = stateObj;
   let nextQueue = q;
@@ -316,6 +353,21 @@ function freezeGlobalContract(ctx, options, runDir, statePath, stateObj) {
     throw new Error(`Cannot freeze global contract: ${contract.blockingQuestions.length} blocking question(s) remain.`);
   }
   const normalized = globalContract.writeGlobalContract(runDir, contract, 'freeze');
+  const acceptanceContract = acceptanceEvaluator.recordAcceptanceContract({
+    kind: 'global-contract',
+    workdir: ctx.resolveWorkdir(options),
+    runDir,
+    source: normalized,
+    controlStoreOptions: ctx.goalLeaseStoreOptions(options, ctx.resolveWorkdir(options)),
+  });
+  if (acceptanceContract.status !== 'written') {
+    throw new Error(`Cannot freeze acceptance contract: ${acceptanceContract.error}`);
+  }
+  freezeReceipt.recordFreezeReceipt(runDir, {
+    scopeRef: 'global',
+    contractHash: acceptanceContract.contract.contractHash,
+    frozenPayload: normalized,
+  }, controlStoreOptions(ctx, options, ctx.resolveWorkdir(options)));
   let nextState = stateObj;
   if (nextState.status === RUN_STATES.GLOBAL_CONTRACT_READY) {
     nextState = transitionRun(nextState, RUN_STATES.GLOBAL_CONTRACT_FROZEN);
@@ -324,12 +376,20 @@ function freezeGlobalContract(ctx, options, runDir, statePath, stateObj) {
   }
   nextState = {
     ...nextState,
+    acceptanceProtocol: freezeReceipt.ACCEPTANCE_PROTOCOL,
     pipeline: {
       ...nextState.pipeline,
+      globalFreezeScope: 'global',
       globalContractFrozenAt: nowIso(),
       globalContractFrozenBy: ctx.optionValue(options, 'reviewer') || process.env.USER || process.env.USERNAME || 'human',
     },
-    files: { ...nextState.files, globalContract: 'global-contract.json' },
+    files: {
+      ...nextState.files,
+      globalContract: 'global-contract.json',
+      ...(acceptanceContract.status === 'written'
+        ? { acceptanceContract: 'acceptance-contract.json' }
+        : {}),
+    },
   };
   saveState(statePath, nextState);
   ctx.log(`[OK] global contract frozen (hash=${normalized.contractHash})`);
@@ -357,11 +417,21 @@ function freezeSlice(ctx, options, runDir, statePath, stateObj, sliceId) {
     slice.contractHash = sliceNormalizer.computeSliceHash(slice, contract.contractHash);
     slicePlanner.writeSliceArtifacts(runDir, slice);
   }
+  const globalScope = stateObj.pipeline.globalFreezeScope || 'global';
+  const revisionSuffix = globalScope.includes('@') ? globalScope.slice(globalScope.indexOf('@')) : '';
+  const sliceScope = `slice:${sliceId}${revisionSuffix}`;
+  freezeReceipt.recordFreezeReceipt(runDir, {
+    scopeRef: sliceScope,
+    contractHash: contract.contractHash,
+    frozenPayload: slice,
+  }, controlStoreOptions(ctx, options, ctx.resolveWorkdir(options)));
   let nextState = stateObj;
   if (sliceStateNow === SLICE_STATES.PENDING) {
     nextState = transitionSlice(nextState, sliceId, SLICE_STATES.READY);
   }
   nextState = transitionSlice(nextState, sliceId, SLICE_STATES.FROZEN);
+  nextState = { ...nextState, pipeline: { ...nextState.pipeline,
+    sliceFreezeScopes: { ...(nextState.pipeline.sliceFreezeScopes || {}), [sliceId]: sliceScope } } };
   saveState(statePath, nextState);
   ctx.log(`[OK] slice ${sliceId} frozen (hash=${slice.contractHash})`);
   return nextState;
@@ -371,6 +441,28 @@ function resumePipelineRun(ctx, options, positionals) {
   const { runDir, statePath, state: stateObj } = ctx.loadRun(options, positionals);
   if (stateObj.mode !== 'pipeline') {
     throw new Error('resumePipelineRun: state.mode must be "pipeline"');
+  }
+  if (stateObj.acceptanceProtocol === freezeReceipt.ACCEPTANCE_PROTOCOL) {
+    const contract = globalContract.loadGlobalContract(runDir);
+    const acceptanceContract = JSON.parse(
+      fs.readFileSync(path.join(runDir, 'acceptance-contract.json'), 'utf8')
+    );
+    const storeOptions = controlStoreOptions(ctx, options, ctx.resolveWorkdir(options));
+    freezeReceipt.verifyFreezeReceipt(runDir, {
+      scopeRef: stateObj.pipeline.globalFreezeScope || 'global',
+      contractHash: acceptanceContract.contractHash,
+      frozenPayload: contract,
+    }, storeOptions);
+    for (const [sliceId, sliceStatus] of Object.entries(stateObj.pipeline.sliceStates || {})) {
+      if (![SLICE_STATES.FROZEN, SLICE_STATES.IMPLEMENTING, SLICE_STATES.IMPLEMENTED,
+        SLICE_STATES.REVIEWING, SLICE_STATES.COMPLETED].includes(sliceStatus)) continue;
+      const frozenSlice = slicePlanner.loadSlice(runDir, sliceId);
+      freezeReceipt.verifyFreezeReceipt(runDir, {
+        scopeRef: stateObj.pipeline.sliceFreezeScopes?.[sliceId] || `slice:${sliceId}`,
+        contractHash: contract.contractHash,
+        frozenPayload: frozenSlice,
+      }, storeOptions);
+    }
   }
   const effectiveOptions = nativeExecutionControl.resolveExecutionPolicyOptions(
     options,
@@ -441,13 +533,57 @@ function resolveContractConflict(ctx, options, runDir, statePath, stateObj, acti
     const currentContract = globalContract.loadGlobalContract(runDir);
     if (!currentContract) throw new Error('Cannot accept revision: global-contract.json not found');
     const nextContract = globalContract.applyRevisionToContract(currentContract, revision);
+    const acceptanceSemanticFields = ['goal', 'globalAcceptance', 'acceptanceContract'];
+    const proposedChangedFields = globalContract.detectChangedCanonicalFields(currentContract, nextContract);
+    const semanticRevision = proposedChangedFields.some((field) => acceptanceSemanticFields.includes(field));
+    const previousAcceptance = semanticRevision
+      ? JSON.parse(fs.readFileSync(path.join(runDir, 'acceptance-contract.json'), 'utf8'))
+      : null;
+    const nextAcceptance = semanticRevision
+      ? acceptanceEvaluator.createAcceptanceContractForGlobalContract(nextContract)
+      : null;
+    let semanticImpact = [];
+    let changedCriteria = [];
+    if (semanticRevision) {
+      changedCriteria = changedCriterionIds(previousAcceptance, nextAcceptance);
+      if (changedCriteria.length === 0) changedCriteria = nextAcceptance.criteria.map((item) => item.id);
+      semanticImpact = criterionImpact(runDir, nextContract, changedCriteria);
+    }
+    let pendingGlobalFreeze = null;
+    if (semanticRevision) {
+      const recorded = acceptanceEvaluator.recordAcceptanceContract({
+        kind: 'global-contract', workdir: ctx.resolveWorkdir(options), runDir,
+        source: nextContract, allowRevision: true,
+        controlStoreOptions: ctx.goalLeaseStoreOptions(options, ctx.resolveWorkdir(options)),
+      });
+      if (recorded.status !== 'written') throw new Error(`Cannot revise acceptance contract: ${recorded.error}`);
+      const scopeRef = `global@${recorded.contract.contractHash.slice('sha256:'.length)}`;
+      freezeReceipt.recordFreezeReceipt(runDir, {
+        scopeRef, contractHash: recorded.contract.contractHash, frozenPayload: nextContract,
+      }, controlStoreOptions(ctx, options, ctx.resolveWorkdir(options)));
+      pendingGlobalFreeze = scopeRef;
+    }
     const writtenContract = globalContract.writeGlobalContract(runDir, nextContract, 'revision-applied');
+    if (pendingGlobalFreeze) {
+      stateObj = { ...stateObj, pipeline: { ...stateObj.pipeline, globalFreezeScope: pendingGlobalFreeze } };
+    }
     const changedFields = globalContract.detectChangedCanonicalFields(currentContract, writtenContract);
     const driftEntry = findDriftEntry(runDir, revisionId);
     const impact = driftEntry && driftEntry.impact ? driftEntry.impact : {};
     let q = queue.loadQueue(runDir);
     let next = stateObj;
-    const superseded = markSlicesSuperseded(runDir, next, q, impact.pendingSlices || [], revisionId);
+    const reopenedSlices = [];
+    for (const sliceId of semanticImpact) {
+      if (next.pipeline.sliceStates[sliceId] === SLICE_STATES.COMPLETED) {
+        next = state.reopenCompletedSlice(next, sliceId, revisionId);
+        q = queue.moveToPending(q, sliceId);
+        reopenedSlices.push(sliceId);
+      }
+    }
+    const pendingImpact = semanticRevision
+      ? (impact.pendingSlices || []).filter((sliceId) => semanticImpact.includes(sliceId))
+      : (impact.pendingSlices || []);
+    const superseded = markSlicesSuperseded(runDir, next, q, pendingImpact, revisionId);
     next = superseded.state;
     q = superseded.queue;
     const reconciliationResult = createReconciliationSlice(
@@ -455,7 +591,7 @@ function resolveContractConflict(ctx, options, runDir, statePath, stateObj, acti
       next,
       q,
       revision,
-      impact.completedSlices || [],
+      semanticRevision ? [] : (impact.completedSlices || []),
       writtenContract.contractHash
     );
     next = reconciliationResult.state;
@@ -468,16 +604,20 @@ function resolveContractConflict(ctx, options, runDir, statePath, stateObj, acti
       resolution: 'accepted',
       appliedContractHash: writtenContract.contractHash,
       changedFields,
-      supersededSlices: uniqueStrings(impact.pendingSlices || []),
+      supersededSlices: uniqueStrings(pendingImpact),
       reconciliationSliceId: reconciliationResult.slice ? reconciliationResult.slice.id : null,
+      changedCriterionIds: changedCriteria,
+      reopenedSlices,
     });
     appendPipelineEvent(runDir, {
       type: 'contract-revision-accepted',
       revisionId,
       appliedContractHash: writtenContract.contractHash,
       changedFields,
-      supersededSlices: uniqueStrings(impact.pendingSlices || []),
+      supersededSlices: uniqueStrings(pendingImpact),
       reconciliationSliceId: reconciliationResult.slice ? reconciliationResult.slice.id : null,
+      changedCriterionIds: changedCriteria,
+      reopenedSlices,
     });
     next = transitionRun(next, RUN_STATES.EXECUTING_SLICES);
     saveState(statePath, next);
@@ -582,7 +722,7 @@ function advancePipeline(ctx, options, runDir, statePath, stateObj) {
         saveState(statePath, current);
         continue;
       }
-      const sliceId = q.ready[0] || q.pending[0];
+      const sliceId = q.ready[0] || q.pending[0] || q.running[0];
       if (!sliceId) {
         ctx.log(`[GATE] no ready slice; ${q.blocked.length} blocked, ${q.pending.length} pending. Use resume --unblock or wait.`);
         return current;
@@ -656,7 +796,17 @@ function advancePipeline(ctx, options, runDir, statePath, stateObj) {
       continue;
     }
     if (current.status === RUN_STATES.INTEGRATION_READY) {
+      if (current.acceptanceProtocol === 'v1'
+          && (['failed', 'unknown'].includes(current.acceptanceStatus)
+            || current.completionGateStatus === 'failed')
+          && !ctx.boolOption(options, 'retry-acceptance')) {
+        ctx.log(
+          `[GATE] integration completion remains blocked (acceptance=${current.acceptanceStatus || 'unknown'}, gate=${current.completionGateStatus || 'unknown'}); resolve the evidence or implementation, then resume with --retry-acceptance.`
+        );
+        return current;
+      }
       current = providers.runIntegrationReviewProvider(ctx, current, statePath, runDir, options);
+      if (current.status !== RUN_STATES.COMPLETED) return current;
       continue;
     }
     ctx.log(`[STOP] unhandled run status: ${current.status}`);
@@ -757,13 +907,29 @@ function startPipelineRun(ctx, options, positionals) {
 
   if (ctx.boolOption(options, 'dry-run')) {
     const contract = dryRunGlobalContract(requirement);
-    globalContract.writeGlobalContract(runDir, contract, 'dry-run');
+    const normalizedContract = globalContract.writeGlobalContract(runDir, contract, 'dry-run');
+    const acceptanceContract = acceptanceEvaluator.recordAcceptanceContract({
+      kind: 'global-contract',
+      workdir,
+      runDir,
+      source: normalizedContract,
+      controlStoreOptions: ctx.goalLeaseStoreOptions(options, workdir),
+    });
+    if (acceptanceContract.status !== 'written') {
+      throw new Error(`Cannot freeze acceptance contract: ${acceptanceContract.error}`);
+    }
     stateObj = transitionRun(stateObj, RUN_STATES.GLOBAL_CONTRACT_READY);
     stateObj = transitionRun(stateObj, RUN_STATES.GLOBAL_CONTRACT_FROZEN);
     stateObj = {
       ...stateObj,
       pipeline: { ...stateObj.pipeline, globalContractFrozenAt: nowIso(), globalContractFrozenBy: 'dry-run' },
-      files: { ...stateObj.files, globalContract: 'global-contract.json' },
+      files: {
+        ...stateObj.files,
+        globalContract: 'global-contract.json',
+        ...(acceptanceContract.status === 'written'
+          ? { acceptanceContract: 'acceptance-contract.json' }
+          : {}),
+      },
     };
     stateObj = transitionRun(stateObj, RUN_STATES.PLANNING_SLICES);
     const slices = dryRunSliceBatch(contract);
@@ -819,4 +985,6 @@ module.exports = {
   startPipelineRun,
   dryRunGlobalContract,
   dryRunSliceBatch,
+  changedCriterionIds,
+  criterionImpact,
 };

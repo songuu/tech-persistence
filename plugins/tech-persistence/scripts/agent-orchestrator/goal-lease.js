@@ -160,7 +160,7 @@ function validateGoalLeaseForDispatch(existing, input = {}) {
   if (existing.runId !== String(input.runId || '')) {
     throw new Error(`goal lease run conflict: expected ${existing.runId}`);
   }
-  if (!RUNTIMES.has(input.providerRuntime)) {
+  if (!RUNTIMES.has(input.providerRuntime) && !(input.providerRuntime === 'openai-compatible' && input.providerIntent === 'read-only')) {
     throw new Error('goal lease providerRuntime must be codex or claude');
   }
   const expectedRuntime = input.orchestrationOwner === 'codex-host'

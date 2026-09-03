@@ -22,7 +22,7 @@
     "schemaVersion": { "const": "runtime-capability-snapshot-v1" },
     "runtime": {
       "type": "string",
-      "enum": ["codex", "claude"]
+      "enum": ["codex", "claude", "openai-compatible"]
     },
     "profileId": { "type": "string", "minLength": 1 },
     "adapter": { "type": "string", "minLength": 1 },

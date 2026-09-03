@@ -7,6 +7,8 @@ description: Codex-native findings-first review with evidence, risk-based testin
 
 审查当前 diff/提交是否正确、安全、可维护且测试充分。默认只读：用户只要求 review 时不得顺手修复、提交或推送。
 
+活动 Sprint 为 `acceptance_protocol=v1` 时，Review 必须让 Agent Harness 按冻结 Contract 生成 system-owned Receipt。任何 owned criterion 为 `failed/unknown`、Receipt stale/tampered，或 authority readback 不完整时只能回 Work/blocked；只有同一 contract hash 的 `passed` Receipt 才允许 `review → compound`。
+
 ## Review loop
 
 1. 读取完成定义、基线、`git status` 与完整 diff，识别用户既有修改。

@@ -1,0 +1,23 @@
+[Unit]
+Description=Tech Persistence durable Harness transcript synchronization
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=tp-authority
+Group=tp-authority
+WorkingDirectory=/var/lib/tech-persistence/authority/runtime-20260902-harness-wiring-v1
+ExecStart=/usr/bin/node scripts/sync-runtime-transcripts.js --outbox /var/lib/tech-persistence/authority/transcripts --env-file /var/lib/tech-persistence/authority/runtime-current/deploy/postgres/.env.transcripts
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/tech-persistence/authority/transcripts
+UMask=0077
+MemoryMax=192M
+TasksMax=32
+TimeoutStartSec=120
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

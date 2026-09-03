@@ -213,22 +213,17 @@ assert.strictEqual(codexOfficialJsonl.nativeAccepted, true);
 assert.strictEqual(codexOfficialJsonl.runtimeRefs.threadId, 'thr-official-sample');
 assert.strictEqual(codexOfficialJsonl.runtimeRefs.turnId, null);
 
-let codexInvalidPayloadError;
-try {
-  adapters.normalizeCodexOutput({
-    stdout: [
-      JSON.stringify({ type: 'thread.started', thread_id: 'thr-invalid-payload' }),
-      JSON.stringify({ type: 'turn.started', turn_id: 'turn-invalid-payload' }),
-      JSON.stringify({ type: 'turn.completed' }),
-    ].join('\n'),
-    lastMessage: '{not-json',
-  });
-} catch (error) {
-  codexInvalidPayloadError = error;
-}
-assert(codexInvalidPayloadError);
-assert.strictEqual(codexInvalidPayloadError.runtimeResult.runtimeRefs.threadId, 'thr-invalid-payload');
-assert.strictEqual(codexInvalidPayloadError.runtimeResult.runtimeRefs.turnId, 'turn-invalid-payload');
+const codexInvalidPayload = adapters.normalizeCodexOutput({
+  stdout: [
+    JSON.stringify({ type: 'thread.started', thread_id: 'thr-invalid-payload' }),
+    JSON.stringify({ type: 'turn.started', turn_id: 'turn-invalid-payload' }),
+    JSON.stringify({ type: 'turn.completed' }),
+  ].join('\n'),
+  lastMessage: '{not-json',
+});
+assert.strictEqual(codexInvalidPayload.payload, null);
+assert.strictEqual(codexInvalidPayload.runtimeRefs.threadId, 'thr-invalid-payload');
+assert.strictEqual(codexInvalidPayload.runtimeRefs.turnId, 'turn-invalid-payload');
 
 assert.deepStrictEqual(
   adapters.extractRecoveryRuntimeRefs('claude', {

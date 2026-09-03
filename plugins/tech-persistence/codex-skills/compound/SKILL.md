@@ -7,6 +7,8 @@ description: Codex-native evidence-gated knowledge compounding with bounded solu
 
 把本次已完成工作的可复用知识沉淀下来。只读取当前目标、当前 diff、实际测试结果、review findings 和当前 Sprint 计划；不要扫描全部历史，也不要加载其他 Phase skill。
 
+活动 Sprint 为 `acceptance_protocol=v1` 时，进入 Compound 前必须已由状态 CLI 读回同一 Contract 的 authority-owned `passed` Receipt；Receipt 与 pointer transition 间中断只重试原 transition，不重写 Receipt 或 pointer。
+
 ## 证据门槛
 
 - 先分开列出**已验证事实、推断、未知项**。只有能指向代码、测试、日志、文档或用户确认的内容可以持久化。

@@ -7,6 +7,8 @@ description: Codex-native implementation workflow using TDD, risk-scaled verific
 
 按已确认的任务边界实施并验证。优先读取当前任务、相关源文件和现有测试；不重新做产品范围决策。
 
+活动 Sprint 为 `acceptance_protocol=v1` 时，Work 开始前必须读回 `<plan>.acceptance.json` 并核对当前计划 acceptance marker 与 frozen Contract；不得自行改 criterion、Oracle、contract hash 或用 agent 自报替代 authority evidence。
+
 ## 单任务循环
 
 1. 明确可观察完成条件、涉及文件和风险等级。

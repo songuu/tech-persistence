@@ -171,6 +171,7 @@ test('operator packet is bounded, public-safe, and contains only derived fields'
   assert.deepStrictEqual(Object.keys(first).sort(), [
     'boundary',
     'decision',
+    'evidenceLayers',
     'evidenceRefs',
     'freshness',
     'nextSafeAction',
@@ -185,6 +186,10 @@ test('operator packet is bounded, public-safe, and contains only derived fields'
   assert.strictEqual(first.schedulerHint.action, 'run-now');
   assert.strictEqual(first.evidenceRefs.length, MAX_EVIDENCE_REFS);
   assert.deepStrictEqual(first.evidenceRefs, [...first.evidenceRefs].sort());
+  assert.deepStrictEqual(Object.keys(first.evidenceLayers).sort(), [
+    'artifact', 'local', 'production', 'runtime', 'user',
+  ]);
+  assert(Object.values(first.evidenceLayers).every(Array.isArray));
   assert.strictEqual(new Set(first.evidenceRefs).size, first.evidenceRefs.length);
   assert(first.evidenceRefs.every((ref) => ref.length <= MAX_EVIDENCE_REF_LENGTH));
   assert(first.reason.length <= MAX_REASON_LENGTH);

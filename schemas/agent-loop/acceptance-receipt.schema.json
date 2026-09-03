@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/acceptance-receipt.schema.json",
+  "title": "Agent Loop Acceptance Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractHash",
+    "subjectRef",
+    "subjectHash",
+    "results",
+    "overallStatus",
+    "receiptHash"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "acceptance-receipt-v1" },
+    "contractHash": { "$ref": "#/$defs/hash" },
+    "subjectRef": { "type": "string", "minLength": 1 },
+    "subjectHash": { "$ref": "#/$defs/hash" },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/result" }
+    },
+    "overallStatus": { "$ref": "#/$defs/status" },
+    "receiptHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "criterionId": {
+      "type": "string",
+      "pattern": "^ac-[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["passed", "failed", "unknown"]
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref", "digest", "assurance"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "command-execution",
+            "artifact-readback",
+            "runtime-readback",
+            "independent-review",
+            "user-confirmation"
+          ]
+        },
+        "ref": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/$defs/hash" },
+        "assurance": { "type": "string", "enum": ["claimed", "verified"] }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "criterionId",
+        "oracleHash",
+        "status",
+        "evaluatorRef",
+        "evidenceRefs",
+        "observed"
+      ],
+      "properties": {
+        "criterionId": { "$ref": "#/$defs/criterionId" },
+        "oracleHash": { "$ref": "#/$defs/hash" },
+        "status": { "$ref": "#/$defs/status" },
+        "evaluatorRef": { "type": "string", "minLength": 1 },
+        "evidenceRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/evidenceRef" }
+        },
+        "observed": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

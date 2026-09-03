@@ -197,6 +197,7 @@ const validSlice = {
   dependsOn: [],
   ownedFiles: ['src/index.js'],
   readFiles: [],
+  criterionIds: [],
   risk: 'L1',
   acceptanceCriteria: ['works'],
   doneCriteria: ['tests pass'],

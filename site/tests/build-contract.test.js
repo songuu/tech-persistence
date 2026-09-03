@@ -33,9 +33,11 @@ test("builds every public route and immutable asset from the live project model"
       "updates/index.html",
       "install/index.html",
       "status/index.html",
+      "tasks/index.html",
       "404.html",
       "assets/styles.css",
       "assets/app.js",
+      "assets/tasks.js",
       "assets/mark.svg",
       "build-manifest.json",
     ];

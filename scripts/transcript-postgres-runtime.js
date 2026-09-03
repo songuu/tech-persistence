@@ -20,6 +20,17 @@ const SECRET_DEFINITIONS = Object.freeze([
   { key: 'admin', fileName: 'postgres-admin-password' },
   { key: 'reader', fileName: 'transcript-reader-password' },
   { key: 'writer', fileName: 'transcript-writer-password' },
+  { key: 'acceptanceReader', fileName: 'acceptance-reader-password' },
+  { key: 'acceptanceWriter', fileName: 'acceptance-writer-password' },
+]);
+const LEGACY_SECRET_FILE_NAMES = Object.freeze([
+  'postgres-admin-password',
+  'transcript-reader-password',
+  'transcript-writer-password',
+]);
+const ACCEPTANCE_SECRET_FILE_NAMES = new Set([
+  'acceptance-reader-password',
+  'acceptance-writer-password',
 ]);
 
 function defaultPostgresDataDir() {
@@ -356,10 +367,23 @@ function prepareRuntime(options = {}) {
     file: path.join(paths.secretsDir, definition.fileName),
   }));
   const missingSecrets = secretPaths.filter(({ file }) => !fs.existsSync(file));
+  const pgVersionFile = path.join(paths.dataDir, 'PG_VERSION');
+  const legacyAcceptanceUpgrade = missingSecrets.length > 0
+    && missingSecrets.every(({ fileName }) => ACCEPTANCE_SECRET_FILE_NAMES.has(fileName))
+    && LEGACY_SECRET_FILE_NAMES.every((fileName) => {
+      const file = path.join(paths.secretsDir, fileName);
+      if (!fs.existsSync(file)) return false;
+      const stat = fs.lstatSync(file);
+      return stat.isFile() && !stat.isSymbolicLink();
+    })
+    && fs.existsSync(pgVersionFile)
+    && fs.lstatSync(pgVersionFile).isFile()
+    && !fs.lstatSync(pgVersionFile).isSymbolicLink();
 
   // WHY: initialized clusters retain role password hashes. Generating a new
   // missing file would make the runtime credential diverge from the database.
-  if (missingSecrets.length > 0 && directoryHasEntries(paths.dataDir)) {
+  if (missingSecrets.length > 0 && directoryHasEntries(paths.dataDir)
+      && !legacyAcceptanceUpgrade) {
     throw new Error(
       `Transcript PostgreSQL data directory is not empty (${paths.dataDir}); missing Docker `
       + `secret files: ${missingSecrets.map(({ fileName }) => fileName).join(', ')}. `
@@ -396,6 +420,8 @@ function prepareRuntime(options = {}) {
   const port = normalizePort(requestedPort);
   const readerPassword = encodeURIComponent(secrets.reader);
   const writerPassword = encodeURIComponent(secrets.writer);
+  const acceptanceReaderPassword = encodeURIComponent(secrets.acceptanceReader);
+  const acceptanceWriterPassword = encodeURIComponent(secrets.acceptanceWriter);
   const desiredEnv = [
     [POSTGRES_DATA_DIR_ENV, paths.dataDir],
     ['TECH_PERSISTENCE_POSTGRES_PORT', String(port)],
@@ -408,6 +434,15 @@ function prepareRuntime(options = {}) {
       'TRANSCRIPTS_POSTGRES_WRITE_URL',
       `postgresql://transcript_writer:${writerPassword}@${DATABASE_HOST}:${port}/${DATABASE_NAME}`,
     ],
+    ['ACCEPTANCE_POSTGRES_SSL', 'false'],
+    [
+      'ACCEPTANCE_POSTGRES_READ_URL',
+      `postgresql://acceptance_reader:${acceptanceReaderPassword}@${DATABASE_HOST}:${port}/${DATABASE_NAME}`,
+    ],
+    [
+      'ACCEPTANCE_POSTGRES_WRITE_URL',
+      `postgresql://acceptance_writer:${acceptanceWriterPassword}@${DATABASE_HOST}:${port}/${DATABASE_NAME}`,
+    ],
   ];
   if (allowLocalDevData) desiredEnv.splice(1, 0, [POSTGRES_LOCAL_DEV_ENV, 'true']);
   const missingEnvEntries = desiredEnv.filter(([key]) => !existingEnv.has(key));
@@ -419,6 +454,26 @@ function prepareRuntime(options = {}) {
     createdSecrets,
     addedEnvKeys: missingEnvEntries.map(([key]) => key),
   };
+}
+
+function runAcceptanceMigrations(options = {}) {
+  runCompose('acceptance role migration', [
+    'exec',
+    '-T',
+    'tech-persistence-postgres',
+    '/bin/sh',
+    '/docker-entrypoint-initdb.d/00-create-roles.sh',
+  ], options);
+  return runCompose('acceptance schema migration', [
+    'exec',
+    '-T',
+    'tech-persistence-postgres',
+    'psql',
+    '--set=ON_ERROR_STOP=1',
+    '--username=postgres',
+    '--dbname=tech_persistence',
+    '--file=/docker-entrypoint-initdb.d/20-acceptance-authority.sql',
+  ], options);
 }
 
 function runCompose(operation, composeArgs, options = {}) {
@@ -475,7 +530,8 @@ function runCli(argv, options = {}) {
   if (command === 'prepare') return prepareRuntime(options);
   if (command === 'up') {
     prepareRuntime(options);
-    return runCompose('up', ['up', '-d', '--wait', '--wait-timeout', '120'], options);
+    runCompose('up', ['up', '-d', '--wait', '--wait-timeout', '120'], options);
+    return runAcceptanceMigrations(options);
   }
   if (command === 'status') return runCompose('status', ['ps'], options);
   if (command === 'down') return runCompose('down', ['down'], options);
@@ -510,6 +566,7 @@ module.exports = {
   assertStorageCapacity,
   prepareRuntime,
   resolveRuntimePaths,
+  runAcceptanceMigrations,
   runCli,
   runCompose,
 };

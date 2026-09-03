@@ -324,6 +324,21 @@ function ensureControlRunDir(runDir, options = {}) {
   return controlDir;
 }
 
+function readControlRunBinding(runDir, options = {}) {
+  const controlDir = controlRunDir(runDir, options);
+  const file = bindingPath(controlDir);
+  const locator = expectedLocatorBinding(runDir);
+  const identityFile = identityPath(resolveControlRoot(options), locator.identityKey);
+  const identity = validateIdentityBinding(
+    readAuthoritativeJson(runDir, identityFile, options),
+    locator
+  );
+  return validateBinding(
+    readAuthoritativeJson(runDir, file, options),
+    expectedAuthorityBinding(identity)
+  );
+}
+
 module.exports = {
   CONTROL_BINDING_FILE,
   CONTROL_IDENTITY_SCHEMA_VERSION,
@@ -337,6 +352,9 @@ module.exports = {
   controlRunDir,
   controlRunKey,
   ensureControlRunDir,
+  claimAuthoritativeJson,
+  readAuthoritativeJson,
+  readControlRunBinding,
   resolveControlRoot,
   stableRunLocator,
 };

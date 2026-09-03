@@ -22,12 +22,15 @@ description: Codex-native sprint state machine with phase-local loading and tran
 
 ```text
 node <cli> init --plan <plan> [--restore-phase <phase>] --next <action>
-node <cli> advance --expected <current> --to <adjacent> --next <action>
+node <cli> bind-acceptance --run-dir <v1-run-dir> --control-root <authority-root>
+node <cli> advance --expected <current> --to <adjacent> --next <action> [--control-root <authority-root>]
 node <cli> block --expected <current> --reason <reason> --next <action>
 node <cli> complete --expected compound
 ```
 
 CLI 用持久 transaction、move-verify claim、exclusive-link、token/inode 锁实现 CAS；仅此协议受支持，裸写（含预开 FD）属外部破坏。协议内及可观察 path successor 不覆盖/删除。迁移仅 `think->plan->work->review->compound` 与 `review->work`；冲突停下重读。`SPRINT_STATE_LOCKED` 不按年龄删除，核验 owner 后仅用户/运维清 orphan。
+
+新建 pointer 使用 `acceptance_protocol=v1`：`plan->work` 前必须把计划的 canonical acceptance marker 区块绑定到同内容的 frozen Agent Harness Contract；`review->compound` 前必须从外部 authority 读回同一 Contract 的 `passed` Receipt。旧 pointer 没有该字段时只按 `legacy` 打开，不隐式升级。Receipt 已写而 pointer transition 中断时，原 `advance` 可幂等重试，不能手改成完成。
 
 ## 启动与恢复
 

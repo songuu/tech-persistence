@@ -3,13 +3,19 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { canonicalize } = require('../lib/self-learning-canonical');
 
 const CANONICAL_HASH_FIELDS = [
   'goal',
   'nonGoals',
   'globalAcceptance',
+  'acceptanceContract',
   'architectureConstraints',
   'runtimeTargets',
+  'riskLevel',
+  'blockingQuestions',
+  'integrationValidationCommands',
+  'integrationCriterionIds',
 ];
 
 function nowIso() {
@@ -56,8 +62,17 @@ function canonicalContractPayload(contract) {
   payload.goal = String(contract.goal || '');
   payload.nonGoals = sortedStringArray(contract.nonGoals);
   payload.globalAcceptance = sortedStringArray(contract.globalAcceptance);
+  payload.acceptanceContract = contract.acceptanceContract
+    ? canonicalize(contract.acceptanceContract)
+    : null;
   payload.architectureConstraints = sortedStringArray(contract.architectureConstraints);
   payload.runtimeTargets = sortedStringArray(contract.runtimeTargets);
+  payload.riskLevel = String(contract.riskLevel || 'L2');
+  payload.blockingQuestions = sortedStringArray(contract.blockingQuestions);
+  payload.integrationValidationCommands = sortedStringArray(
+    contract.integrationValidationCommands
+  );
+  payload.integrationCriterionIds = sortedStringArray(contract.integrationCriterionIds);
   return payload;
 }
 
@@ -74,6 +89,9 @@ function normalizeGlobalContract(raw) {
     goal: String(contract.goal || '').trim(),
     nonGoals: Array.isArray(contract.nonGoals) ? contract.nonGoals.map(String) : [],
     globalAcceptance: Array.isArray(contract.globalAcceptance) ? contract.globalAcceptance.map(String) : [],
+    ...(contract.acceptanceContract && Array.isArray(contract.acceptanceContract.criteria)
+      ? { acceptanceContract: canonicalize({ criteria: contract.acceptanceContract.criteria }) }
+      : {}),
     architectureConstraints: Array.isArray(contract.architectureConstraints) ? contract.architectureConstraints.map(String) : [],
     runtimeTargets: Array.isArray(contract.runtimeTargets) && contract.runtimeTargets.length > 0
       ? contract.runtimeTargets.map(String)
@@ -82,6 +100,9 @@ function normalizeGlobalContract(raw) {
     blockingQuestions: Array.isArray(contract.blockingQuestions) ? contract.blockingQuestions.map(String) : [],
     integrationValidationCommands: Array.isArray(contract.integrationValidationCommands)
       ? contract.integrationValidationCommands.map(String)
+      : [],
+    integrationCriterionIds: Array.isArray(contract.integrationCriterionIds)
+      ? contract.integrationCriterionIds.map(String)
       : [],
   };
   normalized.contractHash = computeContractHash(normalized);
@@ -154,6 +175,7 @@ function detectChangedCanonicalFields(previous, next) {
 
 function sortedStringArrayOrString(value) {
   if (Array.isArray(value)) return sortedStringArray(value);
+  if (value && typeof value === 'object') return JSON.stringify(canonicalize(value));
   return value == null ? '' : String(value);
 }
 

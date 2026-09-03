@@ -336,13 +336,43 @@ node scripts\agent-orchestrator.js self-test
 node scripts\agent-orchestrator.js status --run latest
 node scripts\agent-orchestrator.js status --run latest --json  # 只读 Operator Review Packet + 最新 TurnReceipt
 
+# 汇总 shadow Acceptance 样本；requires-review 不是 Gate 通过
+node scripts\agent-orchestrator\acceptance-shadow-report.js --runs-dir .agent-runs
+
 # 可选：固定 compute-turn 预算；只在 durable-writeback 后幂等扣槽
 node scripts\agent-orchestrator.js run --requirement "原始需求" --turn-budget-slots 8
+
+# Linux：以独立 provider UID/GID 启动；生产环境同时加 require 开关防止静默降级
+node scripts\agent-orchestrator.js run --requirement "原始需求" --provider-uid 2002 --provider-gid 2002 --provider-home /srv/tp-provider --require-provider-os-isolation
+
+# Linux 宿主：先只读查看固定部署计划；apply 需要 plan 输出的精确确认令牌
+sh deploy/acceptance-authority/install-linux.sh plan
+npm run acceptance:os-boundary:audit -- --json
 
 # 宿主先实际应用 scheduler hint，再显式提交 apply 与 readback ACK
 node scripts\agent-orchestrator.js scheduler-apply --run <runId> --turn-key <sha256> --scheduler-owner <owner> --scheduler-ref <ref> --action <action> [--reset-token <token>] --applied-state-hash <sha256> --expected-journal-revision <n> --expected-journal-hash <sha256> --expected-goal-lease-revision <n>
 node scripts\agent-orchestrator.js scheduler-ack --run <runId> --turn-key <sha256> --scheduler-owner <owner> --scheduler-ref <ref> --apply-payload-hash <sha256> --observed-state-hash <sha256> --expected-journal-revision <n> --expected-journal-hash <sha256> --expected-goal-lease-revision <n>
 ```
+
+freeze 会生成 canonical `acceptance-contract.json`。当前批 1 只写 shadow Receipt：provider assessment
+与未封存的工作区 validation/log 保持 `claimed/unknown`，不会影响完成态。classic/integration command
+validation 会在 reviewer 前封存、reviewer 后由 harness 重跑，再单次绑定 contract+subject；
+artifact Oracle 使用 `artifact:<workdir-relative-path>`；freeze 时封存基线，reviewer 后从受限 workdir
+做有界读回并将 digest 单次绑定 contract+subject；artifact 还必须命中 reviewer 启动前由 harness 捕获并写入
+accepted subject 的 changed-files effect scope，且 reviewer 前后 workspace snapshot 必须稳定。缺失为 failed，新建或内容变化为 passed，未变化、
+路径逃逸及 symlink/junction 为 unknown。尚无 adapter 的 Oracle 保持 unknown。报表只统计 external authority ledger，拒绝重复或伪造 workdir Receipt，
+没有真实样本时返回 `insufficient-data`。Linux 可用固定的 root-owned `setpriv` 将 provider 降权到独立
+UID/GID；orchestrator 会拒绝同 UID、可写/链接启动器、可替换的启动器父目录、错误 owner 的 provider home，
+清除 authority HOME/SSH/sudo/私密 PG 环境，并在执行后复核启动器 digest。`--require-provider-os-isolation`
+用于禁止未配置时静默降级。代码不会自行创建宿主账号、设置 capability 或 ACL；部署方尚未实际应用并审计
+这些宿主权限前，P1-4 仍未完成。Windows 不支持该 UID/GID 机制并会 fail closed。
+生产部署资产位于 `deploy/acceptance-authority/`：使用独立 nologin 账号、无 supplementary groups、
+authority-only capability launcher，并清除/拒绝敏感路径及 launcher 父链的扩展 ACL；安装末尾会以 authority
+身份真实降权探测 provider 对 secret、control root、workspace 与 launcher 的访问结果。
+项目 workdir 是 `authority:provider 0770` 的共享可写面；orchestrator/plugin/broker/env 必须从该 workdir
+之外的 authority-owned 路径加载，不能执行 provider 可修改的 harness 副本。
+项目 workdir 是 `authority:provider 0770` 的共享可写面；orchestrator/plugin/broker/env 必须从该 workdir
+之外的 authority-owned 路径加载，不能执行 provider 可修改的 harness 副本。
 
 命令入口（参数与 CLI 对齐）：
 
@@ -356,7 +386,9 @@ node scripts\agent-orchestrator.js scheduler-ack --run <runId> --turn-key <sha25
 $agent-loop <原始需求>             # Codex 入口（同名 skill）
 ```
 
-运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review、follow-up task，以及带时间戳的 provider 日志和 prompt 文件。Turn journal 与可选 budget ledger 的权威副本位于 provider workspace 之外的 external control store；旧 `contracts/*.turn-journal.json` 仅作为 gate 建立前的一次性迁移源。`turn-journals/` authority gate 建立后会冻结 legacy discovery，新 legacy turnKey 不再进入 read/list/migration。`.agent-runs/` 是运行态目录，不进入 Git。
+运行产物写入 `.agent-runs/<runId>/`，包含冻结 spec、技术设计、任务拆解、diff、validation、handoff、review、follow-up task，以及带时间戳的 provider 日志和 prompt 文件。Classic、pipeline slice 与 pipeline integration 在进入完成态前都使用同一套 Completion Gate；对应的 `completion-gate.json`、`slices/<id>/completion-gate.json` 或 `integration-completion-gate.json` 会持久化 `scope/ok/reasons/evidenceRefs`。Review 的 `approved` 只是 Gate 输入之一，`compliant=false`、未解决 revision/blocker、证据缺失、required slice 未完成或 integration validation 未通过都会 fail closed。
+
+Pipeline integration validation 由 orchestrator 在 review 前以 `shell:false` 和受限命令策略真实执行，结果写入 `integration-validation.json`，stdout/stderr 只通过日志引用进入 review prompt；policy 拒绝、启动失败、超时或非零退出都不能完成 run。Turn journal 与可选 budget ledger 的权威副本位于 provider workspace 之外的 external control store；旧 `contracts/*.turn-journal.json` 仅作为 gate 建立前的一次性迁移源。`turn-journals/` authority gate 建立后会冻结 legacy discovery，新 legacy turnKey 不再进入 read/list/migration。`.agent-runs/` 是运行态目录，不进入 Git。
 
 `status --json` 只读取既有 artifact，返回脱敏、有界的 Operator Review Packet、确定性最新 TurnReceipt、Goal lease 与 turn budget 投影，不创建控制目录。`schedulerHint.permission` 始终为 `none`；只有宿主真实修改调度状态后，显式 `scheduler-apply` / `scheduler-ack` 才会在 owner、脱敏 Goal revision/identity/lease hash、journal CAS、reset token 和 readback hash 全部匹配时持久化证据。Memory recall 仍显式标记为 advisory-only。
 
@@ -383,7 +415,7 @@ node scripts\agent-orchestrator.js abandon --run <id>
 node scripts\agent-orchestrator.js run --requirement "smoke" --pipeline --dry-run
 ```
 
-Pipeline run 额外写入 `global-contract.json` / `global-contract.history.jsonl` / `contract-revisions.jsonl` / `queue.json` / `locks.json` / `drift-report.json` / `slices/<id>/{slice,handoff,review,diff,validation}.*`。详细双层状态机、契约 hash 范围、drift 五级分类、reconciliation 递归终止、`--auto` safe 集合等设计见 `docs/architecture/agent-loop-pipeline-architecture.md`。
+Pipeline run 额外写入 `global-contract.json` / `global-contract.history.jsonl` / `contract-revisions.jsonl` / `queue.json` / `locks.json` / `drift-report.json` / `integration-validation.json` / `integration-completion-gate.json` / `slices/<id>/{slice,handoff,review,diff,validation,completion-gate}.*`。详细双层状态机、Completion Gate、integration validation 策略、契约 hash 范围、drift 五级分类、reconciliation 递归终止、`--auto` safe 集合等设计见 `docs/architecture/agent-loop-pipeline-architecture.md`。
 
 Caveman 入口：
 
@@ -565,6 +597,8 @@ approval 只在项目 journal 中 `shadow` 候选的 current candidate hash 与 
 npm install
 npm run transcripts:postgres          # 创建私有凭据并等待本机 PostgreSQL healthy
 npm run transcripts:postgres:status
+npm run acceptance:postgres:canary # writer 提交后由独立只读连接做权限证明与精确读回
+npm run acceptance:cohort:tombstone -- --workdir <path> --run-dir <path> --control-root <path> --broker <path> --reason operator-abandoned
 npm run transcripts:configure         # 写入 ~/.tech-persistence/config.json 并启用自动 worker
 npm run transcripts:sync              # 消费 SessionEnd outbox
 npm run transcripts:backfill          # 容量核验后显式回填首次启用前的 Codex sessions

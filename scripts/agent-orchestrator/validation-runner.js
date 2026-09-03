@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { withoutPrivateDatabaseCredentials } = require('../lib/private-runtime-env');
 const { redactArtifactValue, redactSensitiveText } = require('../lib/redaction');
 const validationPolicy = require('./validation-command-policy');
 
@@ -25,7 +26,7 @@ function pathInside(root, candidate) {
   return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
-function resolveDirectories(workdirValue, runDirValue) {
+function resolveDirectories(workdirValue, runDirValue, authorityRunsRootValue) {
   if (!runDirValue) throw new Error('validation runner requires runDir');
   const workdir = path.resolve(workdirValue || process.cwd());
   let workdirStat;
@@ -37,14 +38,17 @@ function resolveDirectories(workdirValue, runDirValue) {
   if (!workdirStat.isDirectory()) throw new Error(`validation workdir is not a directory: ${workdir}`);
 
   const runDir = path.resolve(runDirValue);
-  if (!pathInside(workdir, runDir)) {
-    throw new Error(`validation runDir must stay inside workdir: ${runDir}`);
+  const authorityRunsRoot = authorityRunsRootValue ? path.resolve(authorityRunsRootValue) : null;
+  if (!pathInside(workdir, runDir) && (!authorityRunsRoot || !pathInside(authorityRunsRoot, runDir))) {
+    throw new Error(`validation runDir must stay inside workdir or the authority runs root: ${runDir}`);
   }
   fs.mkdirSync(runDir, { recursive: true });
   const realWorkdir = fs.realpathSync(workdir);
   const realRunDir = fs.realpathSync(runDir);
-  if (!pathInside(realWorkdir, realRunDir)) {
-    throw new Error(`validation runDir must stay inside workdir: ${runDir}`);
+  const realAuthorityRunsRoot = authorityRunsRoot ? fs.realpathSync(authorityRunsRoot) : null;
+  if (!pathInside(realWorkdir, realRunDir)
+      && (!realAuthorityRunsRoot || !pathInside(realAuthorityRunsRoot, realRunDir))) {
+    throw new Error(`validation runDir must stay inside workdir or the authority runs root: ${runDir}`);
   }
 
   const logsDir = path.join(realRunDir, 'logs');
@@ -134,9 +138,8 @@ function baseCommandRecord(index, decision, status, reason = null) {
   };
 }
 
-function writeAggregate(runDir, record) {
-  // integration-validation.json is the latest projection; per-attempt logs remain immutable.
-  writeJson(path.join(runDir, 'integration-validation.json'), record);
+function writeAggregate(runDir, record, artifactName) {
+  writeJson(path.join(runDir, artifactName), record);
   return record;
 }
 
@@ -144,10 +147,16 @@ function runValidationCommands(commandsValue, options = {}) {
   const commands = normalizeCommands(commandsValue);
   const timeoutMs = normalizeTimeout(options.timeoutMs);
   const attemptId = normalizeAttemptId(options.attemptId);
+  const artifactName = options.artifactName || 'integration-validation.json';
+  const logPrefix = options.logPrefix || 'integration-validation';
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.json$/.test(artifactName)
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(logPrefix)) {
+    throw new Error('validation artifactName/logPrefix must be safe bounded names');
+  }
   const now = typeof options.now === 'function' ? options.now : () => new Date().toISOString();
   const spawnSyncImpl = options.spawnSyncImpl || spawnSync;
   if (typeof spawnSyncImpl !== 'function') throw new Error('validation spawnSyncImpl must be a function');
-  const { workdir, runDir, logsDir } = resolveDirectories(options.workdir, options.runDir);
+  const { workdir, runDir, logsDir } = resolveDirectories(options.workdir, options.runDir, options.authorityRunsRoot);
 
   const startedAt = now();
   const decisions = commands.map((command) => (
@@ -169,9 +178,9 @@ function runValidationCommands(commandsValue, options = {}) {
       finishedAt: now(),
       generatedAt: now(),
       timeoutMs,
-      artifactRef: 'integration-validation.json',
+      artifactRef: artifactName,
       commands: records,
-    });
+    }, artifactName);
   }
 
   if (decisions.length === 0) {
@@ -183,9 +192,9 @@ function runValidationCommands(commandsValue, options = {}) {
       finishedAt: now(),
       generatedAt: now(),
       timeoutMs,
-      artifactRef: 'integration-validation.json',
+      artifactRef: artifactName,
       commands: [],
-    });
+    }, artifactName);
   }
 
   const records = [];
@@ -208,7 +217,7 @@ function runValidationCommands(commandsValue, options = {}) {
       result = spawnSyncImpl(decision.argv[0], decision.argv.slice(1), {
         cwd: workdir,
         encoding: 'utf8',
-        env: options.env || process.env,
+        env: withoutPrivateDatabaseCredentials(process.env, options.env || {}),
         maxBuffer: MAX_BUFFER,
         shell: false,
         timeout: timeoutMs,
@@ -221,11 +230,11 @@ function runValidationCommands(commandsValue, options = {}) {
     const commandFinishedAt = now();
     const stdoutFile = path.join(
       logsDir,
-      `integration-validation-${attemptId}-${index}.stdout.log`
+      `${logPrefix}-${attemptId}-${index}.stdout.log`
     );
     const stderrFile = path.join(
       logsDir,
-      `integration-validation-${attemptId}-${index}.stderr.log`
+      `${logPrefix}-${attemptId}-${index}.stderr.log`
     );
     const stdout = writeLogEvidence(runDir, stdoutFile, result.stdout);
     const stderr = writeLogEvidence(runDir, stderrFile, result.stderr);
@@ -259,9 +268,9 @@ function runValidationCommands(commandsValue, options = {}) {
     finishedAt: now(),
     generatedAt: now(),
     timeoutMs,
-    artifactRef: 'integration-validation.json',
+    artifactRef: artifactName,
     commands: records,
-  });
+  }, artifactName);
 }
 
 function runValidationCommand(command, options = {}) {

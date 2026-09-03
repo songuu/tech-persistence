@@ -8,6 +8,12 @@ const path = require('path');
 
 const { capturePromptBehavior } = require('./prompt-submit');
 const { captureToolBehavior, main: observeMain } = require('./observe');
+const { isTrustedUserAuthorityEvent } = require('./lib/behavior-events');
+const { canonicalStringify } = require('./lib/self-learning-canonical');
+const {
+  NATIVE_CONTROL_PREFIX,
+  parseAcceptanceConfirmationControl,
+} = require('./lib/acceptance-user-confirmation-control');
 const { detectStableProjectIdentity } = require('./lib/project-identity');
 const { readJournal, resolveStoreDir } = require('./lib/self-learning-store');
 
@@ -72,6 +78,91 @@ test('prompt hook writes a redacted idempotent BehaviorEvent without changing re
     assert.strictEqual(journal.records[0].payload.signal_strength, 'explicit');
     assert.notStrictEqual(journal.records[0].payload.occurred_at, payload.timestamp);
     assert(!JSON.stringify(journal).includes(`glpat-${'S'.repeat(24)}`));
+  });
+});
+
+test('Claude native canonical acceptance controls have parity with Codex authority', () => {
+  withTempProject(({ workspace, baseDir, project }) => {
+    const hash = `sha256:${'a'.repeat(64)}`;
+    const semantic = {
+      action: 'confirm-acceptance',
+      contract_hash: hash,
+      criterion_id: 'ac-claude-parity',
+      decision: 'accepted',
+      oracle_hash: hash,
+      subject_hash: hash,
+    };
+    const prompt = `${NATIVE_CONTROL_PREFIX}${canonicalStringify(semantic)}`;
+    assert.strictEqual(parseAcceptanceConfirmationControl(prompt).status, 'control');
+    const captured = capturePromptBehavior({
+      hook_event_name: 'UserPromptSubmit',
+      prompt_id: 'prompt-claude-acceptance-001',
+      session_id: 'session-claude-acceptance',
+      cwd: workspace,
+      prompt,
+    }, { baseDir, project, cwd: workspace });
+    assert.strictEqual(captured.status, 'recorded');
+    const event = journalFor(baseDir, project.id).records[0].payload;
+    assert.strictEqual(event.runtime, 'claude');
+    assert.strictEqual(event.source, 'claude_hook');
+    assert.strictEqual(event.event_type, 'user.approval');
+    assert.strictEqual(event.final_disposition, 'accepted');
+    const { prompt_receipt: promptReceipt, ...controlDetails } = event.details;
+    assert.deepStrictEqual(controlDetails, semantic);
+    assert.strictEqual(promptReceipt.occurrence, 1);
+    assert.match(promptReceipt.transcript_ref, /^sha256:[a-f0-9]{64}$/);
+    assert.strictEqual(isTrustedUserAuthorityEvent(event, 'approval'), true);
+
+    const rejectedSemantic = { ...semantic, decision: 'rejected' };
+    const rejected = capturePromptBehavior({
+      hook_event_name: 'UserPromptSubmit',
+      prompt_id: 'prompt-claude-acceptance-002',
+      session_id: 'session-claude-acceptance',
+      cwd: workspace,
+      prompt: `${NATIVE_CONTROL_PREFIX}${canonicalStringify(rejectedSemantic)}`,
+    }, { baseDir, project, cwd: workspace });
+    assert.strictEqual(rejected.status, 'recorded');
+    const rejectedEvent = journalFor(baseDir, project.id).records[1].payload;
+    assert.strictEqual(rejectedEvent.event_type, 'user.approval');
+    assert.strictEqual(rejectedEvent.final_disposition, 'rejected');
+    assert.strictEqual(isTrustedUserAuthorityEvent(rejectedEvent, 'approval'), true);
+  });
+});
+
+test('Claude acceptance controls reject noncanonical bytes while prose remains non-authorizing', () => {
+  withTempProject(({ workspace, baseDir, project }) => {
+    const hash = `sha256:${'b'.repeat(64)}`;
+    const semantic = {
+      action: 'confirm-acceptance',
+      contract_hash: hash,
+      criterion_id: 'ac-claude-parity',
+      decision: 'rejected',
+      oracle_hash: hash,
+      subject_hash: hash,
+    };
+    const invalid = capturePromptBehavior({
+      hook_event_name: 'UserPromptSubmit',
+      prompt_id: 'prompt-claude-acceptance-invalid',
+      session_id: 'session-claude-acceptance',
+      cwd: workspace,
+      prompt: `${NATIVE_CONTROL_PREFIX}${JSON.stringify(semantic)} trailing`,
+    }, { baseDir, project, cwd: workspace });
+    assert.strictEqual(invalid.status, 'skipped');
+    assert.match(invalid.reason, /^control-/);
+    assert.strictEqual(journalFor(baseDir, project.id).records.length, 0);
+
+    const prose = capturePromptBehavior({
+      hook_event_name: 'UserPromptSubmit',
+      prompt_id: 'prompt-claude-acceptance-prose',
+      session_id: 'session-claude-acceptance',
+      cwd: workspace,
+      prompt: 'I approve this acceptance result.',
+    }, { baseDir, project, cwd: workspace });
+    assert.strictEqual(prose.status, 'recorded');
+    const event = journalFor(baseDir, project.id).records[0].payload;
+    assert.strictEqual(event.event_type, 'user.prompt');
+    assert.strictEqual(event.final_disposition, 'unknown');
+    assert.strictEqual(isTrustedUserAuthorityEvent(event, 'approval'), false);
   });
 });
 

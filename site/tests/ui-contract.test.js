@@ -91,6 +91,7 @@ test("renders the complete ECC-shaped, Tech Persistence-owned route map", () => 
       "install/index.html",
       "platforms/index.html",
       "status/index.html",
+      "tasks/index.html",
       "updates/index.html",
     ],
   );

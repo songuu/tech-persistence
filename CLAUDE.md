@@ -167,15 +167,13 @@
 > Generated from `docs/solutions/*.md`; do not edit this block manually.
 > Refresh with `node scripts/sync-solution-index.js --all`.
 
-- [2026-08-21] [self-learning/behavior-event/learning-candidate] 用户行为驱动 Agent 自学习框架 P0：可信证据、候选生命周期与发布门禁 — 目标不是让 Agent 把每次用户输入直接记成永久规则，而是建立一个可审计的学习闭环：观察用户行为、 操作、纠正、批准和任务结果，形成候选经验；只有经过证据、反例、评测、shadow 和人工批准的内容， 才允许影响后续 Agent 执行。 → `docs/solutions/2026-08-21-user-behavior-self-learning-p0.md`
-- [2026-08-20] [sibling-eval/skill-evolution/cognitive-skill-engine] mattpocock/skills + Cognitive Skill Engine v2.2 对当前 Skill 自进化架构的借鉴评估 — mattpocock/skills + CSE v2.2 对当前 Skill 自进化架构的借鉴评估 → `docs/solutions/2026-08-20-mattpocock-skills-cse-self-evolution-eval.md`
-- [2026-07-01] [sibling-eval/external-reference/superpowers] obra/superpowers + garrytan/gstack 2026-06 更新评估 — 可借鉴项收敛到 token、安全、决策可见性、eval 隔离 — 用户请求：研究 obra/superpowers 和 garrytan/gstack 最近一个月更新了哪些内容，以及哪些值得直接借鉴到当前 tech-persistence 架构里。 → `docs/solutions/2026-07-01-superpowers-gstack-june-2026-eval.md`
-- [2026-06-17] [sibling-eval/goal-mode/claude-code] Sibling-eval：Claude /goal × Codex /goal 原生命令 vs TP /sprint --goal（收窄到原生 goal 原语） — 用户问"结合 Claude Code 自带的 /goal 和 Codex 自带的 /goal，TP 当前架构的 /sprint --goal 需要改进哪里"。作用域严格收窄到 两个 runtime 各自的原生 /goal 命令本身 ，排除 Claude Dynamic Workflows / /loop / cron / Routines / fan-out（那些不是 /goal）。对比对象是 TP /sprint --goal（纯… → `docs/solutions/2026-06-17-native-goal-sibling-eval.md`
-- [2026-06-15] [sibling-eval/external-reference/moai-adk] Sibling-eval：MoAI-ADK (modu-ai) vs tech-persistence — Sibling-eval：MoAI-ADK (modu-ai) vs tech-persistence → `docs/solutions/2026-06-15-moai-adk-eval.md`
+- [2026-09-03] [harness/transcript/linux] Harness 生产资格中的 OS 能力与 Transcript 消费边界 — 受控 Linux 上的任务可以入队，但 provider 启动或 Transcript 最终同步会停滞；单独的模型 canary、旧 Transcript timer 绿色和 HTTP 200 都不能证明登录任务全链路完成。 → `docs/solutions/2026-09-03-harness-production-qualification-boundaries.md`
+- [2026-09-02] [postgres/authorization/concurrency] 持久任务授权必须固定策略行，并证明真实锁等待 — 任务创建和入队即使使用 READ COMMITTED、全局 advisory lock 和数据库内身份校验，仍可能与不使用同一锁的管理员撤权产生竞争。成功路径测试通过不能证明撤权路径安全。 → `docs/solutions/2026-09-02-task-authorization-row-locks.md`
+- [2026-09-02] [harness/transcript/security] Harness 接线不能用 canary、路径或数据库计数替代真实工作流证据 — 独立外部 runtime canary、手工 transcript 导入成功，曾被扩大解释为 Harness/Transcript 已完整接入。实际主 dispatch、自动采集、增长 cursor 和 worker 均存在缺口。 → `docs/solutions/2026-09-02-harness-wiring-evidence-boundaries.md`
+- [2026-09-02] [authentication/postgres/security] 认证请求必须限制未完成业务，而非只限制连接 — 连接数限制不能约束客户端断开后仍在等待 PostgreSQL 的业务请求。认证服务还需要验证事务快照、接收期限和关闭失败，而不仅是登录成功/失败。 → `docs/solutions/2026-09-02-auth-business-admission-and-shutdown.md`
+- [2026-09-01] [agent-harness/acceptance/evidence] Shadow 验收不能把自报 assessment 升级为 verified evidence — Acceptance Contract/Receipt 的 canonical hash、exact coverage 和 Oracle 绑定都正确时，provider 仍可在 assessment JSON 中自报 exitCode=0、withinRoot=true 或伪造独立 identity，制造看似 verified 的 Receipt。 这不会在 shadow 阶段直接改变完成态，却会污染 measure-before-e… → `docs/solutions/2026-09-01-shadow-acceptance-evidence-boundary.md`
 
 <!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->
-
-<!-- tech-persistence:project-standards:start -->
 ## Project standards routing
 
 - Architecture evidence and the exact managed inventory live in `.claude/project-standards.json`.

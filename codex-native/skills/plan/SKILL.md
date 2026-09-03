@@ -19,6 +19,8 @@ description: Codex-native risk-scaled architecture and implementation planning w
 
 涉及多 runtime projection、schema、生成器或 tracked 派生文件时，增加 before/after 契约表，并列出所有消费者和一致性测试。
 
+活动 Sprint 为 `acceptance_protocol=v1` 时，成功标准必须写在唯一的 `<!-- acceptance-contract:start -->` / `<!-- acceptance-contract:end -->` checklist 区块。Plan 验收后先由 Agent Harness freeze 同一组 criterion，再运行 `bind-acceptance`；绑定或 authority readback 失败不得进入 Work。
+
 ## 输出
 
 1. 方案概述与关键取舍。

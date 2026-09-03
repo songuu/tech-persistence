@@ -1082,6 +1082,12 @@ function validatePromptReceipt(receipt, label = 'prompt receipt') {
   return receipt;
 }
 
+function isTrustedClaudeNativePromptPayload(payload) {
+  return isPlainObject(payload)
+    && ((payload.event_type === 'user.prompt' && payload.source_assurance === 'observed')
+      || (payload.event_type === 'user.approval' && payload.source_assurance === 'explicit'));
+}
+
 function promptReceiptsForStream(records, spec) {
   const receipts = [];
   for (const record of records) {
@@ -1107,8 +1113,7 @@ function promptReceiptsForStream(records, spec) {
         || record.payload.occurred_at !== record.occurred_at
         || record.payload.runtime !== 'claude'
         || record.payload.source !== 'claude_hook'
-        || record.payload.source_assurance !== 'observed'
-        || record.payload.event_type !== 'user.prompt'
+        || !isTrustedClaudeNativePromptPayload(record.payload)
         || !record.payload.actor || record.payload.actor.kind !== 'user'
         || record.actor.kind !== 'user'
         || record.actor.runtime !== 'claude'
@@ -1130,6 +1135,7 @@ function promptReceiptsForStream(records, spec) {
 }
 
 function assertBuiltPromptReceiptRecord(input, spec, receipt, sourceEventId, occurredAt) {
+  const nativePromptKind = isTrustedClaudeNativePromptPayload(input && input.payload);
   if (!isPlainObject(input)
       || input.record_type !== 'behavior_event'
       || input.record_id !== input.entity_id
@@ -1145,8 +1151,7 @@ function assertBuiltPromptReceiptRecord(input, spec, receipt, sourceEventId, occ
       || input.payload.occurred_at !== occurredAt
       || input.payload.runtime !== 'claude'
       || input.payload.source !== 'claude_hook'
-      || input.payload.source_assurance !== 'observed'
-      || input.payload.event_type !== 'user.prompt'
+      || !nativePromptKind
       || !isPlainObject(input.payload.actor)
       || input.payload.actor.kind !== 'user'
       || !isPlainObject(input.payload.details)

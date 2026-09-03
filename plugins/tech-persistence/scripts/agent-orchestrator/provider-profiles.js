@@ -33,11 +33,16 @@ const PROFILES = {
 };
 
 function profileId(options, key) {
+  if (['spec', 'review'].includes(key) && require('./external-runtime-config').stages(options).includes(key)) return `external-readonly-${key}-v1`;
   const requested = options && options[`${key}-profile`];
   return requested && PROFILES[requested] ? requested : DEFAULT_PROFILES[key];
 }
 
 function profile(options, key) {
+  if (['spec', 'review'].includes(key) && require('./external-runtime-config').stages(options).includes(key)) {
+    return { id: `external-readonly-${key}-v1`, runtime: 'openai-compatible', adapter: 'openai-compatible-chat',
+      capabilities: ['stdin', 'structured-output', 'bounded-context'], documentedMaturity: 'experimental', providerKey: key };
+  }
   return PROFILES[profileId(options, key)];
 }
 

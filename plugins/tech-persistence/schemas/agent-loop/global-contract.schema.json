@@ -28,6 +28,20 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "acceptanceContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criteria"],
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/criterion"
+          }
+        }
+      }
+    },
     "architectureConstraints": {
       "type": "array",
       "items": { "type": "string" }
@@ -51,6 +65,39 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "integrationCriterionIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/criterionId" }
+    },
     "contractHash": { "type": "string" }
+  },
+  "$defs": {
+    "criterionId": { "type": "string", "pattern": "^ac-[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "oracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "procedure", "expected"],
+      "properties": {
+        "type": { "type": "string", "enum": ["command", "artifact", "readback", "independent-review", "user-confirmation"] },
+        "procedure": { "type": "string", "minLength": 1, "description": "For artifact Oracle use artifact:<workdir-relative-path>; unsupported or unsafe locators remain unknown." },
+        "expected": { "type": "string", "minLength": 1 }
+      },
+      "oneOf": [
+        { "properties": { "type": { "const": "command" }, "expected": { "const": "exit code is zero" } } },
+        { "properties": { "type": { "enum": ["artifact", "readback", "independent-review", "user-confirmation"] } } }
+      ]
+    },
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "sourceRefs", "oracle"],
+      "properties": {
+        "id": { "$ref": "#/$defs/criterionId" },
+        "statement": { "type": "string", "minLength": 1 },
+        "sourceRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "oracle": { "$ref": "#/$defs/oracle" }
+      }
+    }
   }
 }

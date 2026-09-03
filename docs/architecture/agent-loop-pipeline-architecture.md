@@ -40,7 +40,10 @@ scripts/agent-orchestrator/
   ├── queue.js                                 pending/ready/running/completed/blocked 队列
   ├── locks.js                                 claimed/completed-owner/released 三态、dependsOn 升级
   ├── slice-runner.js                          Codex implementation prompt、handoff/diff/validation 文件 I/O
-  ├── review.js                                slice review + integration review、validation 命令聚合
+  ├── review.js                                canonical review contract、slice/integration review 输入
+  ├── completion-gate.js                       classic/slice/integration 共用的纯完成判定与 receipt
+  ├── validation-command-policy.js             integration 命令 allowlist 与 argv 归一化
+  ├── validation-runner.js                     shell:false 执行、超时/日志/hash 证据持久化
   ├── drift-detector.js                        白名单触发源、五级分类
   └── reconciliation.js                        depth=1 限制、递归 revision 拒绝
 ```
@@ -96,6 +99,10 @@ slice-pending
 合法转移由 `pipeline-state.js` 的 `RUN_TRANSITIONS` / `SLICE_TRANSITIONS` 表显式声明，
 `pipeline.js` 内部通过 `assertRunTransition` / `assertSliceTransition` 强制；非法转移立即抛错，
 便于在 self-test 与开发时早暴露 bug。
+
+完成态不是 provider 的直接输出。Classic、slice 与 integration 都先把 canonical review、validation、blocker/revision/clarification 和结构化 evidence refs 输入 `completion-gate.js`，再持久化 `completion-gate-v1` receipt。Gate 输出固定为 `scope/ok/reasons/evidenceRefs`；`approved` 但 `compliant=false`、非 canonical decision、未解决 revision/blocker、缺失证据或 validation 非 passed 均 fail closed。
+
+Pipeline integration 还有两个确定性前置：所有 required slice 必须已处于 `slice-completed`，并且聚合 validation 命令必须由 orchestrator 真实执行成功。命令经过 allowlist 后以 `shell:false` 运行，policy 拒绝、启动失败、超时与非零退出都写入 `integration-validation.json` 并阻断 integration review 完成。Review prompt 只消费已执行 artifact 和日志引用，不再把命令文本当作证据。
 
 ## 4. 不可变契约与 hash 范围
 
@@ -267,6 +274,9 @@ self-test 覆盖（`runPipelineSelfTests`）：
 - reconciliation depth>1 拒绝
 - reconciliation revision 递归剥离
 - integration validation 命令聚合顺序与去重
+- Completion Gate 在 classic / slice / integration 三种 scope 的通过与 fail-closed 路径
+- review decision/compliant 组合、未解决 revision/blocker 与缺失 evidence 的负向回归
+- integration validation 的 policy 拒绝、启动失败、超时、非零退出、required slice 未完成与成功证据
 - newPipelineState mode/status 正确
 - transition events 记录 from / to / actor / source / reason
 - provider 模块禁止直接写 terminal slice/run status
@@ -425,6 +435,30 @@ P1：
 - task envelope 可选携带 typed coordination：`taskClass`、`actionKind`、`continuationPolicy`、`successorRefs`、`noFollowUp`、`claimedBy`。字段缺失时保持旧 envelope/hash 行为；存在时进入 canonical hash。`claimedBy` 只是可见性 soft owner，不是写租约。
 - scheduler hint 是纯函数、只读建议，输出 `run-now|backoff|wait|stop`，`permission` 固定为 `none`；它不会修改 queue、推进状态或消费额度。
 - Memory recall 统一附加 `memory-recall-authority-v1`，明确 `advisoryOnly=true`、不授予新动作权限、不代表外部写入或额度消费，并要求抑制外部 sink。
+
+Shadow Acceptance 批 1 复用同一文件型状态机：freeze 生成 canonical Contract，classic、slice 与
+integration review 写按 contract/subject versioned 的 Receipt，但 Receipt 不参与 Completion Gate。
+provider assessment 与未封存的 provider 可写工作区 validation/log 只能形成 claim-only evidence；普通
+hash 不证明 provenance。classic/integration command evidence 由 orchestrator 在 reviewer 调用前封存，
+reviewer 返回后重跑同组 policy-approved commands，再以一次性 binding 关联 contract+subject；Receipt authority ledger 也位于外部
+控制存储。artifact Oracle 采用 `artifact:<workdir-relative-path>`：freeze 封存 missing/present 基线，reviewer 后从
+受限 workdir 有界读回；只有 reviewer 前后 workspace snapshot 稳定，且命中 reviewer 前捕获、由 accepted subject evidence 绑定的 changed-files effect scope 时，
+新建或 digest 变化才可 verified passed；缺失为 failed，未变化、scope 不匹配、逃逸或 link 为 unknown，并把
+baseline/current/scope 与 contract+subject 封存在 external store。尚未实现 authority adapter 的 Oracle一律保持 unknown。离线报告只消费 ledger、重验
+Contract/Receipt/seal/binding 并拒绝重复样本；在 D1 和最小样本门槛确定前只输出 `requires-review` 或
+`insufficient-data`，不能自行放行 Gate B-1。
+
+External control store 的 authority 是条件性的：Linux provider dispatch 可显式配置独立 UID/GID 与 home，
+通过固定 root-owned、整条父目录链不可写的 `setpriv` shell-free 降权；环境会切换 HOME/XDG 并清除
+authority 用户、SSH/sudo 和私密 PostgreSQL 凭据，执行后还会复核 launcher 权限与 digest。
+`--require-provider-os-isolation` 可将缺失配置变成 preflight/dispatch 硬失败。仓库仍不创建 OS 账号、
+capability 或 ACL；宿主未实际部署并独立审计这些权限时，不能据此宣称 verified trust boundary 已闭环。
+`deploy/acceptance-authority/install-linux.sh` 将该边界固化为两个 nologin system accounts、无附加组、
+authority-only file-capability launcher 和 exact owner/mode/no-extended-ACL 目录合同。安装后由
+`acceptance-authority-os-boundary.js` 以 authority 身份真实执行降权与反向访问探针；JSON audit 非零或任一
+check 失败都不能作为部署证明。仓库内 Windows 测试只验证合同和 collector，不替代目标 Linux audit。
+shared workdir 使用 `authority:provider 0770`，同时服务编排与 provider 实现；authority runtime、plugin、broker
+与 secret 必须从 workdir 外加载，否则 provider 可通过修改 repo 中的 harness 代码跨越身份边界。
 
 当时明确未包含 scheduler apply/ack、跨进程 journal lock、quota/budget、event-store、daemon 与 multi-worker hard lease；其中适合当前文件型架构的前三项已在 13.10 以最小 P2 形式补齐。
 

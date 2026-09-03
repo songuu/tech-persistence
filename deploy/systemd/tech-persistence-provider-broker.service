@@ -1,0 +1,36 @@
+[Unit]
+Description=Tech Persistence provider model broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tp-broker
+Group=tp-provider
+SupplementaryGroups=tp-broker
+EnvironmentFile=/etc/tech-persistence/task-runtime/broker.env
+ExecStart=/usr/bin/node /usr/local/libexec/tech-persistence/openai-responses-broker.js
+RuntimeDirectory=tech-persistence-provider-broker/provider
+RuntimeDirectoryMode=0750
+Restart=on-failure
+RestartSec=3
+UMask=0027
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

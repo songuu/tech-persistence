@@ -41,9 +41,13 @@ function computeSliceHash(slice, globalContractHash) {
     title: slice.title || '',
     dependsOn: [...asStringArray(slice.dependsOn)].sort(),
     ownedFiles: [...asStringArray(slice.ownedFiles)].sort(),
+    readFiles: [...asStringArray(slice.readFiles)].sort(),
+    criterionIds: [...asStringArray(slice.criterionIds)].sort(),
     acceptanceCriteria: [...asStringArray(slice.acceptanceCriteria)],
     doneCriteria: [...asStringArray(slice.doneCriteria)],
     risk: slice.risk || 'L1',
+    validationCommands: [...asStringArray(slice.validationCommands)],
+    questions: [...asStringArray(slice.questions)],
     globalContractHash: globalContractHash || '',
   };
   const hash = crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
@@ -63,7 +67,12 @@ function normalizeRisk(value) {
 }
 
 function normalizeSlice(raw, options) {
-  const { fallbackIndex = 0, globalContractHash = '', defaultType = 'slice' } = options || {};
+  const {
+    fallbackIndex = 0,
+    globalContractHash = '',
+    defaultType = 'slice',
+    allowedCriterionIds = [],
+  } = options || {};
   const source = raw && typeof raw === 'object' ? raw : {};
   const type = source.type === 'reconciliation' ? 'reconciliation' : defaultType;
   const slice = {
@@ -73,6 +82,9 @@ function normalizeSlice(raw, options) {
     dependsOn: asStringArray(source.dependsOn),
     ownedFiles: asStringArray(source.ownedFiles),
     readFiles: asStringArray(source.readFiles),
+    criterionIds: Object.prototype.hasOwnProperty.call(source, 'criterionIds')
+      ? asStringArray(source.criterionIds)
+      : asStringArray(allowedCriterionIds),
     risk: normalizeRisk(source.risk),
     acceptanceCriteria: asStringArray(source.acceptanceCriteria),
     doneCriteria: asStringArray(source.doneCriteria),
@@ -91,6 +103,13 @@ function normalizeSlice(raw, options) {
     }
   }
   slice.sensitiveAreas = detectSensitiveAreas(slice);
+  const allowed = new Set(asStringArray(allowedCriterionIds));
+  const unknownCriterionIds = slice.criterionIds.filter((id) => !allowed.has(id));
+  if (allowed.size > 0 && unknownCriterionIds.length > 0) {
+    slice.questions.push(
+      `unknown criterionIds: ${unknownCriterionIds.join(', ')}`
+    );
+  }
   slice.contractHash = computeSliceHash(slice, globalContractHash);
   return slice;
 }

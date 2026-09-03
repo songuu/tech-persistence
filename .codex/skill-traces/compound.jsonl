@@ -1,0 +1,2 @@
+{"schema_version":"1.0","timestamp":"2026-09-02T04:50:26.329Z","skill":"compound","source":"manual-session-evidence","input_excerpt":"Recorded authenticated-task boundary and pending authorizations; no production mutation, no provider fees, no native authority learning claim."}
+{"schema_version":"1.0","timestamp":"2026-09-02T04:58:27.617Z","skill":"compound","source":"manual-session-evidence","input_excerpt":"Recorded deployed-auth evidence and model schema probe hashes. No secrets or model text exported. Full Harness acceptance remains false; no public execution enabled."}

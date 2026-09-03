@@ -1,0 +1,23 @@
+[Unit]
+Description=Tech Persistence read-only llama.cpp provider runtime
+After=network.target
+
+[Service]
+Type=simple
+User=tp-provider
+Group=tp-provider
+ExecStart=/opt/tech-persistence/runtimes/llama.cpp-b10621-src/build/bin/llama-server --model /opt/tech-persistence/models/SmolLM2-135M-GGUF/SmolLM2-135M-Q4_K_M.gguf --host 127.0.0.1 --port 5190 --ctx-size 2048 --threads 2 --no-webui
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=700M
+
+[Install]
+WantedBy=multi-user.target

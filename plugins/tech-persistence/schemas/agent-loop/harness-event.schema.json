@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/harness-event.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "kind", "sourceId", "sourceHash", "observedAt"],
+  "properties": {
+    "version": { "const": "harness-event-v1" },
+    "id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "kind": { "type": "string", "pattern": "^[a-z][a-z0-9.-]+$" },
+    "sourceId": { "type": "string", "minLength": 1 },
+    "sourceHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "links": { "type": "object", "additionalProperties": { "type": "string" } },
+    "summary": { "type": "object" }
+  }
+}

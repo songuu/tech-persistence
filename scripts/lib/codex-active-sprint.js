@@ -11,7 +11,10 @@ const TRANSACTION_RELATIVE_PATH = 'docs/plans/.handoff/active-sprint.transaction
 const COMPLETION_RELATIVE_PATH = 'docs/plans/.handoff/active-sprint.completed.json';
 const TRANSACTION_RELEASE_RELATIVE_PATH = `${TRANSACTION_RELATIVE_PATH}.release.tmp`;
 const MAX_RECOVERY_BYTES = 32 * 1024;
-const POINTER_KEYS = new Set(['version', 'plan', 'phase', 'status', 'updated_at', 'next', 'block_reason']);
+const POINTER_KEYS = new Set([
+  'version', 'plan', 'phase', 'status', 'updated_at', 'next', 'block_reason',
+  'acceptance_protocol',
+]);
 const RECOVERY_VERSION = 1;
 const LEGACY_TRANSACTION_VERSION = 1;
 const PAYLOAD_TRANSACTION_VERSION = 2;
@@ -184,6 +187,12 @@ function validatePointerSchema(cwd, value) {
     } else if (Object.hasOwn(value, 'block_reason')) {
       throw new Error('active pointer forbids block_reason');
     }
+    const acceptanceProtocol = value.acceptance_protocol === undefined
+      ? 'legacy'
+      : value.acceptance_protocol;
+    if (!['legacy', 'v1'].includes(acceptanceProtocol)) {
+      throw new Error('pointer acceptance_protocol must be legacy or v1');
+    }
     return {
       ok: true,
       pointer: {
@@ -193,6 +202,9 @@ function validatePointerSchema(cwd, value) {
         status: value.status,
         updated_at: updatedAt,
         next,
+        ...(value.acceptance_protocol === undefined
+          ? {}
+          : { acceptance_protocol: acceptanceProtocol }),
         ...(value.status === 'blocked' ? { block_reason: blockReason } : {}),
       },
     };
@@ -234,6 +246,7 @@ function readActiveSprintPointer(cwd = process.cwd()) {
     blockReason: pointer.block_reason || '',
     updatedAt: pointer.updated_at,
     next: pointer.next,
+    acceptanceProtocol: pointer.acceptance_protocol || 'legacy',
   };
 }
 function readPrivateClaimRecoveryStatus(cwd, stateDirectory, pointerPath) {
@@ -397,7 +410,7 @@ function readActiveSprint(cwd = process.cwd()) {
     }
     return pointer;
   }
-  const { plan, phase, status, blockReason, updatedAt, next } = pointer;
+  const { plan, phase, status, blockReason, updatedAt, next, acceptanceProtocol } = pointer;
 
   const absolutePlanPath = path.resolve(cwd, plan);
   const planInspection = inspectBoundedWorkspaceFile(
@@ -435,6 +448,7 @@ function readActiveSprint(cwd = process.cwd()) {
     blockReason,
     updatedAt,
     next,
+    acceptanceProtocol,
     meta,
     tasksCompleted: parseCount(meta.tasks_completed),
     tasksTotal: parseCount(meta.tasks_total),
@@ -2189,7 +2203,9 @@ function atomicWriteSprintPointer(paths, pointer, expectedRaw) {
     });
   }
 }
-function canonicalPointer({ plan, phase, status = 'active', next, now, blockReason }) {
+function canonicalPointer({
+  plan, phase, status = 'active', next, now, blockReason, acceptanceProtocol,
+}) {
   return {
     version: POINTER_VERSION,
     plan,
@@ -2197,16 +2213,25 @@ function canonicalPointer({ plan, phase, status = 'active', next, now, blockReas
     status,
     updated_at: now,
     next,
+    ...(acceptanceProtocol ? { acceptance_protocol: acceptanceProtocol } : {}),
     ...(status === 'blocked' ? { block_reason: blockReason } : {}),
   };
 }
 
-function initActiveSprint({ cwd = process.cwd(), plan, restorePhase, next, now } = {}) {
+function initActiveSprint({
+  cwd = process.cwd(), plan, restorePhase, next, now, acceptanceProtocol = 'legacy',
+} = {}) {
   const normalizedPlan = validatePlanForState(cwd, plan);
   const initialPhase = restorePhase === undefined
     ? 'think' : normalizeStatePhase(restorePhase, 'restore phase');
   const normalizedNext = normalizeStateText(next, 'next');
   const normalizedNow = normalizeStateTimestamp(now);
+  if (!['legacy', 'v1'].includes(acceptanceProtocol)) {
+    throw sprintStateError(
+      'INVALID_SPRINT_ACCEPTANCE_PROTOCOL',
+      'acceptanceProtocol must be legacy or v1'
+    );
+  }
   return withSprintStateLock(cwd, (paths) => {
     prepareNonCompletionMutation(paths);
     if (readPointerRaw(paths.pointerPath) !== null) {
@@ -2217,6 +2242,7 @@ function initActiveSprint({ cwd = process.cwd(), plan, restorePhase, next, now }
       phase: initialPhase,
       next: normalizedNext,
       now: normalizedNow,
+      acceptanceProtocol: acceptanceProtocol === 'v1' ? 'v1' : undefined,
     });
     atomicWriteSprintPointer(paths, pointer, null);
     cleanupCompletionRecord(paths);
@@ -2224,7 +2250,9 @@ function initActiveSprint({ cwd = process.cwd(), plan, restorePhase, next, now }
   });
 }
 
-function advanceActiveSprint({ cwd = process.cwd(), expectedPhase, toPhase, next, now } = {}) {
+function advanceActiveSprint({
+  cwd = process.cwd(), expectedPhase, toPhase, next, now, controlRoot,
+} = {}) {
   const expected = normalizeStatePhase(expectedPhase, 'expected phase');
   const target = normalizeStatePhase(toPhase, 'target phase');
   const normalizedNext = normalizeStateText(next, 'next');
@@ -2239,11 +2267,34 @@ function advanceActiveSprint({ cwd = process.cwd(), expectedPhase, toPhase, next
         `cannot advance from ${expected} to ${target}`
       );
     }
+    if ((snapshot.pointer.acceptance_protocol || 'legacy') === 'v1') {
+      const requiresFreeze = expected === 'plan' && target === 'work';
+      const requiresPassedReceipt = expected === 'review' && target === 'compound';
+      if (requiresFreeze || requiresPassedReceipt) {
+        if (typeof controlRoot !== 'string' || !controlRoot.trim()) {
+          throw sprintStateError(
+            'SPRINT_ACCEPTANCE_REQUIRED',
+            'v1 sprint transition requires --control-root'
+          );
+        }
+        try {
+          require('./codex-sprint-acceptance').verifySprintAcceptance({
+            cwd,
+            plan: snapshot.pointer.plan,
+            controlRoot,
+            requirePassed: requiresPassedReceipt,
+          });
+        } catch (error) {
+          throw sprintStateError('SPRINT_ACCEPTANCE_REQUIRED', error.message);
+        }
+      }
+    }
     const pointer = canonicalPointer({
       plan: snapshot.pointer.plan,
       phase: target,
       next: normalizedNext,
       now: normalizedNow,
+      acceptanceProtocol: snapshot.pointer.acceptance_protocol,
     });
     atomicWriteSprintPointer(paths, pointer, snapshot.raw);
     return { action: 'advance', from: expected, to: target, pointer };
@@ -2266,6 +2317,7 @@ function blockActiveSprint({ cwd = process.cwd(), expectedPhase, reason, next, n
       blockReason: normalizedReason,
       next: normalizedNext,
       now: normalizedNow,
+      acceptanceProtocol: snapshot.pointer.acceptance_protocol,
     });
     atomicWriteSprintPointer(paths, pointer, snapshot.raw);
     return { action: 'block', pointer };

@@ -161,7 +161,7 @@ try {
   assert(output.operatorReviewPacket.evidenceRefs.includes('validation.json'));
   assert(output.operatorReviewPacket.evidenceRefs.includes(
     'contracts/slice-implementation.turn-journal.json'
-  ));
+  ), JSON.stringify(output.operatorReviewPacket.evidenceRefs));
   assert.strictEqual(output.turnReceipt.status, 'in-progress');
   assert.strictEqual(output.turnReceipt.currentPhase, 'durable-writeback');
   assert.strictEqual(output.turnReceipt.nextPhase, 'scheduler-apply');

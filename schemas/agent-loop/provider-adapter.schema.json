@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/provider-adapter.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "runtime", "mode", "maturity"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]+$" },
+    "runtime": { "enum": ["claude", "codex", "openai-compatible"] },
+    "mode": { "enum": ["print", "bare", "exec", "app-server", "chat"] },
+    "maturity": { "enum": ["stable", "experimental"] }
+  }
+}

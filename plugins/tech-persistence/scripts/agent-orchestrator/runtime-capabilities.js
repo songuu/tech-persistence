@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 
-const RUNTIMES = Object.freeze(['codex', 'claude']);
+const RUNTIMES = Object.freeze(['codex', 'claude', 'openai-compatible']);
 const DOCUMENTED_MATURITIES = Object.freeze([
   'stable',
   'preview',

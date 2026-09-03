@@ -10,6 +10,9 @@ const {
   validateHash,
   validateIdentifier,
 } = require('./self-learning-canonical');
+const {
+  parseAcceptanceConfirmationControl,
+} = require('./acceptance-user-confirmation-control');
 
 const EVIDENCE_REF_SCHEMA_VERSION = 'self-learning-evidence-ref-v1';
 const BEHAVIOR_EVENT_SCHEMA_VERSION = 'self-learning-behavior-event-v1';
@@ -399,6 +402,27 @@ function adaptClaudeHookEvent(payload, context = {}) {
       payload.prompt, payload.user_prompt, payload.userPrompt, payload.input,
       payload.message, payload.text, payload.content
     );
+    const promptControl = parseAcceptanceConfirmationControl(prompt);
+    if (promptControl.status === 'invalid') {
+      const error = new Error(promptControl.reason);
+      error.code = 'SELF_LEARNING_CONTROL_INVALID';
+      throw error;
+    }
+    if (promptControl.status === 'control') {
+      return createBehaviorEvent({
+        ...base,
+        parent_event_id: null,
+        actor: { kind: 'user', id: 'user', role: null },
+        source_assurance: 'explicit',
+        event_type: promptControl.event_type,
+        signal_strength: 'explicit',
+        status: 'observed',
+        final_disposition: promptControl.final_disposition,
+        details: promptControl.details,
+        input_value: promptControl.semantic,
+        output_value: null,
+      });
+    }
     return createBehaviorEvent({
       ...base,
       parent_event_id: null,
@@ -659,6 +683,11 @@ function trustedUserAuthorityKind(event) {
       && event.event_type === 'user.prompt') {
     return 'claude_prompt';
   }
+  if (event.source === 'claude_hook'
+      && event.source_assurance === 'explicit'
+      && event.event_type === 'user.approval') {
+    return 'claude_prompt';
+  }
   return null;
 }
 
@@ -667,7 +696,8 @@ function isTrustedUserAuthorityEvent(input, purpose = 'general') {
     ? normalizeBehaviorEvent(input) : createBehaviorEvent(input);
   const authorityKind = trustedUserAuthorityKind(event);
   if (purpose === 'approval') {
-    return authorityKind === 'codex_cli' && event.event_type === 'user.approval';
+    return ['codex_cli', 'claude_prompt'].includes(authorityKind)
+      && event.event_type === 'user.approval';
   }
   if (purpose === 'memory') {
     return event.event_type === 'user.prompt'

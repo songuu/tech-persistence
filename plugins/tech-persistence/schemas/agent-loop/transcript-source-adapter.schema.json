@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tech-persistence.local/schemas/agent-loop/transcript-source-adapter.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "runtime", "positionKind", "capabilities"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]+$" },
+    "runtime": { "type": "string", "pattern": "^[a-z][a-z0-9-]+$" },
+    "positionKind": { "enum": ["line", "ordinal"] },
+    "capabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["discover", "inspect", "stream"] } },
+    "batchDryRunOnly": { "type": "boolean" }
+  }
+}

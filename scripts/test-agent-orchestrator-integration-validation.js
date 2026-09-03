@@ -25,6 +25,7 @@ function assertRejected(decision, pattern) {
 }
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-integration-validation-'));
+const authorityEvidenceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-integration-validation-authority-'));
 
 try {
   writeText(path.join(root, 'package.json'), `${JSON.stringify({
@@ -38,7 +39,10 @@ try {
     },
   }, null, 2)}\n`);
   writeText(path.join(root, 'scripts', 'safe-validation.js'), "console.log('safe');\n");
-  writeText(path.join(root, 'scripts', 'deploy.js'), "console.log('must not run');\n");
+  writeText(
+    path.join(root, 'scripts', 'deploy.js'),
+    "require('fs').writeFileSync('unsafe-command-ran.txt', 'ran');\n"
+  );
 
   const quoted = validationPolicy.validateGeneratedValidationCommand(
     'node "scripts/safe-validation.js" --label "value with spaces"',
@@ -155,6 +159,25 @@ try {
   assert.deepStrictEqual(
     JSON.parse(fs.readFileSync(path.join(blockedRunDir, 'integration-validation.json'), 'utf8')),
     blocked
+  );
+
+  const classicOrchestrator = require('./agent-orchestrator');
+  const classicBlockedRunDir = path.join(root, '.agent-runs', 'classic-blocked');
+  const classicBlocked = classicOrchestrator.writeValidation(root, classicBlockedRunDir, {
+    'validation-command': [
+      'node scripts/safe-validation.js',
+      'node scripts/deploy.js',
+    ],
+  }, { enforcePolicy: true });
+  assert.strictEqual(classicBlocked.status, 'failed');
+  assert.strictEqual(
+    fs.existsSync(path.join(root, 'unsafe-command-ran.txt')),
+    false,
+    'classic validation must reject the entire unsafe batch before any command executes'
+  );
+  assert.deepStrictEqual(
+    classicBlocked.commands.map((command) => command.status),
+    ['not-run', 'blocked']
   );
 
   let observedLaunch = null;
@@ -307,6 +330,23 @@ try {
     skipped
   );
 
+  const authorityRunsRoot = path.join(authorityEvidenceRoot, 'runs');
+  fs.mkdirSync(authorityRunsRoot, { recursive: true });
+  const authorityRunDir = path.join(authorityRunsRoot, 'bound-run');
+  const authorityResult = validationRunner.runValidationCommands([], {
+    workdir: root,
+    runDir: authorityRunDir,
+    authorityRunsRoot,
+    attemptId: 'authority-run',
+  });
+  assert.strictEqual(authorityResult.status, 'skipped');
+  assert.throws(() => validationRunner.runValidationCommands([], {
+    workdir: root,
+    runDir: path.join(`${authorityEvidenceRoot}-unbound`, 'run'),
+    authorityRunsRoot,
+    attemptId: 'unbound-run',
+  }), /authority runs root/);
+
   assert.throws(
     () => validationRunner.runValidationCommands(['node scripts/safe-validation.js'], {
       workdir: root,
@@ -332,4 +372,5 @@ try {
   console.log('agent-orchestrator-integration-validation: 55 passed');
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(authorityEvidenceRoot, { recursive: true, force: true });
 }

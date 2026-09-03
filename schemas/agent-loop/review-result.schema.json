@@ -17,6 +17,12 @@
     },
     "compliant": { "type": "boolean" },
     "summary": { "type": "string" },
+    "criterionIds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^ac-[a-z0-9]+(?:-[a-z0-9]+)*$" }
+    },
     "findings": {
       "type": "array",
       "items": {

@@ -1,6 +1,9 @@
 'use strict';
 
 const providerProfiles = require('./provider-profiles');
+const providerAdapterRegistry = require('./provider-adapter-registry');
+const externalRuntimeGovernance = require('./external-runtime-governance');
+const externalConfig = require('./external-runtime-config');
 const { ORCHESTRATION_OWNERS, decideRoute } = require('./capability-router');
 const { createCapabilitySnapshot, stableHash } = require('./runtime-capabilities');
 const {
@@ -56,6 +59,7 @@ function adapterPolicy(options = {}) {
 }
 
 function executionPolicy(options = {}) {
+  const config = externalConfig.configured(options);
   return {
     schemaVersion: EXECUTION_POLICY_VERSION,
     orchestrationOwner: orchestrationOwner(options),
@@ -64,6 +68,8 @@ function executionPolicy(options = {}) {
     },
     adapterPolicy: adapterPolicy(options),
     allowExperimentalAppServer: boolOption(options, 'allow-experimental-app-server'),
+    ...(config ? { external: { configFile: String(options['external-runtime-config']), configHash: config.configHash,
+      stages: externalConfig.stages(options) } } : {}),
   };
 }
 
@@ -77,6 +83,7 @@ function normalizePersistedExecutionPolicy(persisted) {
     capabilityRouter: persisted.capabilityRouter,
     adapterPolicy: persisted.adapterPolicy,
     allowExperimentalAppServer: persisted.allowExperimentalAppServer === true,
+    ...(persisted.external ? { external: persisted.external } : {}),
   };
   if (normalized.schemaVersion !== EXECUTION_POLICY_VERSION) {
     throw new Error(`unsupported execution policy version: ${normalized.schemaVersion}`);
@@ -91,6 +98,11 @@ function resolveExecutionPolicyOptions(options = {}, persisted) {
   if (!persisted) return { ...options };
   const expected = normalizePersistedExecutionPolicy(persisted);
   const resolvedOptions = { ...options };
+  if (expected.external) {
+    if (resolvedOptions['external-stages'] === undefined) resolvedOptions['external-stages'] = expected.external.stages.join(',');
+    if (resolvedOptions['external-runtime-config'] === undefined) resolvedOptions['external-runtime-config'] = expected.external.configFile;
+    resolvedOptions.externalConfigHash = expected.external.configHash;
+  }
   if (optionValue(resolvedOptions, 'orchestration-owner') === undefined) {
     resolvedOptions['orchestration-owner'] = expected.orchestrationOwner;
   }
@@ -109,6 +121,7 @@ function resolveExecutionPolicyOptions(options = {}, persisted) {
   }
 
   const actual = executionPolicy(resolvedOptions);
+  if (stableHash(actual.external || null) !== stableHash(expected.external || null)) throw new Error('execution policy conflict for external runtime');
   const checks = [
     ['orchestration owner', actual.orchestrationOwner, expected.orchestrationOwner],
     ['capability router', actual.capabilityRouter.mode, expected.capabilityRouter.mode],
@@ -145,6 +158,7 @@ function validateProviderRecovery(recovery, stageControl, input = {}) {
 }
 
 function adapterId(profile, policy) {
+  if (profile.runtime === 'openai-compatible') return 'openai-compatible-chat';
   if (profile.runtime === 'claude') return `claude-${policy.claude}`;
   return policy.codex === 'app-server' ? 'codex-app-server' : 'codex-exec';
 }
@@ -210,10 +224,16 @@ function buildStageControl(input = {}) {
   if (!profile) throw new Error(`unknown provider key: ${input.providerKey}`);
   const policy = input.adapterPolicy || adapterPolicy(options);
   const owner = input.orchestrationOwner || orchestrationOwner(options);
+  const config = externalConfig.configured(options);
+  if (profile.runtime === 'openai-compatible' && input.intent === 'write') throw new Error('external runtime cannot be a writer');
+  const externalEvidence = profile.runtime === 'openai-compatible' && config ? {
+    runtimeObserved: Object.fromEntries(profile.capabilities.map((capability) => [capability, true])),
+    source: 'authority-canary-probe', observedAt: config.canary.finishedAt,
+  } : input.capabilityEvidence;
   const capabilitySnapshot = buildCapabilitySnapshot(
     options,
     input.providerKey,
-    input.capabilityEvidence,
+    externalEvidence,
     policy
   );
   const task = createTaskEnvelope({
@@ -226,16 +246,22 @@ function buildStageControl(input = {}) {
     payload: input.payload || {},
   });
   const providerRef = `${profile.runtime}:${input.providerKey}:${capabilitySnapshot.adapter}`;
+  const candidates = [{ ref: providerRef, providerKey: input.providerKey, priority: 10, snapshot: capabilitySnapshot }];
+  if (config && profile.runtime !== 'openai-compatible') {
+    const externalSnapshot = buildCapabilitySnapshot({ ...options, 'external-stages': 'spec' }, 'spec', {
+      runtimeObserved: { stdin: true, 'structured-output': true, 'bounded-context': true },
+      source: 'authority-canary-probe', observedAt: config.canary.finishedAt,
+    }, policy);
+    candidates.push({ ref: 'openai-compatible:spec:openai-compatible-chat', providerKey: 'spec', priority: 100, snapshot: externalSnapshot });
+  }
+  externalRuntimeGovernance.selectWriter(candidates.map(candidate => ({ id: candidate.ref,
+    writerEligible: candidate.ref === providerRef && task.intent === 'write' })));
   const route = decideRoute({
     task,
-    candidates: [{
-      ref: providerRef,
-      providerKey: input.providerKey,
-      priority: 10,
-      snapshot: capabilitySnapshot,
-    }],
+    candidates,
     policy: {
       allowReadOnlyFallback: false,
+      allowedCandidateRefs: [providerRef],
       ...(task.intent === 'write' ? { writerCandidateRef: providerRef } : {}),
     },
   });
@@ -309,6 +335,8 @@ function buildExecutionPlan(input = {}) {
     review: { providerKey: 'review', intent: 'read-only' },
   };
   const stages = {};
+  const config = externalConfig.configured(options);
+  const externalRuntime = resolveExternalRuntime(config ? config.promotion : input.externalPromotionReceipt);
   for (const [stage, definition] of Object.entries(stageDefinitions)) {
     const capabilityEvidence = evidenceByProvider[definition.providerKey]
       ? observedAdapterEvidence(
@@ -338,11 +366,40 @@ function buildExecutionPlan(input = {}) {
     version: 'execution-plan-v2',
     orchestrationOwner: owner,
     adapterPolicy: policy,
+    adapterRegistry: {
+      mode: providerAdapterRegistry.REGISTRY_MODE,
+      hash: providerAdapterRegistry.registryHash(),
+    },
+    externalRuntime,
     capabilityRouter: { mode: capabilityRouterMode(options) },
     requirementHash: input.requirementHash || null,
-    planHash: stableHash({ owner, policy, stages }),
+    planHash: stableHash({ owner, policy, adapterRegistry: {
+      mode: providerAdapterRegistry.REGISTRY_MODE,
+      hash: providerAdapterRegistry.registryHash(),
+    }, externalRuntime, stages }),
     stages,
   };
+}
+
+function resolveExternalRuntime(receipt) {
+  const descriptorId = 'openai-compatible-chat-v1';
+  if (!receipt) return externalRuntimeGovernance.shadowDecision(
+    descriptorId, { source: 'checked-in-descriptor', livePromotion: false }
+  );
+  const { receiptHash, ...core } = receipt;
+  const checkNames = ['registered', 'observedCapability', 'fixedCanaryPassed', 'canaryReceiptBound', 'zeroEffects', 'identityMatched', 'environmentAllowed', 'explicitPromotion'];
+  if (receiptHash !== stableHash(core)
+      || receipt.version !== 'external-runtime-promotion-v1'
+      || !/^sha256:[a-f0-9]{64}$/.test(receipt.canaryReceiptHash || '')
+      || receipt.descriptorId !== descriptorId
+      || receipt.descriptorHash !== externalRuntimeGovernance.descriptorHash(descriptorId)
+      || receipt.eligible !== true || receipt.route !== 'read-only'
+      || receipt.writerEligible !== false
+      || !receipt.checks || Object.keys(receipt.checks).length !== checkNames.length
+      || checkNames.some(key => receipt.checks[key] !== true)) {
+    throw new Error('external runtime promotion receipt is invalid');
+  }
+  return Object.freeze({ ...receipt });
 }
 
 module.exports = {
@@ -350,6 +407,7 @@ module.exports = {
   CODEX_ADAPTERS,
   ROUTER_MODES,
   adapterPolicy,
+  resolveExternalRuntime,
   buildExecutionPlan,
   buildStageControl,
   executionPolicy,

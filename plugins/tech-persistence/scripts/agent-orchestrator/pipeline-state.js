@@ -58,7 +58,7 @@ const SLICE_TRANSITIONS = {
     SLICE_STATES.ABANDONED,
   ],
   [SLICE_STATES.IMPLEMENTATION_FAILED]: [SLICE_STATES.READY, SLICE_STATES.PENDING, SLICE_STATES.ABANDONED],
-  [SLICE_STATES.IMPLEMENTED]: [SLICE_STATES.REVIEWED, SLICE_STATES.REJECTED, SLICE_STATES.ABANDONED],
+  [SLICE_STATES.IMPLEMENTED]: [SLICE_STATES.REVIEWED, SLICE_STATES.BLOCKED, SLICE_STATES.REJECTED, SLICE_STATES.ABANDONED],
   [SLICE_STATES.REVIEWED]: [SLICE_STATES.COMPLETED, SLICE_STATES.REJECTED, SLICE_STATES.ABANDONED],
   [SLICE_STATES.COMPLETED]: [],
   [SLICE_STATES.BLOCKED]: [SLICE_STATES.READY, SLICE_STATES.PENDING, SLICE_STATES.ABANDONED],
@@ -154,6 +154,31 @@ function transitionSlice(stateObj, sliceId, target, metadata = {}) {
   return next;
 }
 
+function reopenCompletedSlice(stateObj, sliceId, revisionId) {
+  const current = stateObj.pipeline?.sliceStates?.[sliceId];
+  if (current !== SLICE_STATES.COMPLETED) {
+    throw new Error(`Only completed slices can be reopened by contract revision: ${sliceId}`);
+  }
+  if (typeof revisionId !== 'string' || !revisionId.trim()) {
+    throw new Error('contract revision id is required to reopen a completed slice');
+  }
+  let next = {
+    ...stateObj,
+    updatedAt: new Date().toISOString(),
+    pipeline: {
+      ...stateObj.pipeline,
+      sliceStates: { ...stateObj.pipeline.sliceStates, [sliceId]: SLICE_STATES.PENDING },
+    },
+  };
+  next = appendTransitionEvent(next, {
+    ...transitionEvent('slice', current, SLICE_STATES.PENDING, {
+      source: 'contract-revision', reason: revisionId,
+    }),
+    sliceId,
+  });
+  return next;
+}
+
 module.exports = {
   RUN_STATES,
   SLICE_STATES,
@@ -165,4 +190,5 @@ module.exports = {
   assertSliceTransition,
   transitionRun,
   transitionSlice,
+  reopenCompletedSlice,
 };

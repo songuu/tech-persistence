@@ -1,4 +1,5 @@
 'use strict';
+const providerAdapterRegistry = require('./provider-adapter-registry');
 
 function managedRunEnv(runtime, overrides = {}) {
   return {
@@ -106,6 +107,14 @@ function buildCodexInvocation(options = {}) {
     env: managedRunEnv('codex', options.env),
     schemaPath: options.schemaPath || null,
   };
+}
+
+function buildProviderInvocation(runtime, options = {}) {
+  const mode = options.mode || (runtime === 'claude' ? 'print' : runtime === 'codex' ? 'exec' : '');
+  providerAdapterRegistry.adapterId(runtime, mode);
+  if (runtime === 'claude') return buildClaudeInvocation(options);
+  if (runtime === 'codex') return buildCodexInvocation(options);
+  throw new Error(`Unknown provider runtime: ${runtime}`);
 }
 
 function parseJson(value, label) {
@@ -361,13 +370,14 @@ function normalizeCodexOutput(input = {}) {
     usage,
     events,
   };
-  try {
-    normalizedResult.payload = input.lastMessage && String(input.lastMessage).trim()
-      ? parseJson(input.lastMessage, 'Codex last message')
-      : null;
-  } catch (error) {
-    error.runtimeResult = normalizedResult;
-    throw error;
+  normalizedResult.payload = null;
+  if (input.lastMessage && String(input.lastMessage).trim()) {
+    try {
+      normalizedResult.payload = parseJson(input.lastMessage, 'Codex last message');
+    } catch (_) {
+      // The orchestration layer owns bounded JSON extraction and schema validation.
+      // Keeping payload null makes that existing fail-closed path reachable.
+    }
   }
   return normalizedResult;
 }
@@ -384,6 +394,7 @@ module.exports = {
   managedRunEnv,
   buildClaudeInvocation,
   buildCodexInvocation,
+  buildProviderInvocation,
   normalizeClaudeOutput,
   normalizeCodexOutput,
   extractRecoveryRuntimeRefs,

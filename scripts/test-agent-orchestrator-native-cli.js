@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const executionEnvelopes = require('./agent-orchestrator/execution-envelopes');
+const acceptanceShadowReport = require('./agent-orchestrator/acceptance-shadow-report');
 const goalLease = require('./agent-orchestrator/goal-lease');
 const turnBudget = require('./agent-orchestrator/turn-budget');
 const turnTransaction = require('./agent-orchestrator/turn-transaction');
@@ -93,7 +94,14 @@ function acceptedSecretProviderScript(secret) {
     );
 }
 
-function pipelineClaudeProviderScript(validationCommands) {
+function pipelineClaudeProviderScript(
+  validationCommands,
+  integrationValidationCommands = [],
+  mutateIntegrationReview = false,
+  oracle = null,
+  integrationCriterionIds = [],
+  sliceCriterionIds = ['ac-validation-gate']
+) {
   return `
 const fs = require('fs');
 const prompt = [fs.readFileSync(0, 'utf8'), ...process.argv.slice(2)].join('\\n');
@@ -105,10 +113,24 @@ if (prompt.includes('global-contract provider')) {
     goal: 'verify pipeline validation gate',
     nonGoals: [],
     globalAcceptance: ['validation gate is enforced'],
+    acceptanceContract: {
+      criteria: [{
+        id: 'ac-validation-gate',
+        statement: 'validation gate is enforced',
+        sourceRefs: ['global-contract.json#/globalAcceptance/0'],
+        oracle: ${JSON.stringify(oracle || {
+          type: 'command',
+          procedure: integrationValidationCommands[0] || 'git diff --check',
+          expected: 'exit code is zero',
+        })}
+      }]
+    },
     architectureConstraints: [],
     runtimeTargets: ['claude-code', 'codex'],
     riskLevel: 'L1',
     blockingQuestions: []
+    ,integrationValidationCommands: ${JSON.stringify(integrationValidationCommands)}
+    ,integrationCriterionIds: ${JSON.stringify(integrationCriterionIds)}
   };
   sessionId = 'claude-pipeline-global';
 } else if (prompt.includes('slice-planner provider')) {
@@ -119,6 +141,7 @@ if (prompt.includes('global-contract provider')) {
       dependsOn: [],
       ownedFiles: ['pipeline-output.txt'],
       readFiles: [],
+      criterionIds: ${JSON.stringify(sliceCriterionIds)},
       risk: 'L1',
       acceptanceCriteria: ['gate blocks unsafe durable writeback'],
       doneCriteria: ['gate behavior is receipted'],
@@ -127,9 +150,29 @@ if (prompt.includes('global-contract provider')) {
     }]
   };
   sessionId = 'claude-pipeline-planner';
+} else if (prompt.includes('slice-review provider')) {
+  structuredOutput = {
+    decision: 'approved',
+    compliant: true,
+    findings: [],
+    followUpTasks: [],
+    contractRevisions: []
+  };
+  sessionId = 'claude-pipeline-slice-review';
+} else if (prompt.includes('integration-review provider')) {
+  ${mutateIntegrationReview ? "fs.writeFileSync('seed.txt', 'mutated after validation  \\n');" : ''}
+  structuredOutput = {
+    decision: 'approved',
+    compliant: true,
+    findings: [],
+    followUpTasks: [],
+    contractRevisions: []
+  };
+  sessionId = 'claude-pipeline-integration-review';
 } else {
   throw new Error('unexpected pipeline prompt');
 }
+
 process.stdout.write(JSON.stringify({
   type: 'result',
   subtype: 'success',
@@ -137,6 +180,464 @@ process.stdout.write(JSON.stringify({
   structured_output: structuredOutput
 }));
 `;
+}
+
+function assertPipelineReviewMutationInvalidatesSeal(temporaryRoot, controlRoot) {
+  const workdir = path.join(temporaryRoot, 'pipeline-review-mutation-workdir');
+  fs.mkdirSync(workdir);
+  fs.writeFileSync(path.join(workdir, 'seed.txt'), 'seed\n');
+  for (const args of [
+    ['init'],
+    ['config', 'user.email', 'agent-loop@example.invalid'],
+    ['config', 'user.name', 'Agent Loop Test'],
+    ['add', 'seed.txt'],
+    ['commit', '-m', 'test: seed review mutation worktree'],
+  ]) {
+    const git = spawnSync('git', args, { cwd: workdir, encoding: 'utf8' });
+    assert.strictEqual(git.status, 0, git.stderr || git.stdout);
+  }
+  const runId = 'pipeline-review-mutation';
+  const runDir = path.join(workdir, '.runs', runId);
+  const provider = path.join(temporaryRoot, 'fake-pipeline-review-mutation-claude.js');
+  const implementationProvider = path.join(temporaryRoot, 'fake-pipeline-review-mutation-codex.js');
+  fs.writeFileSync(provider, pipelineClaudeProviderScript(['git diff --check'], ['git diff --check'], true));
+  fs.writeFileSync(implementationProvider, validImplementationProviderScript());
+  const providerCommand = `${process.execPath} ${provider}`;
+  const implementationCommand = `${process.execPath} ${implementationProvider}`;
+  const common = [
+    '--workdir', workdir, '--runs-dir', '.runs', '--auto', '--allow-dirty',
+    '--skip-cli-schema', '--spec-command', providerCommand,
+    '--implementation-command', implementationCommand, '--review-command', providerCommand,
+    '--capability-router', 'shadow', '--control-root', controlRoot, '--turn-budget-slots', '20',
+  ];
+  run(['run', '--requirement', 'invalidate stale validation after reviewer mutation', '--run-id', runId, '--pipeline', ...common]);
+  let state = readJson(path.join(runDir, 'state.json'));
+  for (let attempt = 0; attempt < 8 && state.status !== 'completed'; attempt += 1) {
+    run(['resume', '--run', runId, ...common]);
+    state = readJson(path.join(runDir, 'state.json'));
+  }
+  assert.strictEqual(state.status, 'integration-ready');
+  assert.strictEqual(state.acceptanceStatus, 'passed');
+  assert.strictEqual(readJson(path.join(runDir, 'acceptance-shadow.json')).overallStatus, 'failed');
+  assert.strictEqual(
+    readJson(path.join(runDir, 'acceptance-review-workspace-drift.json')).revalidated,
+    true
+  );
+  const report = acceptanceShadowReport.collectAcceptanceShadowReport(
+    path.join(workdir, '.runs'),
+    { providerRoot: workdir, controlRoot }
+  );
+  assert.deepStrictEqual(report.counts, { passed: 1, failed: 1, unknown: 0 });
+  assert.strictEqual(report.errors.length, 0);
+}
+
+function assertPipelineFailedShadowReceipt(temporaryRoot, controlRoot) {
+  const workdir = path.join(temporaryRoot, 'pipeline-failed-shadow-workdir');
+  fs.mkdirSync(workdir);
+  fs.writeFileSync(path.join(workdir, 'seed.txt'), 'seed\n');
+  fs.writeFileSync(path.join(workdir, 'fail-validation.js'), "process.exitCode = 1;\n");
+  for (const args of [
+    ['init'],
+    ['config', 'user.email', 'agent-loop@example.invalid'],
+    ['config', 'user.name', 'Agent Loop Test'],
+    ['add', 'seed.txt', 'fail-validation.js'],
+    ['commit', '-m', 'test: seed failed shadow worktree'],
+  ]) {
+    const git = spawnSync('git', args, { cwd: workdir, encoding: 'utf8' });
+    assert.strictEqual(git.status, 0, git.stderr || git.stdout);
+  }
+  const runId = 'pipeline-failed-shadow-receipt';
+  const runDir = path.join(workdir, '.runs', runId);
+  const specProvider = path.join(temporaryRoot, 'fake-pipeline-failed-shadow-claude.js');
+  const implementationProvider = path.join(temporaryRoot, 'fake-pipeline-failed-shadow-codex.js');
+  fs.writeFileSync(specProvider, pipelineClaudeProviderScript(
+    ['git diff --check'],
+    ['node fail-validation.js'],
+    false,
+    null,
+    ['ac-validation-gate'],
+    []
+  ));
+  fs.writeFileSync(implementationProvider, validImplementationProviderScript());
+  const specCommand = `${process.execPath} ${specProvider}`;
+  const implementationCommand = `${process.execPath} ${implementationProvider}`;
+  const common = [
+    '--workdir', workdir, '--runs-dir', '.runs',
+    '--auto', '--allow-dirty', '--skip-cli-schema',
+    '--spec-command', specCommand,
+    '--implementation-command', implementationCommand,
+    '--review-command', specCommand,
+    '--capability-router', 'shadow', '--control-root', controlRoot,
+    '--turn-budget-slots', '20',
+  ];
+  run(['run', '--requirement', 'record failed integration validation', '--run-id', runId, '--pipeline', ...common]);
+  const initialProjectionFile = path.join(runDir, 'acceptance-shadow.json');
+  let projection = fs.existsSync(initialProjectionFile)
+    && readJson(initialProjectionFile).overallStatus === 'failed'
+    ? readJson(initialProjectionFile)
+    : null;
+  for (let attempt = 0; attempt < 8 && !projection; attempt += 1) {
+    run(['resume', '--run', runId, ...common]);
+    const file = path.join(runDir, 'acceptance-shadow.json');
+    if (fs.existsSync(file)) {
+      const candidate = readJson(file);
+      if (candidate.overallStatus === 'failed') projection = candidate;
+    }
+  }
+  assert(projection, 'failed integration validation must produce a failed shadow Receipt');
+  assert.strictEqual(readJson(path.join(runDir, 'state.json')).status, 'integration-ready');
+  const report = acceptanceShadowReport.collectAcceptanceShadowReport(
+    path.join(workdir, '.runs'),
+    { providerRoot: workdir, controlRoot }
+  );
+  assert.deepStrictEqual(report.counts, { passed: 0, failed: 1, unknown: 1 });
+  assert.strictEqual(report.errors.length, 0);
+}
+
+function classicClaudeProviderScript(oracle = {
+  type: 'command',
+  procedure: 'git diff --check',
+  expected: 'exit code is zero',
+}) {
+  return `
+const fs = require('fs');
+const prompt = [fs.readFileSync(0, 'utf8'), ...process.argv.slice(2)].join('\\n');
+let structuredOutput;
+if (prompt.includes('analysis and design provider')) {
+  structuredOutput = {
+    requirementSpec: {
+      summary: 'verify classic shadow acceptance',
+      userValue: 'completion remains independent from shadow evidence',
+      scope: ['agent-loop'],
+      acceptanceCriteria: ['classic completion is reviewed']
+    },
+    acceptanceContract: {
+      criteria: [{
+        id: 'ac-classic-validation',
+        statement: 'classic completion is reviewed',
+        sourceRefs: ['spec.json#/requirementSpec/acceptanceCriteria/0'],
+        oracle: ${JSON.stringify(oracle)}
+      }]
+    },
+    technicalDesign: {
+      approach: 'use existing provider pipeline',
+      files: [],
+      interfaces: [],
+      dataAndState: 'none',
+      risks: [],
+      testStrategy: 'git diff --check'
+    },
+    taskBreakdown: [{
+      id: 'T1',
+      title: 'verify',
+      description: 'verify classic shadow output',
+      dependencies: [],
+      risk: 'L1',
+      doneCriteria: ['review completes'],
+      suggestedValidation: ['git diff --check']
+    }],
+    assumptions: [],
+    outOfScope: [],
+    questions: [],
+    humanReviewChecklist: []
+  };
+} else if (prompt.includes('review provider')) {
+  structuredOutput = {
+    decision: 'approved',
+    compliant: true,
+    findings: [],
+    followUpTasks: [],
+    contractRevisions: []
+  };
+} else {
+  throw new Error('unexpected classic prompt');
+}
+process.stdout.write(JSON.stringify({
+  type: 'result',
+  subtype: 'success',
+  session_id: 'claude-classic-shadow',
+  structured_output: structuredOutput
+}));
+`;
+}
+
+function assertPipelineShadowReceipts(temporaryRoot, controlRoot) {
+  const workdir = path.join(temporaryRoot, 'pipeline-shadow-workdir');
+  fs.mkdirSync(workdir);
+  fs.writeFileSync(path.join(workdir, 'seed.txt'), 'seed\n');
+  for (const args of [
+    ['init'],
+    ['config', 'user.email', 'agent-loop@example.invalid'],
+    ['config', 'user.name', 'Agent Loop Test'],
+    ['add', 'seed.txt'],
+    ['commit', '-m', 'test: seed shadow worktree'],
+  ]) {
+    const git = spawnSync('git', args, { cwd: workdir, encoding: 'utf8' });
+    assert.strictEqual(git.status, 0, git.stderr || git.stdout);
+  }
+  const runId = 'pipeline-shadow-receipts';
+  const runDir = path.join(workdir, '.runs', runId);
+  const specProvider = path.join(temporaryRoot, 'fake-pipeline-shadow-claude.js');
+  const implementationProvider = path.join(temporaryRoot, 'fake-pipeline-shadow-codex.js');
+  fs.writeFileSync(specProvider, pipelineClaudeProviderScript(['git diff --check']));
+  fs.writeFileSync(implementationProvider, validImplementationProviderScript());
+  const specCommand = `${process.execPath} ${specProvider}`;
+  const implementationCommand = `${process.execPath} ${implementationProvider}`;
+
+  run([
+    'run', '--requirement', 'produce shadow receipts without enforcing them',
+    '--workdir', workdir, '--runs-dir', '.runs', '--run-id', runId,
+    '--pipeline', '--auto', '--allow-dirty', '--skip-cli-schema',
+    '--spec-command', specCommand,
+    '--implementation-command', implementationCommand,
+    '--review-command', specCommand,
+    '--capability-router', 'shadow', '--control-root', controlRoot,
+    '--turn-budget-slots', '20',
+  ]);
+
+  let state = readJson(path.join(runDir, 'state.json'));
+  for (let attempt = 0; attempt < 6 && state.status !== 'completed'; attempt += 1) {
+    run([
+      'resume', '--workdir', workdir, '--runs-dir', '.runs', '--run', runId,
+      '--auto', '--allow-dirty', '--skip-cli-schema',
+      '--spec-command', specCommand,
+      '--implementation-command', implementationCommand,
+      '--review-command', specCommand,
+      '--capability-router', 'shadow', '--control-root', controlRoot,
+      '--turn-budget-slots', '20',
+    ]);
+    state = readJson(path.join(runDir, 'state.json'));
+  }
+  assert.strictEqual(
+    state.status,
+    'completed',
+    JSON.stringify({ state, queue: readJson(path.join(runDir, 'queue.json')) }, null, 2)
+  );
+  assert(fs.existsSync(path.join(runDir, 'acceptance-contract.json')));
+  for (const relativeDir of [path.join('slices', 'slice-001'), '.']) {
+    const projection = readJson(path.join(runDir, relativeDir, 'acceptance-shadow.json'));
+    assert.strictEqual(projection.overallStatus, 'passed');
+    assert(fs.existsSync(path.join(runDir, relativeDir, 'acceptance-evidence-index.json')));
+    assert(fs.existsSync(path.join(runDir, projection.receiptRef)));
+  }
+  const report = acceptanceShadowReport.collectAcceptanceShadowReport(
+    path.join(workdir, '.runs'),
+    { providerRoot: workdir, controlRoot }
+  );
+  assert.strictEqual(report.receiptCount, 2);
+  assert.deepStrictEqual(report.counts, { passed: 2, failed: 0, unknown: 0 });
+  assert.strictEqual(report.errors.length, 0);
+}
+
+function assertPipelineArtifactShadowReceipts(temporaryRoot, controlRoot) {
+  const workdir = path.join(temporaryRoot, 'pipeline-artifact-shadow-workdir');
+  fs.mkdirSync(workdir);
+  fs.writeFileSync(path.join(workdir, 'seed.txt'), 'seed\n');
+  for (const args of [
+    ['init'],
+    ['config', 'user.email', 'agent-loop@example.invalid'],
+    ['config', 'user.name', 'Agent Loop Test'],
+    ['add', 'seed.txt'],
+    ['commit', '-m', 'test: seed pipeline artifact worktree'],
+  ]) {
+    const git = spawnSync('git', args, { cwd: workdir, encoding: 'utf8' });
+    assert.strictEqual(git.status, 0, git.stderr || git.stdout);
+  }
+  const runId = 'pipeline-artifact-shadow-receipts';
+  const runDir = path.join(workdir, '.runs', runId);
+  const specProvider = path.join(temporaryRoot, 'fake-pipeline-artifact-claude.js');
+  const implementationProvider = path.join(temporaryRoot, 'fake-pipeline-artifact-codex.js');
+  fs.writeFileSync(specProvider, pipelineClaudeProviderScript(
+    ['git diff --check'],
+    ['git diff --check'],
+    false,
+    {
+      type: 'artifact',
+      procedure: 'artifact:pipeline-output.txt',
+      expected: 'artifact exists, is fresh, and matches its sealed digest',
+    }
+  ));
+  fs.writeFileSync(implementationProvider, pipelineArtifactImplementationProviderScript());
+  const specCommand = `${process.execPath} ${specProvider}`;
+  const implementationCommand = `${process.execPath} ${implementationProvider}`;
+
+  run([
+    'run', '--requirement', 'produce pipeline artifact shadow receipts',
+    '--workdir', workdir, '--runs-dir', '.runs', '--run-id', runId,
+    '--pipeline', '--auto', '--allow-dirty', '--skip-cli-schema',
+    '--spec-command', specCommand,
+    '--implementation-command', implementationCommand,
+    '--review-command', specCommand,
+    '--capability-router', 'shadow', '--control-root', controlRoot,
+    '--turn-budget-slots', '20',
+  ]);
+  let state = readJson(path.join(runDir, 'state.json'));
+  for (let attempt = 0; attempt < 6 && state.status !== 'completed'; attempt += 1) {
+    run([
+      'resume', '--workdir', workdir, '--runs-dir', '.runs', '--run', runId,
+      '--auto', '--allow-dirty', '--skip-cli-schema',
+      '--spec-command', specCommand,
+      '--implementation-command', implementationCommand,
+      '--review-command', specCommand,
+      '--capability-router', 'shadow', '--control-root', controlRoot,
+      '--turn-budget-slots', '20',
+    ]);
+    state = readJson(path.join(runDir, 'state.json'));
+  }
+  assert.strictEqual(state.status, 'completed');
+  for (const relativeDir of [path.join('slices', 'slice-001'), '.']) {
+    const projection = readJson(path.join(runDir, relativeDir, 'acceptance-shadow.json'));
+    assert.strictEqual(projection.overallStatus, 'passed');
+    const evidenceIndex = readJson(path.join(
+      runDir,
+      relativeDir,
+      'acceptance-evidence-index.json'
+    ));
+    assert.strictEqual(evidenceIndex.entries[0].evidenceRef.kind, 'artifact-readback');
+    assert.strictEqual(evidenceIndex.entries[0].evidenceRef.assurance, 'verified');
+  }
+  const report = acceptanceShadowReport.collectAcceptanceShadowReport(
+    path.join(workdir, '.runs'),
+    { providerRoot: workdir, controlRoot }
+  );
+  assert.strictEqual(report.receiptCount, 2);
+  assert.deepStrictEqual(report.counts, { passed: 2, failed: 0, unknown: 0 });
+  assert.deepStrictEqual(report.oracleCounts.artifact, { passed: 2, failed: 0, unknown: 0 });
+  assert.strictEqual(report.errors.length, 0);
+}
+
+function assertClassicShadowReceipt(temporaryRoot, controlRoot) {
+  const workdir = path.join(temporaryRoot, 'classic-shadow-workdir');
+  fs.mkdirSync(workdir);
+  fs.writeFileSync(path.join(workdir, 'seed.txt'), 'seed\n');
+  for (const args of [
+    ['init'],
+    ['config', 'user.email', 'agent-loop@example.invalid'],
+    ['config', 'user.name', 'Agent Loop Test'],
+    ['add', 'seed.txt'],
+    ['commit', '-m', 'test: seed classic shadow worktree'],
+  ]) {
+    const git = spawnSync('git', args, { cwd: workdir, encoding: 'utf8' });
+    assert.strictEqual(git.status, 0, git.stderr || git.stdout);
+  }
+  const runId = 'classic-shadow-receipt';
+  const runDir = path.join(workdir, '.runs', runId);
+  const reviewProvider = path.join(temporaryRoot, 'fake-classic-shadow-claude.js');
+  const implementationProvider = path.join(temporaryRoot, 'fake-classic-shadow-codex.js');
+  fs.writeFileSync(reviewProvider, classicClaudeProviderScript());
+  fs.writeFileSync(implementationProvider, validImplementationProviderScript());
+  const reviewCommand = `${process.execPath} ${reviewProvider}`;
+  const implementationCommand = `${process.execPath} ${implementationProvider}`;
+
+  run([
+    'run', '--requirement', 'produce a classic shadow receipt',
+    '--workdir', workdir, '--runs-dir', '.runs', '--run-id', runId,
+    '--allow-dirty', '--skip-cli-schema',
+    '--spec-command', reviewCommand,
+    '--implementation-command', implementationCommand,
+    '--review-command', reviewCommand,
+    '--capability-router', 'shadow', '--control-root', controlRoot,
+    '--turn-budget-slots', '20',
+  ]);
+  run([
+    'freeze', '--workdir', workdir, '--runs-dir', '.runs', '--run', runId,
+    '--control-root', controlRoot,
+  ]);
+  let state = readJson(path.join(runDir, 'state.json'));
+  for (let attempt = 0; attempt < 6 && state.status !== 'completed'; attempt += 1) {
+    run([
+      'resume', '--workdir', workdir, '--runs-dir', '.runs', '--run', runId,
+      '--allow-dirty', '--skip-cli-schema', '--validation-command', 'git diff --check',
+      '--spec-command', reviewCommand,
+      '--implementation-command', implementationCommand,
+      '--review-command', reviewCommand,
+      '--capability-router', 'shadow', '--control-root', controlRoot,
+      '--turn-budget-slots', '20',
+    ]);
+    state = readJson(path.join(runDir, 'state.json'));
+  }
+  assert.strictEqual(state.status, 'completed');
+  const projection = readJson(path.join(runDir, 'acceptance-shadow.json'));
+  assert.strictEqual(projection.overallStatus, 'passed');
+  assert(fs.existsSync(path.join(runDir, 'acceptance-evidence-index.json')));
+  assert(fs.existsSync(path.join(runDir, projection.receiptRef)));
+  const report = acceptanceShadowReport.collectAcceptanceShadowReport(
+    path.join(workdir, '.runs'),
+    { providerRoot: workdir, controlRoot }
+  );
+  assert.strictEqual(report.receiptCount, 1);
+  assert.deepStrictEqual(report.counts, { passed: 1, failed: 0, unknown: 0 });
+  assert.strictEqual(report.errors.length, 0);
+}
+
+function assertClassicArtifactShadowReceipt(temporaryRoot, controlRoot) {
+  const workdir = path.join(temporaryRoot, 'classic-artifact-shadow-workdir');
+  fs.mkdirSync(workdir);
+  fs.writeFileSync(path.join(workdir, 'seed.txt'), 'seed\n');
+  for (const args of [
+    ['init'],
+    ['config', 'user.email', 'agent-loop@example.invalid'],
+    ['config', 'user.name', 'Agent Loop Test'],
+    ['add', 'seed.txt'],
+    ['commit', '-m', 'test: seed classic artifact worktree'],
+  ]) {
+    const git = spawnSync('git', args, { cwd: workdir, encoding: 'utf8' });
+    assert.strictEqual(git.status, 0, git.stderr || git.stdout);
+  }
+  const runId = 'classic-artifact-shadow-receipt';
+  const runDir = path.join(workdir, '.runs', runId);
+  const reviewProvider = path.join(temporaryRoot, 'fake-classic-artifact-claude.js');
+  const implementationProvider = path.join(temporaryRoot, 'fake-classic-artifact-codex.js');
+  fs.writeFileSync(reviewProvider, classicClaudeProviderScript({
+    type: 'artifact',
+    procedure: 'artifact:outputs/classic-result.txt',
+    expected: 'artifact exists, is fresh, and matches its sealed digest',
+  }));
+  fs.writeFileSync(implementationProvider, artifactImplementationProviderScript());
+  const reviewCommand = `${process.execPath} ${reviewProvider}`;
+  const implementationCommand = `${process.execPath} ${implementationProvider}`;
+
+  run([
+    'run', '--requirement', 'produce a verified artifact shadow receipt',
+    '--workdir', workdir, '--runs-dir', '.runs', '--run-id', runId,
+    '--allow-dirty', '--skip-cli-schema',
+    '--spec-command', reviewCommand,
+    '--implementation-command', implementationCommand,
+    '--review-command', reviewCommand,
+    '--capability-router', 'shadow', '--control-root', controlRoot,
+    '--turn-budget-slots', '20',
+  ]);
+  run([
+    'freeze', '--workdir', workdir, '--runs-dir', '.runs', '--run', runId,
+    '--control-root', controlRoot,
+  ]);
+  let state = readJson(path.join(runDir, 'state.json'));
+  for (let attempt = 0; attempt < 6 && state.status !== 'completed'; attempt += 1) {
+    run([
+      'resume', '--workdir', workdir, '--runs-dir', '.runs', '--run', runId,
+      '--allow-dirty', '--skip-cli-schema', '--validation-command', 'git diff --check',
+      '--spec-command', reviewCommand,
+      '--implementation-command', implementationCommand,
+      '--review-command', reviewCommand,
+      '--capability-router', 'shadow', '--control-root', controlRoot,
+      '--turn-budget-slots', '20',
+    ]);
+    state = readJson(path.join(runDir, 'state.json'));
+  }
+  assert.strictEqual(state.status, 'completed');
+  const projection = readJson(path.join(runDir, 'acceptance-shadow.json'));
+  assert.strictEqual(projection.overallStatus, 'passed');
+  const evidenceIndex = readJson(path.join(runDir, 'acceptance-evidence-index.json'));
+  assert.strictEqual(evidenceIndex.entries[0].evidenceRef.kind, 'artifact-readback');
+  assert.strictEqual(evidenceIndex.entries[0].evidenceRef.assurance, 'verified');
+  const report = acceptanceShadowReport.collectAcceptanceShadowReport(
+    path.join(workdir, '.runs'),
+    { providerRoot: workdir, controlRoot }
+  );
+  assert.strictEqual(report.receiptCount, 1);
+  assert.deepStrictEqual(report.counts, { passed: 1, failed: 0, unknown: 0 });
+  assert.deepStrictEqual(report.oracleCounts.artifact, { passed: 1, failed: 0, unknown: 0 });
+  assert.strictEqual(report.errors.length, 0);
 }
 
 function validImplementationProviderScript() {
@@ -155,6 +656,54 @@ fs.writeFileSync(args[outputIndex + 1], JSON.stringify({
 process.stdout.write([
   JSON.stringify({ type: 'thread.started', thread_id: 'codex-post-accept-thread' }),
   JSON.stringify({ type: 'turn.started', turn_id: 'codex-post-accept-turn' }),
+  JSON.stringify({ type: 'turn.completed' })
+].join('\\n'));
+`;
+}
+
+function artifactImplementationProviderScript() {
+  return `
+const fs = require('fs');
+const path = require('path');
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf('--output-last-message');
+if (outputIndex < 0 || !args[outputIndex + 1]) throw new Error('missing --output-last-message');
+const artifactRef = path.join('outputs', 'classic-result.txt');
+fs.mkdirSync(path.dirname(path.join(process.cwd(), artifactRef)), { recursive: true });
+fs.writeFileSync(path.join(process.cwd(), artifactRef), 'classic artifact result\\n');
+fs.writeFileSync(args[outputIndex + 1], JSON.stringify({
+  summary: 'created a fresh classic artifact',
+  changedFiles: [artifactRef.replace(/\\\\/g, '/')],
+  validation: [],
+  risks: [],
+  followUp: []
+}));
+process.stdout.write([
+  JSON.stringify({ type: 'thread.started', thread_id: 'codex-artifact-thread' }),
+  JSON.stringify({ type: 'turn.started', turn_id: 'codex-artifact-turn' }),
+  JSON.stringify({ type: 'turn.completed' })
+].join('\\n'));
+`;
+}
+
+function pipelineArtifactImplementationProviderScript() {
+  return `
+const fs = require('fs');
+const path = require('path');
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf('--output-last-message');
+if (outputIndex < 0 || !args[outputIndex + 1]) throw new Error('missing --output-last-message');
+fs.writeFileSync(path.join(process.cwd(), 'pipeline-output.txt'), 'pipeline artifact result\\n');
+fs.writeFileSync(args[outputIndex + 1], JSON.stringify({
+  summary: 'created a fresh pipeline artifact',
+  changedFiles: ['pipeline-output.txt'],
+  validation: [],
+  risks: [],
+  followUp: []
+}));
+process.stdout.write([
+  JSON.stringify({ type: 'thread.started', thread_id: 'codex-pipeline-artifact-thread' }),
+  JSON.stringify({ type: 'turn.started', turn_id: 'codex-pipeline-artifact-turn' }),
   JSON.stringify({ type: 'turn.completed' })
 ].join('\\n'));
 `;
@@ -346,6 +895,9 @@ function assertPostAcceptanceFailurePreservesAcceptedArtifacts(temporaryRoot, co
     'freeze', '--workdir', temporaryRoot, '--runs-dir', '.runs', '--run', runId,
     '--control-root', controlRoot,
   ]);
+  const acceptanceContract = readJson(path.join(runDir, 'acceptance-contract.json'));
+  assert.strictEqual(acceptanceContract.schemaVersion, 'acceptance-contract-v1');
+  assert.strictEqual(acceptanceContract.criteria[0].oracle.type, 'independent-review');
   fs.mkdirSync(path.join(runDir, 'provider-handoff.json'));
   run([
     'resume', '--workdir', temporaryRoot, '--runs-dir', '.runs', '--run', runId,
@@ -536,11 +1088,17 @@ function assertPipelineValidationBlocksDurableWriteback(
     '--turn-budget-slots', '10',
   ]);
 
+  const acceptanceContract = readJson(path.join(runDir, 'acceptance-contract.json'));
+  assert.strictEqual(acceptanceContract.schemaVersion, 'acceptance-contract-v1');
+  assert.strictEqual(acceptanceContract.criteria[0].oracle.type, 'command');
+
   const sliceDir = path.join(runDir, 'slices', 'slice-001');
   const validation = readJson(path.join(sliceDir, 'validation.json'));
+  assert.strictEqual(validation.schemaVersion, 'integration-validation-v1');
   assert.strictEqual(validation.status, sourceStatus);
   if (sourceStatus === 'failed') {
-    assert.strictEqual(validation.commands[0].status, 1);
+    assert.strictEqual(validation.commands[0].status, 'failed');
+    assert.strictEqual(validation.commands[0].exitStatus, 1);
   } else {
     assert.deepStrictEqual(validation.commands, []);
   }
@@ -763,8 +1321,21 @@ function assertOmittedLockfileContentInvalidatesHandoff(temporaryRoot, controlRo
 }
 
 function main() {
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-native-cli-'));
-  const controlRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-native-control-'));
+  const persistentRoot = process.env.TP_NATIVE_CLI_FIXTURE_ROOT;
+  const persistentControlRoot = process.env.TP_NATIVE_CLI_CONTROL_ROOT;
+  if ((persistentRoot && !persistentControlRoot) || (!persistentRoot && persistentControlRoot)) {
+    throw new Error('TP_NATIVE_CLI_FIXTURE_ROOT and TP_NATIVE_CLI_CONTROL_ROOT must be set together');
+  }
+  const temporaryRoot = persistentRoot
+    ? path.resolve(persistentRoot)
+    : fs.mkdtempSync(path.join(os.tmpdir(), 'tp-native-cli-'));
+  const controlRoot = persistentControlRoot
+    ? path.resolve(persistentControlRoot)
+    : fs.mkdtempSync(path.join(os.tmpdir(), 'tp-native-control-'));
+  if (persistentRoot) {
+    fs.mkdirSync(temporaryRoot, { recursive: false });
+    fs.mkdirSync(controlRoot, { recursive: false });
+  }
   const runId = 'native-cli-test';
   const runDir = path.join(temporaryRoot, '.runs', runId);
   try {
@@ -932,15 +1503,24 @@ function main() {
     assertClassicValidationBlocksDurableWriteback(temporaryRoot, controlRoot, 'failed');
     assertPipelineValidationBlocksDurableWriteback(temporaryRoot, controlRoot, 'skipped');
     assertPipelineValidationBlocksDurableWriteback(temporaryRoot, controlRoot, 'failed');
+    assertPipelineShadowReceipts(temporaryRoot, controlRoot);
+    assertPipelineArtifactShadowReceipts(temporaryRoot, controlRoot);
+    assertPipelineReviewMutationInvalidatesSeal(temporaryRoot, controlRoot);
+    assertPipelineFailedShadowReceipt(temporaryRoot, controlRoot);
+    assertClassicShadowReceipt(temporaryRoot, controlRoot);
+    assertClassicArtifactShadowReceipt(temporaryRoot, controlRoot);
     assertPostAcceptanceFailurePreservesAcceptedArtifacts(temporaryRoot, controlRoot);
     assertClassicInvalidHandoffPersistsPartialRecovery(temporaryRoot, controlRoot);
     assertOmittedLockfileContentInvalidatesHandoff(temporaryRoot, controlRoot);
   } finally {
-    fs.rmSync(temporaryRoot, { recursive: true, force: true });
-    fs.rmSync(controlRoot, { recursive: true, force: true });
+    if (!persistentRoot) {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+      fs.rmSync(controlRoot, { recursive: true, force: true });
+    }
   }
 
   console.log('[OK] agent orchestrator native CLI integration tests passed');
 }
 
-main();
+if (require.main === module) main();
+module.exports = { classicClaudeProviderScript, pipelineClaudeProviderScript, validImplementationProviderScript };

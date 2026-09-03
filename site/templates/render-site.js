@@ -198,6 +198,7 @@ function header(model, basePath, page) {
           ${links}
           <a href="${escapeHtml(model.meta.repository)}" rel="noreferrer">GitHub</a>
           <a class="nav-cta" href="${route(basePath, "install")}"${page === "install" ? ' aria-current="page"' : ""}>安装</a>
+          <a href="${route(basePath, "tasks")}"${page === "tasks" ? ' aria-current="page"' : ""}>任务</a>
           <a class="status-link" href="${route(basePath, "status")}"${page === "status" ? ' aria-current="page"' : ""}><span></span>状态</a>
         </nav>
       </div>
@@ -267,6 +268,7 @@ function shell({ model, basePath, page, title, description, body }) {
     ${footer(model, normalizedBase)}
     <div class="toast" role="status" aria-live="polite" data-toast></div>
     <script src="${route(normalizedBase, "assets").replace(/\/$/, "")}/app.js" defer></script>
+    ${page === "tasks" ? `<script src="${route(normalizedBase, "assets").replace(/\/$/, "")}/tasks.js" defer></script>` : ""}
   </body>
 </html>`;
 }
@@ -831,6 +833,18 @@ function renderNotFound(basePath) {
     </section>`;
 }
 
+function renderTasks() {
+  return `
+    <section class="page-hero"><div class="shell"><span class="section-label">[ AUTHENTICATED HARNESS ]</span><h1>创建并执行受控任务</h1><p>每个任务使用独立工作区、冻结验收合同与 hash-only Transcript。需要确认时会停在规格门，确认后从原运行继续。</p></div></section>
+    <section class="section"><div class="shell task-console" data-task-console>
+      <div class="task-panel" data-login-panel><h2>登录</h2><form data-login-form><label>用户名<input name="username" autocomplete="username" required maxlength="64"></label><label>密码<input name="password" type="password" autocomplete="current-password" required maxlength="256"></label><button class="button button--primary" type="submit">登录</button><p role="alert" data-login-error></p></form></div>
+      <div class="task-panel" data-app-panel hidden><div class="task-toolbar"><div><h2>Harness 任务</h2><p data-user-label></p></div><button class="button button--secondary" data-logout>退出</button></div>
+        <form class="task-create" data-task-form><label>项目<select name="projectId" required data-projects></select></label><label>需求<textarea name="requirement" required maxlength="16384" rows="6" placeholder="描述要完成的可验证结果"></textarea></label><button class="button button--primary" type="submit">创建任务</button><p role="alert" data-task-error></p></form>
+        <div class="task-list-heading"><h3>最近任务</h3><button class="button button--secondary" data-refresh type="button">刷新</button></div><div class="task-list" data-task-list></div>
+      </div>
+    </div></section>`;
+}
+
 function renderSitePages(input, options = {}) {
   const model = normalizeModel(input);
   const basePath = normalizeBasePath(options.basePath || "/tech-persistence/");
@@ -890,6 +904,13 @@ function renderSitePages(input, options = {}) {
       description:
         "Tech Persistence 公开站点的源指纹、生成时间与能力发现状态。",
       body: renderStatus(model),
+    }),
+    "tasks/index.html": shell({
+      ...common,
+      page: "tasks",
+      title: "Harness 任务",
+      description: "登录后创建、执行、确认并查看 Tech Persistence Harness 任务。",
+      body: renderTasks(),
     }),
     "404.html": shell({
       ...common,
