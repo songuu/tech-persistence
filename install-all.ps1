@@ -31,7 +31,7 @@ Usage:
   powershell -ExecutionPolicy Bypass -File .\install-all.ps1 -All
 
 Targets:
-  -All           Run all supported Windows installers.
+  -All           Run modern Codex and Claude plugin installers.
   -Legacy        Run .\install.ps1 -All only.
   -Codex         Run .\install-codex.ps1 -All only.
   -Plugin        Run .\install-plugin.ps1 -All only.
@@ -49,6 +49,7 @@ Options:
   -ContinueOnError       Run remaining installers after a failure, then exit non-zero.
   -Help                  Show this help.
 
+Legacy installation is opt-in through -Legacy because Claude Code 2.1+ uses plugins.
 If no target switch is provided, this script defaults to -All.
 "@
 }
@@ -122,7 +123,7 @@ if ($Help) {
 $hasExplicitTarget = $Legacy -or $Codex -or $Plugin
 $runAll = $All -or (-not $hasExplicitTarget)
 
-$runLegacy = $runAll -or $Legacy
+$runLegacy = $Legacy
 $runCodex = $runAll -or $Codex
 $runPlugin = $runAll -or $Plugin
 

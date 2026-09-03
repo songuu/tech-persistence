@@ -345,7 +345,7 @@ function testCodexInstallersUseOneRuntimeOwner() {
 
   const powershellInstaller = read('install-codex.ps1');
   for (const needle of [
-    'codex plugin marketplace add $HomeDir',
+    '$CodexPluginCli plugin marketplace add $HomeDir --json',
     '--fix --install-canonical',
     '--plugin-owner-status --json',
     'Join-Path $PluginSource "codex-skills"',
@@ -394,10 +394,7 @@ function testCodexInstallersUseOneRuntimeOwner() {
     'no version/source CAS',
     "recoverySurfaces.push('marketplaceRegistration')",
     "state = 'rollback-failed'",
-    'environment.APPDATA',
-    'nodeExecutable',
-    "source: 'windows-npm-cli'",
-    "source: 'path-fallback'",
+    "require('./codex-plugin-cli')",
     'unsafe plugin id',
     'duplicate plugin ids',
     'snapshotPluginCaches',
@@ -406,6 +403,18 @@ function testCodexInstallersUseOneRuntimeOwner() {
     'checkpointTransaction',
   ]) {
     assertIncludes(transactionHelper, needle, 'scripts/codex-user-install-transaction.js');
+  }
+
+  const pluginCliHelper = read('scripts/codex-plugin-cli.js');
+  for (const needle of [
+    "'.plugin-appserver', 'codex.exe'",
+    'environment.APPDATA',
+    'nodeExecutable',
+    "source: 'windows-plugin-appserver-cli'",
+    "source: 'windows-npm-cli'",
+    "source: 'path-fallback'",
+  ]) {
+    assertIncludes(pluginCliHelper, needle, 'scripts/codex-plugin-cli.js');
   }
 
   for (const needle of [
@@ -507,6 +516,8 @@ function testPowerShellInstallersRetainBackupsAndSkipUnchangedFiles() {
   const pluginInstaller = read('install-plugin.ps1');
   assertIncludes(pluginInstaller, '[switch]$All', 'install-plugin.ps1');
   assertIncludes(pluginInstaller, 'function Show-Help', 'install-plugin.ps1');
+  assert(!pluginInstaller.includes('--yes'), 'install-plugin.ps1 must not pass removed Claude plugin --yes flags');
+  assert(codexInstaller.includes('$CodexPluginCli plugin marketplace add $HomeDir --json'), 'install-codex.ps1 must use the Desktop plugin CLI marketplace JSON contract');
 }
 
 function testUnifiedPowerShellInstallerCoversAllWindowsInstallers() {
@@ -523,6 +534,8 @@ function testUnifiedPowerShellInstallerCoversAllWindowsInstallers() {
     '[switch]$SkipPlugin',
     '[switch]$DryRun',
     '[switch]$ContinueOnError',
+    '$runLegacy = $Legacy',
+    'Legacy installation is opt-in through -Legacy because Claude Code 2.1+ uses plugins.',
     'If no target switch is provided, this script defaults to -All.',
   ]) {
     assertIncludes(script, needle, unifiedInstallerPath);

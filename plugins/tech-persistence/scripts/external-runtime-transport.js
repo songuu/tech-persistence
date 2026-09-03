@@ -2,28 +2,25 @@
 
 // Fixed child transport: no tools, filesystem access, environment credentials or redirects.
 const { validateEndpoint, sha256 } = require('./agent-orchestrator/external-runtime-config');
+const { requestText } = require('./lib/loopback-http');
 function parseJson(value) { try { return JSON.parse(value); } catch { throw new Error('external response is invalid JSON'); } }
 async function execute(input) {
   const baseUrl = validateEndpoint(input.baseUrl);
   if (typeof input.prompt !== 'string' || Buffer.byteLength(input.prompt) > 192 * 1024) throw new Error('external prompt exceeds bounded context');
-  if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 100 || input.timeoutMs > 120000
+  if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 100 || input.timeoutMs > 300000
       || !Number.isSafeInteger(input.maxTokens) || input.maxTokens < 1 || input.maxTokens > 4096) throw new Error('invalid transport resource limits');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), input.timeoutMs);
-  try {
-    const body = { model: input.model, messages: [{ role: 'user', content: input.prompt }],
+  if (!input.schema || typeof input.schema !== 'object' || Array.isArray(input.schema)) throw new Error('invalid transport schema');
+  const schemaInstruction = `\nReturn only JSON matching exactly this JSON Schema:\n${JSON.stringify(input.schema)}`;
+  const fullPrompt = `${input.prompt}${schemaInstruction}`;
+  if (Buffer.byteLength(fullPrompt) > 192 * 1024) throw new Error('external prompt and schema exceed bounded context');
+  const body = { model: input.model, messages: [{ role: 'user', content: fullPrompt }],
       temperature: 0, max_tokens: input.maxTokens, stream: false,
       response_format: { type: 'json_schema', json_schema: { name: 'harness_result', strict: true, schema: input.schema } } };
-    const response = await fetch(`${baseUrl}/v1/chat/completions`, { method: 'POST', redirect: 'error', signal: controller.signal,
-      headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const response = await requestText(`${baseUrl}/v1/chat/completions`, { method: 'POST', socketPath: input.socketPath,
+      timeoutMs: input.timeoutMs,
+      maxBytes: 512 * 1024, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     if (!response.ok) throw new Error(`external HTTP status ${response.status}`);
-    const chunks = []; let bytes = 0;
-    for await (const chunk of response.body) {
-      bytes += chunk.length;
-      if (bytes > 512 * 1024) { controller.abort(); throw new Error('external response exceeds size limit'); }
-      chunks.push(chunk);
-    }
-    const raw = Buffer.concat(chunks).toString('utf8');
+    const raw = response.text;
     const envelope = parseJson(raw);
     const choice = envelope.choices?.[0];
     if (typeof envelope.id !== 'string' || !envelope.id || envelope.choices?.length !== 1
@@ -35,7 +32,6 @@ async function execute(input) {
       nativeAcceptanceErrors: [], terminalEvidence: { observed: true, event: 'chat.completion', status: 'stop' },
       runtimeRefs: { sessionId: input.sessionId, requestId: input.requestId, completionId: sha256(envelope.id) },
       payload, requestHash: sha256(JSON.stringify(body)), responseHash: sha256(raw) };
-  } finally { clearTimeout(timer); }
 }
 async function main() {
   let raw = '';

@@ -23,6 +23,7 @@ const structuredOutput = require('./agent-orchestrator/structured-output');
 const acceptanceEvaluator = require('./agent-orchestrator/acceptance-evaluator');
 const freezeReceipt = require('./agent-orchestrator/freeze-receipt');
 const validationRunner = require('./agent-orchestrator/validation-runner');
+const runtimeCapabilityEvidence = require('./agent-orchestrator/runtime-capability-evidence');
 const operatorReviewPacket = require('./agent-orchestrator/operator-review-packet');
 const turnTransaction = require('./agent-orchestrator/turn-transaction');
 const schedulerControl = require('./agent-orchestrator/scheduler-control');
@@ -762,15 +763,16 @@ function runProcess(label, launchOrCommand, args, settings) {
     externalRuntimeConfig.protectedPath(transportPath, settings.cwd);
     runtimeConfig = externalRuntimeConfig.configured(settings.options, settings.cwd);
     const input = JSON.parse(settings.stdin);
-    if (!runtimeConfig || input.baseUrl !== runtimeConfig.baseUrl || input.model !== runtimeConfig.model) throw new Error('external transport configuration mismatch');
+    if (!runtimeConfig || input.baseUrl !== runtimeConfig.baseUrl || (input.socketPath || null) !== runtimeConfig.socketPath
+        || input.model !== runtimeConfig.model) throw new Error('external transport configuration mismatch');
     transcriptInput = { sessionId: input.sessionId, requestId: input.requestId, taskHash: settings.taskEnvelopeHash,
       routeHash: settings.routeDecisionHash, modelHash: externalRuntimeConfig.sha256(input.model), requestBytes: settings.stdin, startedAt: nowIso() };
     // A durable request precedes dispatch. If capture fails, no untracked request is sent.
     transcriptRequest = require('./lib/runtime-transcript-spool').captureEvent(runtimeConfig.spoolRoot, transcriptInput, 'request');
   }
-  // This child is trusted protocol code, not model-selected executable code. The model server
-  // runs under the separate provider identity; never give the transport inherited credentials.
-  const isolation = externalTransport ? { enabled: false, launch, args } : resolveProviderOsIsolation(
+  // This child is trusted protocol code, not model-selected executable code. It still runs under
+  // the provider identity so only the authority parent can own Transcript and Receipt state.
+  const isolation = resolveProviderOsIsolation(
     settings.options || {},
     launch,
     args,
@@ -784,7 +786,8 @@ function runProcess(label, launchOrCommand, args, settings) {
   const result = runner(effectiveLaunch.command, finalArgs, {
     cwd: settings.cwd,
     encoding: 'utf8',
-    env: externalTransport ? (process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot } : {}) : providerProcessEnv(settings.env || {}, process.env, isolation),
+    env: providerProcessEnv(settings.env || {}, externalTransport
+      ? (process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot } : {}) : process.env, isolation),
     input: settings.stdin,
     maxBuffer: MAX_BUFFER,
     shell: launch.shell === true,
@@ -1333,7 +1336,7 @@ function normalizeSeverity(value) {
   return 'P1';
 }
 
-function validateSpec(spec) {
+function validateSpec(spec, options = null) {
   const errors = [];
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) errors.push('spec must be an object');
   if (!spec.requirementSpec) errors.push('missing requirementSpec');
@@ -1344,6 +1347,40 @@ function validateSpec(spec) {
   if (spec.requirementSpec && !Array.isArray(spec.requirementSpec.acceptanceCriteria)) {
     errors.push('requirementSpec.acceptanceCriteria must be an array');
   }
+  const acceptanceCriteria = Array.isArray(spec.requirementSpec && spec.requirementSpec.acceptanceCriteria)
+    ? spec.requirementSpec.acceptanceCriteria
+    : [];
+  const structuredCriteria = spec.acceptanceContract && Array.isArray(spec.acceptanceContract.criteria)
+    ? spec.acceptanceContract.criteria
+    : [];
+  if (structuredCriteria.length !== acceptanceCriteria.length) {
+    errors.push('acceptanceContract criteria must match acceptanceCriteria length');
+  }
+  structuredCriteria.forEach((criterion, index) => {
+    const expectedSourceRefs = [`spec.json#/requirementSpec/acceptanceCriteria/${index}`];
+    if (criterion.statement !== acceptanceCriteria[index]) {
+      errors.push(`acceptance criterion ${criterion.id || index} must be byte-identical to acceptanceCriteria[${index}]`);
+    }
+    if (JSON.stringify(criterion.sourceRefs) !== JSON.stringify(expectedSourceRefs)) {
+      errors.push(`acceptance criterion ${criterion.id || index} has invalid sourceRefs`);
+    }
+    if (options && criterion.oracle && criterion.oracle.type === 'command'
+        && !optionValues(options, 'validation-command').includes(criterion.oracle.procedure)) {
+      errors.push(`acceptance criterion ${criterion.id || index} uses an unavailable validation command`);
+    }
+    if (options && criterion.oracle && criterion.oracle.type === 'artifact'
+        && criterion.oracle.expected !== 'artifact exists, is fresh, and matches its sealed digest') {
+      errors.push(`acceptance criterion ${criterion.id || index} uses an unsupported artifact expectation`);
+    }
+    const brokerOption = criterion.oracle && {
+      readback: 'acceptance-readback-broker',
+      'independent-review': 'acceptance-independent-review-broker',
+      'user-confirmation': 'acceptance-user-confirmation-broker',
+    }[criterion.oracle.type];
+    if (options && brokerOption && !optionValue(options, brokerOption)) {
+      errors.push(`acceptance criterion ${criterion.id || index} requires unavailable ${criterion.oracle.type} authority`);
+    }
+  });
   const allowedCriterionIds = new Set(
     spec.acceptanceContract && Array.isArray(spec.acceptanceContract.criteria)
       ? spec.acceptanceContract.criteria.map((criterion) => criterion.id)
@@ -1400,6 +1437,12 @@ function completionGateValidationEvidence(gate) {
 }
 
 function buildSpecPrompt(requirement, options) {
+  const validationCommands = optionValues(options, 'validation-command');
+  const enabledExternalOracles = [
+    optionValue(options, 'acceptance-readback-broker') ? 'readback' : null,
+    optionValue(options, 'acceptance-independent-review-broker') ? 'independent-review' : null,
+    optionValue(options, 'acceptance-user-confirmation-broker') ? 'user-confirmation' : null,
+  ].filter(Boolean);
   return [
     'You are the analysis and design provider in Tech Persistence agent-loop v7.',
     'Do not implement code. Produce a frozen contract for a separate implementation provider.',
@@ -1415,9 +1458,14 @@ function buildSpecPrompt(requirement, options) {
     '',
     'Output contract:',
     '- Return one top-level JSON object only; do not wrap it in Markdown.',
+    '- acceptanceContract.criteria must have exactly the same length and order as requirementSpec.acceptanceCriteria; each criterion statement must be byte-for-byte identical to the corresponding acceptanceCriteria string and sourceRefs must equal ["spec.json#/requirementSpec/acceptanceCriteria/<zero-based-index>"].',
     '- taskBreakdown must be a top-level Task[] array, not { "tasks": [...] }.',
-    '- Each task must include id, title, description, dependencies, risk, doneCriteria, and suggestedValidation.',
-    '- Use this exact top-level shape: { "requirementSpec": {...}, "technicalDesign": {...}, "taskBreakdown": [...], "assumptions": [...], "outOfScope": [...], "questions": [...], "humanReviewChecklist": [...] }.',
+    '- Each task must include id, title, description, dependencies, risk, criterionIds, doneCriteria, and suggestedValidation.',
+    '- Before returning, verify that the union of all task criterionIds equals the complete set of acceptanceContract criterion ids; no criterion may be unowned.',
+    `- Allowed command Oracle procedures are exactly these validation command strings (without a command: prefix): ${JSON.stringify(validationCommands)}. Its expected value must be exactly "exit code is zero". A command may prove multiple criteria when the command checks them.`,
+    `- Artifact Oracles use procedure "artifact:<workdir-relative-path>" and expected exactly "artifact exists, is fresh, and matches its sealed digest". Artifact evidence proves only existence and freshness, never exact content; use an allowed validation command for every criterion that claims content.`,
+    `- External authority Oracle types enabled for this run: ${JSON.stringify(enabledExternalOracles)}. Do not use readback, independent-review, or user-confirmation unless listed.`,
+    '- Use this exact top-level shape: { "requirementSpec": {...}, "acceptanceContract": {"criteria": [...]}, "technicalDesign": {...}, "taskBreakdown": [...], "assumptions": [...], "outOfScope": [...], "questions": [...], "humanReviewChecklist": [...] }.',
     '',
     `Repository root: ${options.workdir}`,
     '',
@@ -1436,11 +1484,13 @@ function buildImplementationPrompt(state, runDir) {
     'You are the implementation provider in Tech Persistence agent-loop v7.',
     'Implement only the frozen spec. Do not reinterpret or expand requirements.',
     'If the spec is ambiguous: adopt the smallest safe assumption, KEEP IMPLEMENTING (do not block),',
-    'and record the ambiguity in handoff.clarifications[] as { assumption, question }.',
+    'and record the ambiguity in the top-level clarifications[] field as { assumption, question }.',
     'The spec-writer will rule on each clarification at the next review gate.',
     'Honor any prior clarification rulings listed below.',
     'Follow the repository style and keep changes scoped.',
-    'Return JSON only. Match the handoff schema.',
+    'Return JSON only. Match the handoff schema with these top-level fields: summary, changedFiles, validation, risks, followUp, and optional clarifications.',
+    'Field types are strict: summary is a string; changedFiles, validation, risks, followUp, and clarifications are arrays. Every validation entry is a string.',
+    'Do not wrap the response in a handoff, result, data, or markdown object.',
     '',
     `Run id: ${state.runId}`,
     `Repository root: ${state.workdir}`,
@@ -1990,13 +2040,20 @@ function recordAttemptTurnPhase(attempt, phase, payload) {
   return recorded;
 }
 
+function providerCapabilityEvidence(options, input) {
+  const configuredCapabilityEvidence = options.runtimeCapabilityEvidence
+    && options.runtimeCapabilityEvidence[input.providerKey];
+  return input.capabilityEvidence || configuredCapabilityEvidence || null;
+}
+
 function prepareProviderAttempt(state, runDir, options, input) {
   const stageName = safeStageName(input.stage);
   const stamp = input.stamp || logStamp();
-  const capabilityEvidence = input.capabilityEvidence
+  const rawCapabilityEvidence = providerCapabilityEvidence(options, input);
+  const capabilityEvidence = rawCapabilityEvidence
     ? nativeExecutionControl.observedAdapterEvidence(
       input.providerKey,
-      input.capabilityEvidence
+      rawCapabilityEvidence
     )
     : null;
   const effectBaseline = captureWorktreeSnapshot(state.workdir, runDir);
@@ -2550,7 +2607,7 @@ function runSpecProvider(state, statePath, runDir, options) {
       'classic requirement spec'
     );
     const spec = providerStep('output-normalization', () => normalizeSpec(rawSpec));
-    const errors = validateSpec(spec);
+    const errors = validateSpec(spec, options);
     if (errors.length > 0) {
       const error = new Error(`Invalid spec output: ${errors.join('; ')}`);
       error.providerFailureKind = 'schema-validation';
@@ -2741,6 +2798,38 @@ function ensureCleanWorktree(workdir, options, runDir, state) {
   }
 }
 
+function providerLastMessagePath(options, runId, stamp) {
+  const configured = optionValue(options, 'provider-output-root');
+  if (!configured) return null;
+  if (process.platform === 'win32' || !path.isAbsolute(String(configured))) {
+    throw new Error('provider-output-root requires an absolute Linux path');
+  }
+  const root = path.resolve(String(configured));
+  const stat = fs.lstatSync(root);
+  const providerGid = positiveIdentityInteger(optionValue(options, 'provider-gid'), 'provider-gid');
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.getuid()
+      || stat.gid !== providerGid || (stat.mode & 0o7777) !== 0o2770 || fs.realpathSync.native(root) !== root) {
+    throw new Error('provider-output-root must be an authority-owned setgid provider directory');
+  }
+  const name = `${String(runId).replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(stamp).replace(/[^a-zA-Z0-9_-]/g, '_')}.json`;
+  const target = path.join(root, name);
+  if (fs.existsSync(target)) throw new Error('provider output target already exists');
+  return target;
+}
+
+function consumeProviderOutput(file, expectedUid) {
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.nlink !== 1 || stat.uid !== expectedUid || stat.size < 1 || stat.size > MAX_BUFFER
+        || (stat.mode & 0o022) !== 0) throw new Error('unsafe provider output artifact');
+    return fs.readFileSync(fd, 'utf8');
+  } finally {
+    fs.closeSync(fd);
+    try { fs.unlinkSync(file); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+}
+
 function runImplementationProvider(state, statePath, runDir, options) {
   if (!state.specFrozenAt) throw new Error('Spec is not frozen. Run freeze first.');
   ensureCleanWorktree(state.workdir, options, runDir, state);
@@ -2751,7 +2840,9 @@ function runImplementationProvider(state, statePath, runDir, options) {
   const providerLogStamp = logStamp();
   const stdoutFile = stampedLogPath(runDir, 'implementation', 'stdout.log', providerLogStamp);
   const stderrFile = stampedLogPath(runDir, 'implementation', 'stderr.log', providerLogStamp);
-  const lastMessageFile = stampedLogPath(runDir, 'implementation', 'last-message.json', providerLogStamp);
+  const authorityLastMessageFile = stampedLogPath(runDir, 'implementation', 'last-message.json', providerLogStamp);
+  const untrustedLastMessageFile = providerLastMessagePath(options, state.runId, providerLogStamp);
+  const lastMessageFile = untrustedLastMessageFile || authorityLastMessageFile;
   const invocation = buildCodexProviderInvocation(
     options,
     runDir,
@@ -2796,7 +2887,10 @@ function runImplementationProvider(state, statePath, runDir, options) {
   );
   state.providerRuns.push(record);
 
-  const lastMessageText = safeRead(lastMessageFile);
+  const lastMessageText = untrustedLastMessageFile
+    ? consumeProviderOutput(untrustedLastMessageFile, positiveIdentityInteger(optionValue(options, 'provider-uid'), 'provider-uid'))
+    : safeRead(lastMessageFile);
+  if (untrustedLastMessageFile) writeText(authorityLastMessageFile, lastMessageText);
   return runProviderPostProcess(attempt, record, {
     result,
     lastMessage: lastMessageText,
@@ -2824,7 +2918,7 @@ function runImplementationProvider(state, statePath, runDir, options) {
       writeJson(path.join(runDir, 'handoff.parse-error.json'), {
         message: error.message,
         stdoutFile: path.relative(runDir, stdoutFile),
-        lastMessageFile: path.relative(runDir, lastMessageFile),
+        lastMessageFile: path.relative(runDir, authorityLastMessageFile),
       });
       throw error;
     }
@@ -3310,6 +3404,12 @@ function writeValidation(workdir, runDir, options, settings = {}) {
     execution = validationRunner.runValidationCommands(commands, {
       workdir,
       runDir,
+      authorityRunsRoot: (() => {
+        const controlRoot = optionValue(options, 'control-root');
+        return typeof controlRoot === 'string' && controlRoot.trim()
+          ? path.join(path.dirname(path.resolve(controlRoot)), 'runs')
+          : undefined;
+      })(),
       artifactName,
       logPrefix,
       attemptId: `${logPrefix.slice(0, 40)}-${Date.now()}`,
@@ -5930,7 +6030,15 @@ Options:
 
 function main() {
   const parsed = parseCli(process.argv.slice(2));
-  const { command, options, positionals } = parsed;
+  const { command, positionals } = parsed;
+  const options = { ...parsed.options };
+  const capabilityEvidenceFile = optionValue(options, 'runtime-capability-evidence-file');
+  if (capabilityEvidenceFile && capabilityEvidenceFile !== true) {
+    options.runtimeCapabilityEvidence = runtimeCapabilityEvidence.load(
+      String(capabilityEvidenceFile),
+      optionValue(options, 'codex-command') || 'codex'
+    );
+  }
   if (command === 'help' || boolOption(options, 'help')) {
     usage();
     return;
@@ -5993,7 +6101,9 @@ module.exports = {
   collectGitDiff,
   listChangedFiles,
   normalizeTurnValidation,
+  validateSpec,
   providerProcessEnv,
+  providerCapabilityEvidence,
   resolveProviderOsIsolation,
   runProcess,
   writeValidation,

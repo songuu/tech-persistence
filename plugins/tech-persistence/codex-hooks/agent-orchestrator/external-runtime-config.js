@@ -51,10 +51,14 @@ function validateEndpoint(baseUrl) {
 }
 function loadExternalConfig(file, workdir) {
   const input = readProtectedJson(file, workdir);
-  const allowed = ['version', 'descriptorId', 'baseUrl', 'model', 'promotionFile', 'canaryFile', 'spoolRoot', 'timeoutMs', 'maxTokens', 'contextFiles'];
+  const allowed = ['version', 'descriptorId', 'baseUrl', 'socketPath', 'model', 'promotionFile', 'canaryFile', 'spoolRoot', 'timeoutMs', 'maxTokens', 'contextFiles'];
   if (Object.keys(input).some((key) => !allowed.includes(key)) || input.version !== 'external-runtime-config-v1'
       || input.descriptorId !== 'openai-compatible-chat-v1') throw new Error('invalid external runtime config');
   const baseUrl = validateEndpoint(input.baseUrl);
+  const socketPath = input.socketPath === undefined ? null : path.posix.normalize(String(input.socketPath));
+  if (socketPath && (!socketPath.startsWith('/run/tech-persistence-provider-broker/') || !socketPath.endsWith('/responses.sock'))) {
+    throw new Error('external broker socket path is invalid');
+  }
   if (typeof input.model !== 'string' || !input.model.trim() || input.model.length > 200) throw new Error('external model is required');
   const canary = readProtectedJson(input.canaryFile, workdir);
   const promotion = readProtectedJson(input.promotionFile, workdir);
@@ -68,11 +72,11 @@ function loadExternalConfig(file, workdir) {
   protectedPath(input.spoolRoot, workdir, true);
   const timeoutMs = input.timeoutMs ?? 30000;
   const maxTokens = input.maxTokens ?? 1024;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120000
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 300000
       || !Number.isSafeInteger(maxTokens) || maxTokens < 1 || maxTokens > 4096) throw new Error('external resource limits are invalid');
   const contextFiles = input.contextFiles || [];
   if (!Array.isArray(contextFiles) || contextFiles.length > 16 || contextFiles.some((item) => typeof item !== 'string' || path.isAbsolute(item) || /(^|[\\/])\.\.([\\/]|$)/.test(item))) throw new Error('external contextFiles must be bounded relative paths');
-  const config = { ...input, baseUrl, timeoutMs, maxTokens, contextFiles, promotion, canary };
+  const config = { ...input, baseUrl, socketPath, timeoutMs, maxTokens, contextFiles, promotion, canary };
   return { ...config, configHash: stableHash(config) };
 }
 function stages(options = {}) {

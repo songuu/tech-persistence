@@ -26,7 +26,7 @@ function pathInside(root, candidate) {
   return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
-function resolveDirectories(workdirValue, runDirValue) {
+function resolveDirectories(workdirValue, runDirValue, authorityRunsRootValue) {
   if (!runDirValue) throw new Error('validation runner requires runDir');
   const workdir = path.resolve(workdirValue || process.cwd());
   let workdirStat;
@@ -38,14 +38,17 @@ function resolveDirectories(workdirValue, runDirValue) {
   if (!workdirStat.isDirectory()) throw new Error(`validation workdir is not a directory: ${workdir}`);
 
   const runDir = path.resolve(runDirValue);
-  if (!pathInside(workdir, runDir)) {
-    throw new Error(`validation runDir must stay inside workdir: ${runDir}`);
+  const authorityRunsRoot = authorityRunsRootValue ? path.resolve(authorityRunsRootValue) : null;
+  if (!pathInside(workdir, runDir) && (!authorityRunsRoot || !pathInside(authorityRunsRoot, runDir))) {
+    throw new Error(`validation runDir must stay inside workdir or the authority runs root: ${runDir}`);
   }
   fs.mkdirSync(runDir, { recursive: true });
   const realWorkdir = fs.realpathSync(workdir);
   const realRunDir = fs.realpathSync(runDir);
-  if (!pathInside(realWorkdir, realRunDir)) {
-    throw new Error(`validation runDir must stay inside workdir: ${runDir}`);
+  const realAuthorityRunsRoot = authorityRunsRoot ? fs.realpathSync(authorityRunsRoot) : null;
+  if (!pathInside(realWorkdir, realRunDir)
+      && (!realAuthorityRunsRoot || !pathInside(realAuthorityRunsRoot, realRunDir))) {
+    throw new Error(`validation runDir must stay inside workdir or the authority runs root: ${runDir}`);
   }
 
   const logsDir = path.join(realRunDir, 'logs');
@@ -153,7 +156,7 @@ function runValidationCommands(commandsValue, options = {}) {
   const now = typeof options.now === 'function' ? options.now : () => new Date().toISOString();
   const spawnSyncImpl = options.spawnSyncImpl || spawnSync;
   if (typeof spawnSyncImpl !== 'function') throw new Error('validation spawnSyncImpl must be a function');
-  const { workdir, runDir, logsDir } = resolveDirectories(options.workdir, options.runDir);
+  const { workdir, runDir, logsDir } = resolveDirectories(options.workdir, options.runDir, options.authorityRunsRoot);
 
   const startedAt = now();
   const decisions = commands.map((command) => (

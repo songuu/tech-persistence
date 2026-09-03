@@ -89,10 +89,10 @@ try {
 
 Write-Host ''
 Write-Host '→ 更新 plugin...'
-claude plugin update 'tech-persistence@tech-persistence-local' --yes
+claude plugin update 'tech-persistence@tech-persistence-local'
 if ($LASTEXITCODE -ne 0) {
   Write-Host '  (尚未安装或更新不可用，改为安装...)'
-  claude plugin install 'tech-persistence@tech-persistence-local' --yes
+  claude plugin install 'tech-persistence@tech-persistence-local'
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 

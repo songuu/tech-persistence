@@ -370,13 +370,14 @@ function normalizeCodexOutput(input = {}) {
     usage,
     events,
   };
-  try {
-    normalizedResult.payload = input.lastMessage && String(input.lastMessage).trim()
-      ? parseJson(input.lastMessage, 'Codex last message')
-      : null;
-  } catch (error) {
-    error.runtimeResult = normalizedResult;
-    throw error;
+  normalizedResult.payload = null;
+  if (input.lastMessage && String(input.lastMessage).trim()) {
+    try {
+      normalizedResult.payload = parseJson(input.lastMessage, 'Codex last message');
+    } catch (_) {
+      // The orchestration layer owns bounded JSON extraction and schema validation.
+      // Keeping payload null makes that existing fail-closed path reachable.
+    }
   }
   return normalizedResult;
 }

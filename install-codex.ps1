@@ -20,6 +20,8 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $HomeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
 $CodexHome = Join-Path $HomeDir ".codex"
+$CodexPluginCli = Join-Path $CodexHome "plugins\.plugin-appserver\codex.exe"
+if (-not (Test-Path -LiteralPath $CodexPluginCli)) { $CodexPluginCli = "codex" }
 $HomunculusDir = Join-Path $CodexHome "homunculus"
 $AgentsPluginsDir = Join-Path $HomeDir ".agents\plugins"
 $UserPluginsRoot = Join-Path $HomeDir "plugins"
@@ -476,7 +478,7 @@ function Update-Marketplace {
 
 function Register-CodexMarketplace {
     try {
-        & codex plugin marketplace add $HomeDir --json | Out-Host
+        & $CodexPluginCli plugin marketplace add $HomeDir --json | Out-Host
         if ($LASTEXITCODE -ne 0) { throw "Codex marketplace registration exited $LASTEXITCODE" }
         Write-OK "codex marketplace registered: $HomeDir"
     } catch {
@@ -485,7 +487,7 @@ function Register-CodexMarketplace {
 }
 
 function Refresh-CodexPluginCache {
-    & codex plugin add "$PluginName@local-plugins" --json | Out-Host
+    & $CodexPluginCli plugin add "$PluginName@local-plugins" --json | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "Codex canonical plugin cache refresh failed"
     }
@@ -510,7 +512,7 @@ function Repair-CodexRuntime {
 }
 
 function Get-CodexPluginOwnerStatus {
-    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+    if (-not (Get-Command $CodexPluginCli -ErrorAction SilentlyContinue)) {
         return [pscustomobject]@{ Available = $false; OwnerCount = 0; PluginIds = @() }
     }
     if (-not (Test-Path $DoctorScript)) { throw "Missing Codex runtime doctor: $DoctorScript" }

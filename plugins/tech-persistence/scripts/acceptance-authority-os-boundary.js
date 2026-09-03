@@ -125,7 +125,7 @@ function evaluateBoundarySnapshot(snapshot) {
   );
   add(
     'launcher-minimal-capabilities',
-    JSON.stringify(snapshot.launcherCapabilities) === JSON.stringify(['cap_setgid', 'cap_setuid']),
+    JSON.stringify(snapshot.launcherCapabilities) === JSON.stringify(['cap_kill', 'cap_setgid', 'cap_setuid']),
     snapshot.launcherCapabilities
   );
 

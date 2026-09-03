@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { defaultRunCodex } = require('./codex-plugin-cli');
 
 const PLUGIN_NAME = 'tech-persistence';
 const DEFAULT_CANONICAL_PLUGIN_ID = 'tech-persistence@local-plugins';
@@ -1852,17 +1853,6 @@ function applyRepairPlan(plan, options = {}) {
   } catch (error) {
     throw compensateRepair(plan, runCodex, journal, manifest, error);
   }
-}
-
-function defaultRunCodex(args) {
-  const npmCli = process.platform === 'win32' && process.env.APPDATA
-    ? path.join(process.env.APPDATA, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
-    : null;
-  const command = npmCli && fs.existsSync(npmCli) ? process.execPath : 'codex';
-  const commandArgs = command === process.execPath ? [npmCli, ...args] : args;
-  return spawnSync(command, commandArgs, {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
-  });
 }
 
 function readPluginListWithCodex() {

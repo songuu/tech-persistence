@@ -7,6 +7,10 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const {
+  defaultRunCodex,
+  resolveCodexInvocation,
+} = require('./codex-plugin-cli');
+const {
   hashPath,
   normalizePluginOwners,
 } = require('./codex-runtime-doctor');
@@ -1079,38 +1083,6 @@ function marketplaceSnapshot(value, marketplaceName) {
       ? entry.marketplaceSource.sourceType
       : 'local',
   };
-}
-
-function resolveCodexInvocation(options = {}) {
-  const platform = options.platform || process.platform;
-  const environment = options.env || process.env;
-  const fileExists = options.existsSync || fs.existsSync;
-  const nodeExecutable = options.execPath || process.execPath;
-  const npmCli = platform === 'win32' && environment.APPDATA
-    ? path.join(
-      environment.APPDATA,
-      'npm',
-      'node_modules',
-      '@openai',
-      'codex',
-      'bin',
-      'codex.js'
-    )
-    : null;
-  if (npmCli && fileExists(npmCli)) {
-    return { command: nodeExecutable, argsPrefix: [npmCli], source: 'windows-npm-cli' };
-  }
-  return { command: 'codex', argsPrefix: [], source: 'path-fallback' };
-}
-
-function defaultRunCodex(args, options = {}) {
-  const invocation = resolveCodexInvocation(options);
-  const spawn = options.spawnSync || spawnSync;
-  return spawn(invocation.command, [...invocation.argsPrefix, ...args], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
 }
 
 function probeOwners(runCodex, commands, step) {
@@ -2203,22 +2175,40 @@ function assertRollbackPlanCanonicalStates(manifest) {
   return recoveryIndex;
 }
 
-function verifyRollbackControlSurfaces(manifest, manifestPath, runCodex, label) {
+function verifyRollbackControlSurfaces(manifest, manifestPath, runCodex, label, options = {}) {
   assertTransactionBoundaries(manifest.inputs, manifest.transactionRoot);
   const owners = probeOwners(runCodex, manifest.rollbackResults, `${label}-owners`);
   const expectedOwners = ownerMetadataOnly(manifest.pre.runtimeState.owners);
-  if (!ownersMatch(owners, expectedOwners)) {
-    throw new Error(
-      `rollback owner metadata drift: expected=${JSON.stringify(expectedOwners)} actual=${JSON.stringify(owners)}`
-    );
-  }
   const registration = probeMarketplace(
     runCodex,
     manifest.inputs.marketplaceName,
     manifest.rollbackResults,
     `${label}-marketplace`
   );
-  if (!registrationsMatch(registration, manifest.pre.runtimeState.marketplaceRegistration)) {
+  const marketplaceRestore = manifest.rollbackPlan?.operations?.find(
+    (entry) => entry.step === 'restore-marketplace-file'
+  );
+  const claimedMarketplaceGap = Boolean(
+    options.allowClaimedMarketplaceGap
+    && registration === null
+    && marketplaceRestore?.operation?.status === 'claimed'
+    && operationCanonicalState(marketplaceRestore.operation).claimed
+  );
+  const expectedOwnersDuringGap = expectedOwners.filter(
+    (owner) => !owner.pluginId.endsWith(`@${manifest.inputs.marketplaceName}`)
+  );
+  if (
+    !ownersMatch(owners, expectedOwners)
+    && !(claimedMarketplaceGap && ownersMatch(owners, expectedOwnersDuringGap))
+  ) {
+    throw new Error(
+      `rollback owner metadata drift: expected=${JSON.stringify(expectedOwners)} actual=${JSON.stringify(owners)}`
+    );
+  }
+  if (
+    !registrationsMatch(registration, manifest.pre.runtimeState.marketplaceRegistration)
+    && !claimedMarketplaceGap
+  ) {
     throw new Error(
       `rollback marketplace registration drift: expected=${JSON.stringify(manifest.pre.runtimeState.marketplaceRegistration)} actual=${JSON.stringify(registration)}`
     );
@@ -2367,7 +2357,13 @@ function resumeDurableRollback(manifestPath, manifest, options = {}) {
       const [step, snapshot] = snapshots[index];
       const entry = manifest.rollbackPlan.operations[index];
       verifySnapshot(snapshot);
-      verifyRollbackControlSurfaces(manifest, manifestPath, runCodex, `resume-${step}`);
+      verifyRollbackControlSurfaces(
+        manifest,
+        manifestPath,
+        runCodex,
+        `resume-${step}`,
+        { allowClaimedMarketplaceGap: true }
+      );
       assertRollbackPlanCanonicalStates(manifest);
       if (entry.operation.status === 'complete') {
         if (!entry.result) {
@@ -2399,7 +2395,8 @@ function resumeDurableRollback(manifestPath, manifest, options = {}) {
             manifest,
             manifestPath,
             runCodex,
-            `pre-mutation-${step}-${mutationPhase}`
+            `pre-mutation-${step}-${mutationPhase}`,
+            { allowClaimedMarketplaceGap: true }
           );
           assertRollbackPlanCanonicalStates(manifest);
         },

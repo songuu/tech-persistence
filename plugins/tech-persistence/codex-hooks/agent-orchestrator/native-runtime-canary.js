@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { stableHash } = require('./runtime-capabilities');
+const { requestText } = require('../lib/loopback-http');
 
 const CASES = Object.freeze([
   'cold-start', 'structured-output', 'terminal-success', 'terminal-failure',
@@ -15,17 +16,11 @@ function sha256(value) {
 }
 
 async function requestJson(url, init = {}, timeoutMs = 15000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    const text = await response.text();
-    let body = null;
-    try { body = text ? JSON.parse(text) : null; } catch {}
-    return { status: response.status, ok: response.ok, body, bodyHash: sha256(text) };
-  } finally {
-    clearTimeout(timer);
-  }
+  const response = await requestText(url, { method: init.method, headers: init.headers, body: init.body,
+    timeoutMs, maxBytes: 512 * 1024 });
+  let body = null;
+  try { body = response.text ? JSON.parse(response.text) : null; } catch {}
+  return { status: response.status, ok: response.ok, body, bodyHash: sha256(response.text) };
 }
 
 function caseResult(id, passed, evidence = {}) {

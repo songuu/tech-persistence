@@ -26,6 +26,25 @@ const {
 } = require('./update-codex-marketplace');
 
 {
+  const userProfile = path.join('C:\\', 'Users', 'tester');
+  const appserverCli = path.join(
+    userProfile,
+    '.codex',
+    'plugins',
+    '.plugin-appserver',
+    'codex.exe'
+  );
+  const appserver = resolveCodexInvocation({
+    platform: 'win32',
+    env: { USERPROFILE: userProfile, APPDATA: path.join(userProfile, 'AppData', 'Roaming') },
+    existsSync: (candidate) => candidate === appserverCli,
+  });
+  assert.deepStrictEqual(appserver, {
+    command: appserverCli,
+    argsPrefix: [],
+    source: 'windows-plugin-appserver-cli',
+  });
+
   const appData = path.join('C:\\', 'Users', 'tester', 'AppData', 'Roaming');
   const expectedCli = path.join(
     appData,
@@ -571,6 +590,70 @@ for (const failureStep of ['target', 'marketplace-file']) {
     assert.ok(!fs.existsSync(path.join(fixture.evidenceRoot, 'active-user-install.json')), failureStep);
   });
 }
+
+withFixture((fixture) => {
+  const manifestPath = prepareAndActivate(fixture);
+  completeMarketplaceFileCheckpoint(fixture, manifestPath);
+  const marketplaceAwareRunCodex = (args) => {
+    if (fs.existsSync(fixture.marketplacePath)) return fixture.runCodex(args);
+    fixture.state.commands.push([...args]);
+    if (args.join(' ') === 'plugin list --json') {
+      return { status: 0, stdout: JSON.stringify({ installed: [] }), stderr: '' };
+    }
+    if (args.join(' ') === 'plugin marketplace list --json') {
+      return { status: 0, stdout: JSON.stringify({ marketplaces: [] }), stderr: '' };
+    }
+    return { status: 99, stdout: '', stderr: `unexpected command while marketplace is claimed: ${args.join(' ')}` };
+  };
+  const result = rollbackTransaction(manifestPath, {
+    runCodex: marketplaceAwareRunCodex,
+    reason: 'marketplace-backed owner temporarily disappears during atomic file restore',
+  });
+  assert.strictEqual(result.manifest.state, 'rolled-back');
+  assert.strictEqual(readPluginVersion(fixture.target), '0.9.0');
+  assert.strictEqual(fs.readFileSync(fixture.marketplacePath, 'utf8'), fixture.oldMarketplaceText);
+});
+
+withFixture((fixture) => {
+  const manifestPath = prepareAndActivate(fixture);
+  completeMarketplaceFileCheckpoint(fixture, manifestPath);
+  const marketplaceAwareRunCodex = (args) => {
+    if (fs.existsSync(fixture.marketplacePath)) return fixture.runCodex(args);
+    fixture.state.commands.push([...args]);
+    if (args.join(' ') === 'plugin list --json') {
+      return { status: 0, stdout: JSON.stringify({ installed: [] }), stderr: '' };
+    }
+    if (args.join(' ') === 'plugin marketplace list --json') {
+      return { status: 0, stdout: JSON.stringify({ marketplaces: [] }), stderr: '' };
+    }
+    return { status: 99, stdout: '', stderr: `unexpected command while marketplace is claimed: ${args.join(' ')}` };
+  };
+  assert.throws(
+    () => rollbackTransaction(manifestPath, {
+      runCodex: marketplaceAwareRunCodex,
+      reason: 'interrupt marketplace restore after its durable claim',
+      afterRestoreClaim(step) {
+        if (step === 'restore-marketplace-file') throw new Error('injected marketplace claim interruption');
+      },
+    }),
+    /rollback failed closed/
+  );
+  const interrupted = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  assert.strictEqual(interrupted.rollbackPlan.operations[0].operation.status, 'complete');
+  assert.strictEqual(interrupted.rollbackPlan.operations[1].operation.status, 'claimed');
+  const abandonedPid = deadChildPid();
+  const interruptedLock = JSON.parse(fs.readFileSync(interrupted.lockPath, 'utf8'));
+  interrupted.ownerPid = abandonedPid;
+  interruptedLock.pid = abandonedPid;
+  fs.writeFileSync(manifestPath, `${JSON.stringify(interrupted, null, 2)}\n`);
+  fs.writeFileSync(interrupted.lockPath, `${JSON.stringify(interruptedLock, null, 2)}\n`);
+  const resumed = reconcileTransaction(manifestPath, {
+    runCodex: marketplaceAwareRunCodex,
+    reason: 'resume a later claimed operation after earlier operations completed',
+  });
+  assert.strictEqual(resumed.manifest.state, 'rolled-back');
+  assert.strictEqual(fs.readFileSync(fixture.marketplacePath, 'utf8'), fixture.oldMarketplaceText);
+});
 
 withFixture((fixture) => {
   const manifestPath = prepareAndActivate(fixture);

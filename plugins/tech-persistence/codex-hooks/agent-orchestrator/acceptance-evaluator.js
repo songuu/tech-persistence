@@ -562,13 +562,25 @@ function writeAcceptanceContractForGlobalContract(runDir, globalContract, option
     'global-contract.json#/globalAcceptance', options);
 }
 
-function assertRunWithinWorkdir(workdirValue, runDirValue) {
+function isContained(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function assertRunWithinWorkdir(workdirValue, runDirValue, controlStoreOptions = {}) {
   const workdir = path.resolve(requiredString(workdirValue, 'workdir'));
   const runDir = path.resolve(requiredString(runDirValue, 'runDir'));
   const realWorkdir = fs.realpathSync.native(workdir);
   const realRunDir = fs.realpathSync.native(runDir);
-  const relative = path.relative(realWorkdir, realRunDir);
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+  if (!isContained(realWorkdir, realRunDir)) {
+    const controlRoot = path.resolve(requiredString(controlStoreOptions.controlRoot, 'controlRoot'));
+    const realControlRoot = fs.realpathSync.native(controlRoot);
+    const realRunsRoot = fs.realpathSync.native(path.join(path.dirname(realControlRoot), 'runs'));
+    if (path.basename(realControlRoot) !== 'control' || !isContained(realRunsRoot, realRunDir)) {
+      throw new Error('acceptance runDir must stay inside workdir or the authority runs root');
+    }
+  }
+  if (!fs.statSync(realRunDir).isDirectory()) {
     throw new Error('acceptance runDir must stay inside workdir');
   }
   return { workdir: realWorkdir, runDir: realRunDir };
@@ -576,7 +588,7 @@ function assertRunWithinWorkdir(workdirValue, runDirValue) {
 
 function captureArtifactBaselines(input = {}) {
   const contract = acceptance.assertAcceptanceContract(input.contract);
-  const directories = assertRunWithinWorkdir(input.workdir, input.runDir);
+  const directories = assertRunWithinWorkdir(input.workdir, input.runDir, input.controlStoreOptions);
   if (!input.controlStoreOptions) {
     throw new Error('artifact baseline requires external control store options');
   }
@@ -677,7 +689,7 @@ function assertArtifactSnapshot(value) {
 function sealArtifactEvidence(input = {}) {
   const contract = acceptance.assertAcceptanceContract(input.contract);
   const subjectHash = validateHash(input.subjectHash, 'subjectHash');
-  const directories = assertRunWithinWorkdir(input.workdir, input.runDir);
+  const directories = assertRunWithinWorkdir(input.workdir, input.runDir, input.controlStoreOptions);
   if (!input.controlStoreOptions) {
     throw new Error('artifact seal requires external control store options');
   }
@@ -854,7 +866,7 @@ function sealReadbackEvidence(input = {}) {
   const criteria = contract.criteria.filter((criterion) => criterion.oracle.type === 'readback');
   if (criteria.length === 0 || !input.controlStoreOptions
       || !input.controlStoreOptions.readbackBrokerPath) return null;
-  const directories = assertRunWithinWorkdir(input.workdir, input.runDir);
+  const directories = assertRunWithinWorkdir(input.workdir, input.runDir, input.controlStoreOptions);
   const broker = canonicalExistingFileOutsideProviderRoot(
     input.controlStoreOptions.readbackBrokerPath,
     input.controlStoreOptions.providerRoot || directories.workdir,
@@ -980,7 +992,7 @@ function sealIndependentReviewEvidence(input = {}) {
   );
   if (criteria.length === 0 || !input.controlStoreOptions
       || !input.controlStoreOptions.independentReviewBrokerPath) return null;
-  const directories = assertRunWithinWorkdir(input.workdir, input.runDir);
+  const directories = assertRunWithinWorkdir(input.workdir, input.runDir, input.controlStoreOptions);
   const broker = canonicalExistingFileOutsideProviderRoot(
     input.controlStoreOptions.independentReviewBrokerPath,
     input.controlStoreOptions.providerRoot || directories.workdir,
@@ -1132,7 +1144,7 @@ function sealUserConfirmationEvidence(input = {}) {
   );
   if (criteria.length === 0 || !input.controlStoreOptions
       || !input.controlStoreOptions.userConfirmationBrokerPath) return null;
-  const directories = assertRunWithinWorkdir(input.workdir, input.runDir);
+  const directories = assertRunWithinWorkdir(input.workdir, input.runDir, input.controlStoreOptions);
   const broker = canonicalExistingFileOutsideProviderRoot(
     input.controlStoreOptions.userConfirmationBrokerPath,
     input.controlStoreOptions.providerRoot || directories.workdir,
@@ -1243,7 +1255,7 @@ function receiptAuthorityFiles(runDir, options) {
 function recordAcceptanceCohortTombstone(input = {}) {
   const runDir = path.resolve(input.runDir || '');
   try {
-    const directories = assertRunWithinWorkdir(input.workdir, runDir);
+    const directories = assertRunWithinWorkdir(input.workdir, runDir, input.controlStoreOptions);
     if (!input.controlStoreOptions || !input.controlStoreOptions.cohortTombstoneBrokerPath) {
       throw new Error('acceptance cohort tombstone requires an external lifecycle broker');
     }
@@ -1363,7 +1375,7 @@ function recordAcceptanceContract(input = {}) {
   const runDir = path.resolve(requiredString(input.runDir, 'runDir'));
   let errorFile = null;
   try {
-    if (input.workdir) assertRunWithinWorkdir(input.workdir, runDir);
+    if (input.workdir) assertRunWithinWorkdir(input.workdir, runDir, input.controlStoreOptions);
     errorFile = resolveRunRelative(runDir, '.', 'acceptance-contract.error.json');
     const contract = input.kind === 'global-contract'
       ? writeAcceptanceContractForGlobalContract(runDir, input.source, { allowRevision: input.allowRevision === true })
@@ -1484,7 +1496,7 @@ function commandRuntimeEvidence(input, criterion) {
 
 function sealValidationEvidence(input = {}) {
   const contract = acceptance.assertAcceptanceContract(input.contract);
-  const directories = assertRunWithinWorkdir(input.workdir, input.runDir);
+  const directories = assertRunWithinWorkdir(input.workdir, input.runDir, input.controlStoreOptions);
   const validation = input.validation;
   const workspaceSnapshot = input.workspaceSnapshot;
   if (!isPlainObject(workspaceSnapshot)
@@ -1997,7 +2009,7 @@ function mergeRuntimeEvidence(contract, evidenceMaps) {
 function resolveRuntimeEvidence(input = {}) {
   const contract = acceptance.assertAcceptanceContract(input.contract);
   validateHash(input.subjectHash, 'subjectHash');
-  const directories = assertRunWithinWorkdir(input.workdir, input.runDir);
+  const directories = assertRunWithinWorkdir(input.workdir, input.runDir, input.controlStoreOptions);
   const workdir = directories.workdir;
   const runDir = directories.runDir;
   const relativeDir = input.relativeDir || '.';
@@ -2243,7 +2255,7 @@ function recordShadowAcceptance(input = {}) {
   const relativeDir = input.relativeDir || '.';
   if (input.workdir) {
     try {
-      assertRunWithinWorkdir(input.workdir, runDir);
+      assertRunWithinWorkdir(input.workdir, runDir, input.controlStoreOptions);
     } catch (error) {
       return { status: 'error', error: redactSensitiveText(error.message) };
     }

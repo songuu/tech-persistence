@@ -18,6 +18,10 @@ const transactionHelper = fs.readFileSync(
   path.join(repoRoot, 'scripts', 'codex-user-install-transaction.js'),
   'utf8'
 );
+const pluginCliHelper = fs.readFileSync(
+  path.join(repoRoot, 'scripts', 'codex-plugin-cli.js'),
+  'utf8'
+);
 const jsonAssetHelper = fs.readFileSync(
   path.join(repoRoot, 'scripts', 'install-codex-json-asset.js'),
   'utf8'
@@ -62,7 +66,8 @@ assert.ok(source.includes('$TextAssetInstallScript = Join-Path $ScriptDir "scrip
 assert.ok(source.includes('Codex text asset compare-and-swap failed'), 'PowerShell text projection must fail closed on CAS conflicts');
 assert.ok(textAssetHelper.includes('readTargetExpectation(target)'), 'text asset helper must capture target raw/hash state');
 assert.ok(textAssetHelper.includes('publishTextCompareAndSwap(target, converted, expectation'), 'text asset helper must bind publication to the captured target state');
-assert.ok(source.includes('codex plugin marketplace add $HomeDir'), 'canonical marketplace root must be the user home');
+assert.ok(source.includes('$CodexPluginCli = Join-Path $CodexHome "plugins\\.plugin-appserver\\codex.exe"'), 'PowerShell must prefer the Codex Desktop plugin CLI');
+assert.ok(source.includes('& $CodexPluginCli plugin marketplace add $HomeDir --json'), 'canonical marketplace root must be the user home');
 assert.ok(source.includes('--fix --install-canonical'), 'explicit user installer must invoke the safe runtime repair');
 assert.ok(source.includes('--plugin-owner-status --json'), 'project installer must probe plugin ownership');
 assert.ok(source.includes('Join-Path $PluginSource "codex-skills"'), 'project fallback must use Codex-native skills');
@@ -80,7 +85,8 @@ assert.ok(!source.includes('$RepoAgentsPluginsDir'), 'installer must not maintai
 assert.ok(source.includes('function Install-CodexPluginBundle'), 'plugin refresh must use an isolated installer function');
 assert.ok(source.includes('Staged plugin fingerprint mismatch'), 'plugin stage must be fingerprint-verified');
 assert.ok(source.includes('Refresh-CodexPluginCache'), 'installer must refresh the installed canonical plugin cache');
-assert.ok(source.includes('plugin add "$PluginName@local-plugins" --json'), 'cache refresh must use the official Codex plugin command');
+assert.ok(source.includes('& $CodexPluginCli plugin add "$PluginName@local-plugins" --json'), 'cache refresh must use the resolved official Codex plugin command');
+assert.ok(transactionHelper.includes("require('./codex-plugin-cli')"), 'transaction helper must share the Codex plugin CLI resolver');
 assert.ok(source.includes('Test-SameCodexPluginBundle'), 'Codex bundle must have a runtime-specific fingerprint');
 assert.ok(source.includes('Remove-Item -LiteralPath $legacyCommands'), 'Codex bundle must omit legacy commands before activation');
 assert.ok(source.includes('Existing plugin backed up to $backup'), 'plugin activation must retain a backup');
@@ -191,9 +197,10 @@ assert.ok(transactionHelper.includes('rollback ownership gate'), 'rollback must 
 assert.ok(transactionHelper.includes('no version/source CAS'), 'rollback must expose the official CLI CAS limitation as evidence');
 assert.ok(transactionHelper.includes("recoverySurfaces.push('marketplaceRegistration')"), 'irreversible marketplace registration drift must become recovery-required evidence');
 assert.ok(transactionHelper.includes("checkpoint.phase !== 'doctor'"), 'commit must require the final doctor checkpoint');
-assert.ok(transactionHelper.includes("path.join(\n      environment.APPDATA"), 'Windows transaction CLI must resolve the npm Codex entrypoint');
-assert.ok(transactionHelper.includes("command: nodeExecutable"), 'Windows transaction CLI must use process.execPath for the verified Codex entrypoint');
-assert.ok(transactionHelper.includes("source: 'path-fallback'"), 'PATH fallback must remain available when the verified entrypoint is absent');
+assert.ok(pluginCliHelper.includes("'.plugin-appserver', 'codex.exe'"), 'Windows plugin operations must prefer the Codex Desktop plugin CLI');
+assert.ok(pluginCliHelper.includes("path.join(\n      environment.APPDATA"), 'Windows plugin CLI resolver must retain the npm Codex fallback');
+assert.ok(pluginCliHelper.includes("command: nodeExecutable"), 'Windows npm fallback must use process.execPath for the verified Codex entrypoint');
+assert.ok(pluginCliHelper.includes("source: 'path-fallback'"), 'PATH fallback must remain available when verified entrypoints are absent');
 assert.ok(!source.includes('[System.IO.File]::Replace('), 'PowerShell text projection must not retain the pre-CAS File.Replace path');
 assert.ok(textAssetHelper.includes('expectedSha256: expectation.sha256'), 'text asset result must retain the captured SHA256 evidence');
 assert.ok(textAssetHelper.includes('retainExpectedBackup(target, expectation)'), 'text asset backup must come from captured raw bytes');
