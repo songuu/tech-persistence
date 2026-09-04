@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const {
   advanceActiveSprint,
   blockActiveSprint,
@@ -9,6 +11,21 @@ const {
   readActiveSprint,
   sprintStateError,
 } = require('./lib/codex-active-sprint');
+
+function loadSprintAcceptanceAdapter() {
+  const candidates = [
+    path.join(__dirname, 'lib', 'codex-sprint-acceptance.js'),
+    path.resolve(__dirname, '..', '..', '..', 'scripts', 'lib', 'codex-sprint-acceptance.js'),
+  ];
+  const adapter = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!adapter) {
+    throw sprintStateError(
+      'SPRINT_ACCEPTANCE_REQUIRED',
+      'explicit Harness acceptance adapter is unavailable'
+    );
+  }
+  return require(adapter);
+}
 
 const COMMAND_OPTIONS = Object.freeze({
   status: new Set(),
@@ -105,7 +122,7 @@ function main(argv = process.argv.slice(2), cwd = process.cwd()) {
         'bind-acceptance requires an active v1 sprint'
       );
     }
-    return require('./lib/codex-sprint-acceptance').bindSprintAcceptance({
+    return loadSprintAcceptanceAdapter().bindSprintAcceptance({
       cwd,
       plan: active.plan,
       runDir: options['run-dir'],

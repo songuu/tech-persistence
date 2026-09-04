@@ -33,7 +33,7 @@ node <cli> complete --expected compound
 
 CLI 以持久 transaction、move-verify claim、exclusive-link 和 token/inode 锁实现 CAS；裸写（含预开 FD）属外部破坏。只允许 `think->plan->work->review->compound` 与 `review->work`；冲突停下重读。`SPRINT_STATE_LOCKED` 不按年龄删除，核验 owner 后仅用户/运维清 orphan。
 
-新 pointer 使用 `acceptance_protocol=v1`：`plan->work` 前绑定同内容的 frozen Harness Contract，`review->compound` 前从外部 authority 读回其 `passed` Receipt。旧 pointer 仅按 `legacy` 打开；transition 中断只幂等重试原命令。
+新 pointer 使用 `acceptance_protocol=v1`；Harness 是显式可选增强，未绑定时由当前宿主推进。只有用户显式 `bind-acceptance` 后才启用 Contract/Receipt 外部门，绑定存在则失败闭合。详见 `runtime-portability.md`。旧 pointer 按 `legacy` 打开。
 
 ## 启动与恢复
 

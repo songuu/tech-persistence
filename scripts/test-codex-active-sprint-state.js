@@ -164,6 +164,47 @@ test('init refuses to replace an active pointer', () => withWorkspace((root) => 
   assert.strictEqual(fs.readFileSync(path.join(root, sprint.POINTER_RELATIVE_PATH), 'utf8'), before);
 }));
 
+test('unbound v1 sprint resumes from blocked plan without requiring Harness', () => withWorkspace((root) => {
+  const plan = writePlan(root);
+  sprint.initActiveSprint({
+    cwd: root,
+    plan,
+    restorePhase: 'plan',
+    next: 'Plan',
+    acceptanceProtocol: 'v1',
+  });
+  sprint.blockActiveSprint({
+    cwd: root,
+    expectedPhase: 'plan',
+    reason: 'optional Harness is unavailable',
+    next: 'Continue with current host',
+  });
+
+  sprint.advanceActiveSprint({
+    cwd: root,
+    expectedPhase: 'plan',
+    toPhase: 'work',
+    next: 'Implement with current host',
+  });
+  sprint.advanceActiveSprint({
+    cwd: root,
+    expectedPhase: 'work',
+    toPhase: 'review',
+    next: 'Review with current host',
+  });
+  sprint.advanceActiveSprint({
+    cwd: root,
+    expectedPhase: 'review',
+    toPhase: 'compound',
+    next: 'Compound verified results',
+  });
+
+  const active = sprint.readActiveSprint(root);
+  assert.strictEqual(active.phase, 'compound');
+  assert.strictEqual(active.status, 'active');
+  assert.strictEqual(active.acceptanceProtocol, 'v1');
+}));
+
 test('init requires a bounded regular plan', () => withWorkspace((root) => {
   expectCode(
     () => sprint.initActiveSprint({ cwd: root, plan: 'docs/plans/missing.md', next: 'Nope' }),

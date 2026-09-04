@@ -87,6 +87,8 @@ sprintTranscriptBound=<true|false>
 
 判定保持失败闭合：Acceptance 只有绑定时是 `acceptance-bound`，不能算实际 Harness 执行；只有 provider run/权威 Receipt 才令 `harnessUsed=true`。当前宿主 Transcript 在没有 active Sprint 时显示 `unbound-local` 或 `unbound-synced`，不能归到任一 Sprint。`queued`、`partial`、`postgres-pending`、`postgres-unavailable` 均不能算完整同步。PostgreSQL 只允许 reader URL，并验证 `transaction_read_only=true`；摘要不输出密码、token 或带口令 URL。
 
+`acceptance_protocol=v1` 本身不选择 Harness，也不阻塞当前宿主。Harness Acceptance 是显式可选增强：只有用户显式选择并成功 `bind-acceptance` 后，才要求 frozen Contract 与外部 `passed` Receipt；未绑定时继续使用当前宿主的 Plan、测试与 Review gate。不得因缺少 Claude、Codex、Harness、登录态或外部 Receipt 阻塞未绑定的普通 Sprint。
+
 ## 项目文档贯穿全流程
 
 整个 sprint 共用一个文档。路径：`docs/plans/YYYY-MM-DD-<需求简写>.md`

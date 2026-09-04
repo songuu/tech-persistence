@@ -50,6 +50,9 @@ for (const [skillPath, referencePath] of [
 }
 
 for (const skillRoot of ['codex-native/skills/sprint', 'plugins/tech-persistence/codex-skills/sprint']) {
+  const stateMachine = read(`${skillRoot}/SKILL.md`);
+  assert.match(stateMachine, /Harness.*显式.*可选|显式.*Harness.*可选/);
+  assert.doesNotMatch(stateMachine, /plan->work.*前绑定.*frozen Harness Contract/);
   const evidence = read(`${skillRoot}/SKILL.md`) + read(`${skillRoot}/references/evidence.md`);
   assert.match(evidence, /Sprint Runtime Evidence/);
   assert.match(evidence, /unbound-local/);

@@ -2270,15 +2270,17 @@ function advanceActiveSprint({
     if ((snapshot.pointer.acceptance_protocol || 'legacy') === 'v1') {
       const requiresFreeze = expected === 'plan' && target === 'work';
       const requiresPassedReceipt = expected === 'review' && target === 'compound';
-      if (requiresFreeze || requiresPassedReceipt) {
+      const planFile = path.resolve(cwd, snapshot.pointer.plan);
+      const hasExplicitHarnessBinding = fs.existsSync(`${planFile}.acceptance.json`);
+      if (hasExplicitHarnessBinding && (requiresFreeze || requiresPassedReceipt)) {
         if (typeof controlRoot !== 'string' || !controlRoot.trim()) {
           throw sprintStateError(
             'SPRINT_ACCEPTANCE_REQUIRED',
-            'v1 sprint transition requires --control-root'
+            'Harness-bound sprint transition requires --control-root'
           );
         }
         try {
-          require('./codex-sprint-acceptance').verifySprintAcceptance({
+          loadSprintAcceptanceAdapter().verifySprintAcceptance({
             cwd,
             plan: snapshot.pointer.plan,
             controlRoot,
@@ -2299,6 +2301,18 @@ function advanceActiveSprint({
     atomicWriteSprintPointer(paths, pointer, snapshot.raw);
     return { action: 'advance', from: expected, to: target, pointer };
   });
+}
+
+function loadSprintAcceptanceAdapter() {
+  const candidates = [
+    path.join(__dirname, 'codex-sprint-acceptance.js'),
+    path.resolve(__dirname, '..', '..', '..', '..', 'scripts', 'lib', 'codex-sprint-acceptance.js'),
+  ];
+  const adapter = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!adapter) {
+    throw new Error('explicit Harness acceptance adapter is unavailable');
+  }
+  return require(adapter);
 }
 
 function blockActiveSprint({ cwd = process.cwd(), expectedPhase, reason, next, now } = {}) {

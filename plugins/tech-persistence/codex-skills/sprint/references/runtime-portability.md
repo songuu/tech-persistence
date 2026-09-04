@@ -13,4 +13,5 @@
 - 非当前 provider 缺失、OAuth 过期或 CLI 未安装，不得阻塞 Sprint。Harness、Transcript 或 provider 品牌名只是任务域词，不触发隐式 backend 切换。
 - 有原生 spawn 就分派；否则 inline/串行执行并报告独立性降级。
 - 外部 backend 只在用户显式选择时 preflight；失败回退当前宿主。
+- `acceptance_protocol=v1` 不是外部 backend 选择信号。只有显式 `bind-acceptance` 产生 plan 邻接的 `.acceptance.json` 后才启用 Harness Contract/Receipt 门；没有绑定时由当前宿主完成 phase 验收，不得因缺 Claude、Harness 或 authority Receipt 阻塞。
 - provider 在副作用前失败可换到满足能力和策略的候选；存在 partial effects 后禁止切换 writer，只能恢复同一 provider 或进入 reconciliation。
