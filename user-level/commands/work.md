@@ -17,6 +17,10 @@ description: "工程师模式：按计划逐步实现；直接描述 bug / bug �
 
 - `--auto`：自动审查模式。每个 Task 完成后是否进入下一个，由模型按风险等级 / 置信度 / 用户行为自主判断。L4 任务、destructive 操作、测试失败、scope 偏离仍强制人工。详见 `~/.claude/rules/auto-mode.md`。
 
+## Sprint Acceptance 边界
+
+`acceptance_protocol=v1` 本身不选择 Harness。只有当前计划已存在由显式 `bind-acceptance` 生成的 `<plan>.acceptance.json` 时，Work 才读回并执行冻结 Contract；未绑定时由当前宿主执行，不得启动 Harness、要求外发授权或因外部 provider 不可用而阻塞。
+
 ## 角色约束
 - ✅ 关注：代码质量、测试覆盖、可维护性、按计划执行
 - ❌ 不关注：需求变更（回退到 /think）、过度优化（YAGNI）

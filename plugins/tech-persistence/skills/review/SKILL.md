@@ -15,6 +15,10 @@ description: "多角度代码审查：安全/性能/架构/质量/测试覆盖(�
 
 - `--auto`：自动审查模式。obvious P0（typo / 缺 import / null check / 类型不匹配 / 简单重命名）直接修复并继续；语义级 P0、destructive 改动相关 P0、auth/数据迁移相关 P0 仍保留人工 gate；P1 默认跳过确认。详见 `~/.claude/rules/auto-mode.md`。
 
+## Sprint Acceptance 边界
+
+`acceptance_protocol=v1` 本身不选择 Harness。只有当前计划已存在由显式 `bind-acceptance` 生成的 `<plan>.acceptance.json` 时，Review 才要求 Harness 按冻结 Contract 生成 authority-owned Receipt；未绑定时由当前宿主完成 Review，不得启动 Harness、要求外发授权或等待外部 Receipt。
+
 ## Spawn 协议（Claude Code 真并行）
 
 **目的**：用 Claude Code Agent tool 真 spawn N 个独立 reviewer 子进程并行审查，达成 3 个核心目标 —— 分工明确（每 reviewer 单一视角）+ 减少总时间（5×T → 1×T）+ 提高效率（独立 context + 模型分层）。

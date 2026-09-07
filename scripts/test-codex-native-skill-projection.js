@@ -93,6 +93,10 @@ function readSkill(name) {
   return fs.readFileSync(path.join(nativeRoot, name, 'SKILL.md'), 'utf8');
 }
 
+function installedByteLength(content) {
+  return Buffer.byteLength(builder.normalizeLf(content), 'utf8');
+}
+
 function runBuilder() {
   const messages = [];
   const originalLog = console.log;
@@ -166,7 +170,7 @@ function assertNativeContracts() {
 
   const sprint = readSkill('sprint');
   for (const reference of ['bootstrap.md', 'resume.md', 'goal-loop.md', 'figma.md', 'runtime-portability.md', 'evidence.md']) {
-  assert(Buffer.byteLength(sprint, 'utf8') < 4096, 'native sprint SKILL.md must stay below 4 KiB');
+    assert(installedByteLength(sprint) < 4096, 'native sprint SKILL.md must stay below 4 KiB');
   assert.match(sprint, /只加载当前 Phase/);
   assert.match(sprint, /不得[^\n]*(?:预热|预读)[^\n]*未来 Phase/);
   assert.match(sprint, /references\/bootstrap\.md/);
@@ -217,7 +221,7 @@ function assertNativeContracts() {
     assert.doesNotMatch(content, /isolation\s*:\s*["']?worktree/i);
   }
   const compound = readSkill('compound');
-  assert(Buffer.byteLength(compound, 'utf8') < 4096, 'native compound SKILL.md must stay below 4 KiB');
+  assert(installedByteLength(compound) < 4096, 'native compound SKILL.md must stay below 4 KiB');
   assert.match(compound, /docs\/solutions\/index\.jsonl/);
   assert.match(compound, /CLAUDE\.md/);
   assert.match(compound, /AGENTS\.md[^\n]*(?:不|禁止|不得)/);
@@ -228,13 +232,13 @@ function assertNativeContracts() {
 
   for (const name of ['think', 'plan']) {
     const content = readSkill(name);
-    assert(Buffer.byteLength(content, 'utf8') < 4096, `native ${name} SKILL.md must stay below 4 KiB`);
+    assert(installedByteLength(content) < 4096, `native ${name} SKILL.md must stay below 4 KiB`);
     assert.doesNotMatch(content, /CRITICAL|不可跳过|Phase 间预热|读取 `\.codex\/rules|检查高置信(?:度)?本能/i);
     assert.match(content, /不(?:扫描|预加载|强制)/);
   }
 
   for (const name of providerSpecificOverrides) {
-    assert(Buffer.byteLength(readSkill(name), 'utf8') < 4096, `${name} Codex override must stay below 4 KiB`);
+    assert(installedByteLength(readSkill(name)) < 4096, `${name} Codex override must stay below 4 KiB`);
   }
 
   const testStrategy = readSkill('test-strategy');

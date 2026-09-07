@@ -7,6 +7,10 @@ description: "复利步骤：沉淀 solution，并将行为经验提交为可审
 融合 Compound Engineering + 本能系统 + Skill 信号 + Obsidian 知识图谱。
 **每次有意义的工作结束后都应执行。**
 
+## Sprint Acceptance 边界
+
+`acceptance_protocol=v1` 本身不选择 Harness。只有当前计划已存在由显式 `bind-acceptance` 生成的 `<plan>.acceptance.json` 时，进入 Compound 前才要求状态 CLI 读回同一 Contract 的 authority-owned `passed` Receipt；未绑定时使用当前宿主的 Plan、测试与 Review 证据，不得启动 Harness 或等待外部 Receipt。
+
 ## Self-learning candidate gate
 
 - `docs/solutions/` 文档及其 canonical index 仍可在 Compound 既有写权限内直接新增/更新；这是

@@ -59,6 +59,54 @@ for (const skillRoot of ['codex-native/skills/sprint', 'plugins/tech-persistence
   assert.match(evidence, /transaction_read_only=true/);
 }
 
+const phaseFiles = ['plan', 'work', 'review', 'compound'];
+const implicitHarnessPattern = /Plan 验收后先由 Agent Harness|活动 Sprint 为 `acceptance_protocol=v1` 时，(?:Work 开始前必须|Review 必须让 Agent Harness|进入 Compound 前必须)/;
+for (const skillRoot of ['codex-native/skills', 'plugins/tech-persistence/codex-skills']) {
+  for (const phase of phaseFiles) {
+    const phaseSkill = read(`${skillRoot}/${phase}/SKILL.md`);
+    assert.match(
+      phaseSkill,
+      /`acceptance_protocol=v1`[^\n]*不选择 Harness/,
+      `${skillRoot}/${phase} must distinguish v1 protocol from explicit Harness selection`
+    );
+    assert.match(
+      phaseSkill,
+      /显式[^\n]*(?:选择|绑定|bind-acceptance)/,
+      `${skillRoot}/${phase} must name the explicit Harness opt-in boundary`
+    );
+    assert.doesNotMatch(
+      phaseSkill,
+      implicitHarnessPattern,
+      `${skillRoot}/${phase} must not treat every v1 Sprint as Harness-bound`
+    );
+  }
+}
+
+for (const phase of phaseFiles) {
+  const command = read(`user-level/commands/${phase}.md`);
+  const pluginSkill = read(`plugins/tech-persistence/skills/${phase}/SKILL.md`);
+  for (const [label, projection] of [
+    [`user-level/commands/${phase}.md`, command],
+    [`plugins/tech-persistence/skills/${phase}/SKILL.md`, pluginSkill],
+  ]) {
+    assert.match(
+      projection,
+      /`acceptance_protocol=v1`[^\n]*不选择 Harness/,
+      `${label} must distinguish v1 protocol from explicit Harness selection`
+    );
+    assert.match(
+      projection,
+      /显式[^\n]*(?:选择|绑定|bind-acceptance)/,
+      `${label} must name the explicit Harness opt-in boundary`
+    );
+    assert.doesNotMatch(
+      projection,
+      implicitHarnessPattern,
+      `${label} must not treat every v1 Sprint as Harness-bound`
+    );
+  }
+}
+
 const agentLoopProjection = read('plugins/tech-persistence/codex-skills/agent-loop/SKILL.md');
 assert.match(agentLoopProjection, /可选执行后端/);
 assert.match(agentLoopProjection, /不会成为.*\/sprint.*前置条件/);

@@ -19,7 +19,9 @@ description: Codex-native risk-scaled architecture and implementation planning w
 
 涉及多 runtime projection、schema、生成器或 tracked 派生文件时，增加 before/after 契约表，并列出所有消费者和一致性测试。
 
-活动 Sprint 为 `acceptance_protocol=v1` 时，成功标准必须写在唯一的 `<!-- acceptance-contract:start -->` / `<!-- acceptance-contract:end -->` checklist 区块。Plan 验收后先由 Agent Harness freeze 同一组 criterion，再运行 `bind-acceptance`；绑定或 authority readback 失败不得进入 Work。
+活动 Sprint 为 `acceptance_protocol=v1` 时，成功标准必须写在唯一的 `<!-- acceptance-contract:start -->` / `<!-- acceptance-contract:end -->` checklist 区块；该协议字段本身不选择 Harness，也不授权把计划发送给外部 provider。
+
+只有用户为**当前 Sprint**显式选择 Harness Acceptance 时，才在 Plan 验收后让 Harness freeze 同一组 criterion，再运行 `bind-acceptance`；`--auto`、需求中的 Harness/Transcript/provider 品牌词、已安装 adapter 或历史偏好都不算显式选择。未选择或尚未成功绑定时，由当前宿主按计划验收并直接进入 Work，不得启动 Harness、要求外发授权或因 Claude/Codex/其他 provider 不可用而阻塞。显式绑定成功后保持失败闭合，绑定或 authority readback 失败不得进入 Work。
 
 ## 输出
 

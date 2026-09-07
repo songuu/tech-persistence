@@ -7,7 +7,7 @@ description: Codex-native implementation workflow using TDD, risk-scaled verific
 
 按已确认的任务边界实施并验证。优先读取当前任务、相关源文件和现有测试；不重新做产品范围决策。
 
-活动 Sprint 为 `acceptance_protocol=v1` 时，Work 开始前必须读回 `<plan>.acceptance.json` 并核对当前计划 acceptance marker 与 frozen Contract；不得自行改 criterion、Oracle、contract hash 或用 agent 自报替代 authority evidence。
+`acceptance_protocol=v1` 本身不选择 Harness。只有当前计划已存在由显式 `bind-acceptance` 生成的 `<plan>.acceptance.json` 时，Work 开始前才必须读回绑定并核对 acceptance marker 与 frozen Contract；不得自行改 criterion、Oracle、contract hash 或用 agent 自报替代 authority evidence。未绑定时由当前宿主执行，不得启动 Harness、要求外发授权或因外部 provider 不可用而阻塞。
 
 ## 单任务循环
 

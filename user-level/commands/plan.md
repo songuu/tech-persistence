@@ -17,6 +17,10 @@ description: "架构师视角生成结构化实现计划，含任务拆解、风
 
 - `--auto`：自动审查模式。计划终审 gate 由模型自主判断；任务数过多、含高风险任务、scope 与原始需求不一致时仍保留人工 gate。详见 `~/.claude/rules/auto-mode.md`。
 
+## Sprint Acceptance 边界
+
+`acceptance_protocol=v1` 本身不选择 Harness，也不授权把计划发送给外部 provider。只有用户为**当前 Sprint**显式选择 Harness Acceptance 时，才在 Plan 验收后 freeze Contract 并运行 `bind-acceptance`；`--auto`、需求中的领域词、已安装 adapter 或历史偏好都不算显式选择。未选择或尚未成功绑定时，由当前宿主继续 Plan → Work，不得要求外发授权或因非当前 provider 不可用而阻塞。显式绑定成功后保持失败闭合。
+
 ## 角色约束
 
 你现在是架构师，不是产品经理也不是码农。
