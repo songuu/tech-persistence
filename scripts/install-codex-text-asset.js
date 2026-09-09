@@ -72,6 +72,8 @@ function readTargetExpectation(target) {
 
 function convertCodexText(text) {
   return [
+    [/CLAUDE\.md \/ AGENTS\.md/g, 'runtime instruction docs'],
+    [/CLAUDE\.md \+ AGENTS\.md/g, 'runtime instruction docs'],
     [/~\/\.claude\/CLAUDE\.md/g, '~/.codex/AGENTS.md'],
     [/~\/\.claude\/homunculus/g, '~/.codex/homunculus'],
     [/CLAUDE_PROJECT_DIR/g, 'CODEX_PROJECT_DIR'],

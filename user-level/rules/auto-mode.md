@@ -99,7 +99,7 @@ caveman 控制**输出风格**（压缩 token）。auto-mode 控制**决策行�
 | `/work` | 每个 Task 完成的进入下一步 | L0-L2 自动；L3 视情况；L4 强制问 |
 | `/plan` | 计划终审 | 任务数 ≤ 8 且无高风险 task 时自动；否则问 |
 | `/review` | P0 修复确认 | obvious 修复（typo、缺 import、null check）自动；语义级修复问 |
-| `/think` | 范围确认 | scope 明确时自动进入 plan；含开放问题时问 |
+| `/think` | 范围确认 | 独立调用按所选 `/work` 或 `/plan` 路径自动进入；活动 `/sprint` 保持 `think -> plan`；遇人工 gate 时问 |
 | `/test` | 测试范围 | L0-L2 自动；L3+ 当 diff 包含密码/迁移/认证时强制问 |
 | `/prototype` | 假设确认 | 永远问。原型驱动需求收敛本身就要求人工纠偏 |
 | `/compound` / `/learn` / `/debug-journal` | 几乎无 gate | --auto 是 no-op |

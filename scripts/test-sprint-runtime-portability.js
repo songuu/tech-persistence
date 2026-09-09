@@ -15,6 +15,7 @@ function read(relativePath) {
 const sprint = read('user-level/commands/sprint.md');
 const agentLoop = read('user-level/commands/agent-loop.md');
 const readme = read('README.md');
+const planTemplate = read('docs/plans/TEMPLATE.md');
 
 assert.match(sprint, /运行时可移植性契约/);
 assert.match(sprint, /当前可执行宿主/);
@@ -37,6 +38,22 @@ assert.match(readme, /Sprint 运行时可移植性/);
 assert.match(readme, /当前宿主/);
 assert.match(readme, /其他框架/);
 assert.match(readme, /\/sprint evidence/);
+
+assert.match(
+  planTemplate,
+  /`acceptance_protocol=v1`[^\n]*不选择 Harness/,
+  'plan template must distinguish the v1 protocol from explicit Harness selection'
+);
+assert.match(
+  planTemplate,
+  /显式[^\n]*(?:选择|bind-acceptance)/,
+  'plan template must name the explicit Harness opt-in boundary'
+);
+assert.doesNotMatch(
+  planTemplate,
+  /新 Sprint 在 `plan → work` 前必须/,
+  'plan template must not require every Sprint to bind Harness acceptance'
+);
 
 for (const [skillPath, referencePath] of [
   ['.codex/skills/sprint/SKILL.md', null],

@@ -100,7 +100,10 @@ try {
     '2f2de24b4eed8d8af8ef95214f067e8968d137e895eae888bc9e63b1c2ba8eb3'
   );
   assert.strictEqual(LEGACY_GENERATED_HASHES.user.includes(normalizedSha256(historical.toString('utf8'))), true);
-  const historicalBomCrlf = Buffer.from(`\uFEFF${historical.toString('utf8').replace(/\n/g, '\r\n')}`);
+  // WHY: Git may materialize the fixture with CRLF; canonicalize before constructing
+  // the explicit BOM+CRLF variant so the test does not accidentally create CRCRLF.
+  const historicalLf = historical.toString('utf8').replace(/\r\n?/g, '\n');
+  const historicalBomCrlf = Buffer.from(`\uFEFF${historicalLf.replace(/\n/g, '\r\n')}`);
   assert.strictEqual(normalizedSha256(historicalBomCrlf.toString('utf8')), normalizedSha256(historical.toString('utf8')));
   assert.strictEqual(classifyExistingAgents({
     raw: historicalBomCrlf,

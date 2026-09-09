@@ -9,17 +9,31 @@ description: "CEO/产品视角审视需求：定义做什么、不做什么、�
 ## 用法
 
 ```
-/think <需求>            ← 生成范围定义，结尾询问是否进入 /plan
+/think <需求>            ← 生成范围定义，并按复杂度进入 /work 或 /plan
 /think --clarify <需求>  ← 在范围锁定前，主动扫描并逐条澄清所有欠定义点
-/think --auto <需求>     ← 自动模式：scope 明确且无开放问题时直接进入 /plan
+/think --auto <需求>     ← 自动模式：无人工 gate 时进入所选的 /work 或 /plan 路径
 ```
 
-`--clarify` 与 `--auto` 可组合：`/think --clarify --auto <需求>`（先澄清，澄清完成后再按 auto 判断是否直接进 plan）。
+`--clarify` 与 `--auto` 可组合：`/think --clarify --auto <需求>`（先澄清，再按 auto 判断进入所选的 work/plan 路径）。
 
 ## 可选参数
 
 - `--clarify`：澄清强化模式。在范围锁定前主动执行「需求澄清扫描」子步（见执行步骤 1.5），系统化列出未定义的 输入边界 / 失败模式 / 空状态，逐条要求确认。对标 spec-kit `/clarify`，但内联进 think，不新增独立命令。
-- `--auto`：自动审查模式。scope 中无未解的开放问题、与原始需求无明显 scope creep 时直接 handoff 给 /plan；含开放问题、范围模糊或涉及战略决策时仍保留人工 gate。详见 `~/.claude/rules/auto-mode.md`。
+- `--auto`：自动审查模式。没有开放产品决策、不可逆影响、外部副作用或权限边界时，直接 handoff 给所选的 /work 或 /plan 路径；否则保留人工 gate。详见 `~/.claude/rules/auto-mode.md`。
+
+## Artifact 路由
+
+先按设计复杂度选路径；这些标签是行为约束，不新增命令：
+
+- `probe-like`：只回答可行性或消除一个未知。试验代码保持 throwaway，不写 spec/plan；若要保留或进入生产，必须重新分类。
+- `bounded-like`：设计歧义低、消费者接口封闭、耦合与影响半径小且容易回滚。输出 chat 内短设计与成功标准后可直接 `/work`，不强制持久化。
+- `architectural-like`：新系统/子系统、重组组件关系、改变消费者接口，或仍有开放设计决策。先完成产品边界，再交给 `/plan` 在同一计划内建立 shadow design authority。
+
+已有可读 flow 是 `bounded-like` 的强证据，但不是必要条件。判断同时考虑设计歧义、消费者接口、跨组件耦合、可逆性和影响半径。发现隐藏复杂度时只能升级路径，不能静默降级；`probe-like` 的 throwaway 产物只有重新分类后才能保留。
+
+Artifact 路由与人工 gate 分开：只有开放产品决策、不可逆影响、外部副作用或权限边界需要停等；`architectural-like` 标签本身不强制批准。
+
+活动 `/sprint` 保持 `think -> plan` 状态边：路由只缩放 Plan 深度和附加工件，不能跨 phase 直达 Work；只有独立调用 Think 时，`bounded-like` 才可直接交给 `/work`，`probe-like` 才可只返回答案。
 
 ## 角色约束
 
@@ -94,34 +108,25 @@ WHEN <触发条件/输入> THE SYSTEM SHALL <可观测行为/输出>
 
 **L0-L2 任务可选**：沿用自然语言「3-5 个可验证条件」即可，不强制 EARS-lite（避免对小任务过重）。
 
-### 4. 持久化到项目文档（CRITICAL — 不可跳过）
+### 3.5 路由结论
 
-**MUST** 将上述内容写入项目文档：
+route 必须原样使用 `probe-like`、`bounded-like`、`architectural-like` 之一；同时输出判定理由、是否存在人工 gate，以及下一步是返回答案、`/work` 还是 `/plan`。活动 `/sprint` 仍按既有状态边进入 Plan。
 
-1. **确定文档文件名**：`docs/plans/YYYY-MM-DD-<需求简写>.md`
-   - 日期用当天日期
-   - 简写用英文短横线分隔，简明扼要（如 `chat-switch-impl`、`api-design`）
+### 4. 条件性持久化
 
-2. **创建文档**：参考 `docs/plans/TEMPLATE.md` 的结构，创建文档文件
-
-3. **填写内容**：
-   - 标题：功能名称
-   - Status：`draft`
-   - Created / Updated：当天日期
-   - **需求分析**章节：填入「要做」「不做」「成功标准」「风险和假设」
-   - 其余章节保留空模板，等后续阶段填写
-
-4. **告知用户文档路径**，便于后续 /plan 读取
+- `probe-like` / `bounded-like`：独立调用 Think 时不创建文档；用户明确要求、已有活动 Sprint 或确需跨会话共享时才更新明确路径。
+- `architectural-like`：若已有 Sprint 文档则更新其需求分析；否则在进入 `/plan` 时创建 `docs/plans/YYYY-MM-DD-<需求简写>.md`。design authority 由 Plan 写入同一文件，不在 Think 阶段展开技术设计。
+- 写入后告知用户路径并读回关键内容；不得扫描或改写无关历史计划。
 
 ## 注意
 
 - 如果用户的需求已经很清晰，不要过度提问，快速输出范围定义即可
-- 对于 < 30 分钟的小任务，跳过这个命令直接 `/plan`
-- 读取已有的本能和 rules，确保不重复之前的决策
+- 小任务不按时间估算机械进入 `/plan`；按上面的设计复杂度与风险路由。
+- 只读取当前任务必要的项目约束与证据，不强制扫描全部本能、rules 或历史计划。
 
 ## Phase 间预热钩子
 
-完整 sprint 内执行时（`/sprint` 调用），本命令报告末尾**可选**追加「下一 Phase 预热」段（2026-05-22 起改建议非强制）。协议见当前命令集合中 `sprint.md` 的「Phase 间预热协议」。
+完整 sprint 内执行、且下一路径确为 `/plan` 时，本命令报告末尾**可选**追加「下一 Phase 预热」段（2026-05-22 起改建议非强制）。协议见当前命令集合中 `sprint.md` 的「Phase 间预热协议」。
 
 本命令的典型预热内容：
 

@@ -27,6 +27,7 @@ const {
 const root = path.resolve(__dirname, '..');
 const pluginRoot = path.join(root, 'plugins', 'tech-persistence');
 const CLAUDE_MANIFEST = path.join(pluginRoot, '.claude-plugin', 'plugin.json');
+const CLAUDE_MARKETPLACE = path.join(pluginRoot, '.claude-plugin', 'marketplace.json');
 const MEMORY_TOOLS_SRC = path.join(root, 'scripts', 'lib', 'memory-tools.js');
 const MCP_SERVER_NAME = 'tech-persistence-memory';
 
@@ -49,9 +50,15 @@ function test(name, fn) {
 // ── (a) the real shipped manifest must PASS (regression guard on the live file) ──
 test('pass: real .claude-plugin/plugin.json has no forbidden keys', () => {
   const manifest = JSON.parse(fs.readFileSync(CLAUDE_MANIFEST, 'utf-8'));
+  const marketplace = JSON.parse(fs.readFileSync(CLAUDE_MARKETPLACE, 'utf-8'));
   const errors = checkClaudeManifest(manifest);
   assert.deepStrictEqual(errors, [], `unexpected errors: ${errors.join(' | ')}`);
   assert.strictEqual(manifest.name, 'tech-persistence');
+  assert.strictEqual(
+    marketplace.metadata.version,
+    manifest.version,
+    'Claude marketplace metadata version must match the plugin manifest'
+  );
 });
 
 // ── (b) break-input: forbidden keys rejected ──

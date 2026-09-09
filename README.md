@@ -195,10 +195,11 @@ Node.js >= 18 · Git · Claude Code CLI 或 Codex CLI
 
 ### 统一安装（Windows 推荐）
 
-同时覆盖 legacy Claude Code、Codex、Claude Code plugin 三个安装面：
+默认覆盖 Codex 与 Claude Code plugin 两个现代安装面；legacy Claude Code 是显式 opt-in：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-all.ps1 -All
+powershell -ExecutionPolicy Bypass -File .\install-all.ps1 -All -Legacy  # 同时刷新 legacy Claude Code
 ```
 
 排查时可以只跳过某个安装面：

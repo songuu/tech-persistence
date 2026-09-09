@@ -21,6 +21,28 @@ description: "架构师视角生成结构化实现计划，含任务拆解、风
 
 `acceptance_protocol=v1` 本身不选择 Harness，也不授权把计划发送给外部 provider。只有用户为**当前 Sprint**显式选择 Harness Acceptance 时，才在 Plan 验收后 freeze Contract 并运行 `bind-acceptance`；`--auto`、需求中的领域词、已安装 adapter 或历史偏好都不算显式选择。未选择或尚未成功绑定时，由当前宿主继续 Plan → Work，不得要求外发授权或因非当前 provider 不可用而阻塞。显式绑定成功后保持失败闭合。
 
+## Architectural shadow pilot
+
+Think 明确路由为 `architectural-like`，或 Plan 研究发现同等 architectural 信号时，才启用 shadow design-authority；probe/bounded 路径不得为此增加文档税。在当前计划文件中写入一次：
+
+```markdown
+<!-- design-authority:start -->
+## Design Authority（shadow）
+- 问题与用户价值：...
+- 范围 / 非目标：...
+- 备选方案、选择与理由：...
+- 组件、消费者接口、状态与错误路径：...
+- Acceptance Criteria：
+  - AC-1: WHEN ... THE SYSTEM SHALL ...
+<!-- design-authority:end -->
+```
+
+该区块是 acceptance criterion 的唯一语义 owner；实施任务只引用 `AC-*`，不复制或改写 statement。计划确认后按约定冻结，修改时显式记录 revision 并重新检查任务，不静默改变设计。提交计划前 inline 检查四项：`placeholder`、内部一致性、`scope`、歧义。
+
+若活动 Sprint 使用 `acceptance_protocol=v1`，acceptance checklist 只是 statement 的精确 transport projection，不成为第二语义 owner；shadow 阶段仍不自动校验 AC ID 映射。
+
+这是可回滚的同文件 shadow pilot：不计算 design-authority digest/hash，也不接入 lineage runtime 或 Work/Review gate，不创建独立 spec 文件。当前用户指令、系统/项目规则和权限边界始终优先。
+
 ## 角色约束
 
 你现在是架构师，不是产品经理也不是码农。
@@ -138,20 +160,13 @@ description: "架构师视角生成结构化实现计划，含任务拆解、风
 - **中置信** (50-80%): 有不确定点，标注出来请用户确认
 - **低置信** (<50%): 需要用户提供更多信息或做原型验证
 
-### 4. 持久化到项目文档（CRITICAL — 不可跳过）
+### 4. 条件性持久化
 
-**MUST** 将计划写入项目文档：
+不要仅因调用 Plan 就持久化：
 
-1. **查找已有文档**：检查 `docs/plans/` 下是否已有 /think 阶段创建的文档
-   - 有 → 在该文档的「技术方案」章节填入方案内容
-   - 无 → 创建新文档 `docs/plans/YYYY-MM-DD-<需求简写>.md`，参考 `docs/plans/TEMPLATE.md`，同时简要填写「需求分析」章节
-
-2. **填写内容**：
-   - 更新 Status 为 `planning`
-   - 更新 Updated 日期
-   - 填写「技术方案」章节：方案概述、任务拆解、测试策略、风险评估、涉及文件
-
-3. **告知用户文档路径**，等待确认后进入 /work
+- `probe-like` / `bounded-like` 的独立、可逆任务可在 chat 内给出计划；用户明确要求、已有活动 Sprint 或需要跨 agent/会话共享时才写文档。
+- `architectural-like` 必须把 shadow design-authority 与实施计划写在同一个 `docs/plans/YYYY-MM-DD-<需求简写>.md`；若已有 /think 或 Sprint 文档则更新该文件，不再创建第二份设计文件。
+- 写入时更新 Status/Updated，填入技术方案、任务、测试、风险和涉及文件；完成后读回关键区块并告知用户路径。
 
 ## 注意
 

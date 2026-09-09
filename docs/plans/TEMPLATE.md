@@ -21,9 +21,11 @@
 - [ ] ...
 <!-- acceptance-contract:end -->
 
-> 新 Sprint 在 `plan → work` 前必须把此区块与一个已 freeze 的 Agent Harness v1
-> `AcceptanceContract` 绑定；`review → compound` 前必须读回同一合同的 authority-owned
-> `passed` Receipt。区块内文案一旦绑定即不可静默改写。
+> `acceptance_protocol=v1` 只定义可绑定协议，本身不选择 Harness。只有用户为当前 Sprint
+> 显式选择 Harness Acceptance 并成功 `bind-acceptance` 后，`plan → work` 前才要求此区块
+> 与 frozen `AcceptanceContract` 一致，`review → compound` 前才要求读回同一合同的
+> authority-owned `passed` Receipt。未绑定时由当前宿主按本计划验收；区块内文案一旦绑定
+> 即不可静默改写。
 
 ### 风险和假设
 - ...

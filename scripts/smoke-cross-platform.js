@@ -525,6 +525,7 @@ function testUnifiedPowerShellInstallerCoversAllWindowsInstallers() {
   assert(fs.existsSync(path.join(repoRoot, unifiedInstallerPath)), `${unifiedInstallerPath} does not exist`);
 
   const script = read(unifiedInstallerPath);
+  const readme = read('README.md');
   for (const needle of [
     'install.ps1',
     'install-codex.ps1',
@@ -540,6 +541,13 @@ function testUnifiedPowerShellInstallerCoversAllWindowsInstallers() {
   ]) {
     assertIncludes(script, needle, unifiedInstallerPath);
   }
+
+  assertIncludes(readme, '默认覆盖 Codex 与 Claude Code plugin', 'README.md');
+  assertIncludes(readme, 'install-all.ps1 -All -Legacy', 'README.md');
+  assert(
+    !readme.includes('同时覆盖 legacy Claude Code、Codex、Claude Code plugin 三个安装面'),
+    'README.md must not claim that -All installs the opt-in legacy surface'
+  );
 }
 
 process.stdout.write('\nsmoke: cross-platform install and macOS CI\n');

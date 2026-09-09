@@ -40,6 +40,26 @@ test('publishes converted bytes and retains the exact initial backup', () => {
   }
 });
 
+test('normalizes dual runtime instruction filenames before generic Codex conversion', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-text-asset-'));
+  try {
+    const source = path.join(root, 'source.md');
+    const target = path.join(root, 'target.md');
+    fs.writeFileSync(source, '修改 CLAUDE.md / AGENTS.md 或 CLAUDE.md + AGENTS.md 前必须确认。\n');
+
+    installCodexTextAsset({ allowedRoot: root, source, target, mode: 'backup' });
+
+    const installed = fs.readFileSync(target, 'utf8');
+    assert.strictEqual(
+      installed,
+      '修改 runtime instruction docs 或 runtime instruction docs 前必须确认。\n'
+    );
+    assert.doesNotMatch(installed, /AGENTS\.md\s*[\/+]+\s*AGENTS\.md/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('unchanged and custom no-overwrite targets are non-mutating', () => {
   const { root, source } = fixture();
   try {
