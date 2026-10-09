@@ -34,7 +34,11 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-function missingNativeRefProviderScript(pipeline = false) {
+function missingNativeRefProviderScript(pipeline = false, oracle = {
+  type: 'command',
+  procedure: 'node --version',
+  expected: 'exit code is zero',
+}) {
   return `
 const structuredOutput = ${pipeline ? `{
   version: 'global-v1',
@@ -55,6 +59,14 @@ const structuredOutput = ${pipeline ? `{
     risks: [],
     openQuestions: []
   },
+  acceptanceContract: {
+    criteria: [{
+      id: 'ac-native-evidence',
+      statement: 'accepted',
+      sourceRefs: ['spec.json#/requirementSpec/acceptanceCriteria/0'],
+      oracle: ${JSON.stringify(oracle)}
+    }]
+  },
   technicalDesign: {
     approach: 'approach',
     files: [],
@@ -69,6 +81,7 @@ const structuredOutput = ${pipeline ? `{
     description: 'verify native evidence',
     dependencies: [],
     risk: 'L1',
+    criterionIds: ['ac-native-evidence'],
     doneCriteria: ['native rejection is recorded'],
     suggestedValidation: []
   }],
@@ -85,8 +98,8 @@ process.stdout.write(JSON.stringify({
 `;
 }
 
-function acceptedSecretProviderScript(secret) {
-  return missingNativeRefProviderScript()
+function acceptedSecretProviderScript(secret, oracle) {
+  return missingNativeRefProviderScript(false, oracle)
     .replace("summary: 'summary'", `summary: '${secret}'`)
     .replace(
       "subtype: 'success',",
@@ -331,9 +344,10 @@ if (prompt.includes('analysis and design provider')) {
       id: 'T1',
       title: 'verify',
       description: 'verify classic shadow output',
-      dependencies: [],
-      risk: 'L1',
-      doneCriteria: ['review completes'],
+    dependencies: [],
+    risk: 'L1',
+    criterionIds: ['ac-classic-validation'],
+    doneCriteria: ['review completes'],
       suggestedValidation: ['git diff --check']
     }],
     assumptions: [],
@@ -533,6 +547,7 @@ function assertClassicShadowReceipt(temporaryRoot, controlRoot) {
     'run', '--requirement', 'produce a classic shadow receipt',
     '--workdir', workdir, '--runs-dir', '.runs', '--run-id', runId,
     '--allow-dirty', '--skip-cli-schema',
+    '--validation-command', 'git diff --check',
     '--spec-command', reviewCommand,
     '--implementation-command', implementationCommand,
     '--review-command', reviewCommand,
@@ -781,6 +796,7 @@ function assertNativeRejectionDoesNotAdvance(temporaryRoot, controlRoot, pipelin
     '--run-id', runId,
     '--skip-git-repo-check',
     '--skip-cli-schema',
+    '--validation-command', 'node --version',
     '--spec-command', providerCommand,
     '--implementation-command', providerCommand,
     '--review-command', providerCommand,
@@ -841,6 +857,7 @@ function assertAcceptedCanonicalArtifactsAreRedacted(temporaryRoot, controlRoot)
     '--run-id', runId,
     '--skip-git-repo-check',
     '--skip-cli-schema',
+    '--validation-command', 'node --version',
     '--spec-command', providerCommand,
     '--implementation-command', providerCommand,
     '--review-command', providerCommand,
@@ -886,6 +903,7 @@ function assertPostAcceptanceFailurePreservesAcceptedArtifacts(temporaryRoot, co
     'run', '--requirement', 'preserve accepted artifacts after a post acceptance write failure',
     '--workdir', temporaryRoot, '--runs-dir', '.runs', '--run-id', runId,
     '--skip-git-repo-check', '--skip-cli-schema',
+    '--validation-command', 'node --version',
     '--spec-command', specCommand,
     '--implementation-command', implementationCommand,
     '--review-command', specCommand,
@@ -897,7 +915,7 @@ function assertPostAcceptanceFailurePreservesAcceptedArtifacts(temporaryRoot, co
   ]);
   const acceptanceContract = readJson(path.join(runDir, 'acceptance-contract.json'));
   assert.strictEqual(acceptanceContract.schemaVersion, 'acceptance-contract-v1');
-  assert.strictEqual(acceptanceContract.criteria[0].oracle.type, 'independent-review');
+  assert.strictEqual(acceptanceContract.criteria[0].oracle.type, 'command');
   fs.mkdirSync(path.join(runDir, 'provider-handoff.json'));
   run([
     'resume', '--workdir', temporaryRoot, '--runs-dir', '.runs', '--run', runId,
@@ -949,7 +967,11 @@ function assertClassicValidationBlocksDurableWriteback(
   const implementationProvider = path.join(
     temporaryRoot, `fake-${sourceStatus}-validation-implementation.js`
   );
-  fs.writeFileSync(specProvider, acceptedSecretProviderScript('validation gate spec'));
+  fs.writeFileSync(specProvider, acceptedSecretProviderScript('validation gate spec', {
+    type: 'artifact',
+    procedure: 'artifact:validation-gate-marker.txt',
+    expected: 'artifact exists, is fresh, and matches its sealed digest',
+  }));
   fs.writeFileSync(implementationProvider, validImplementationProviderScript());
   const validationArgs = [];
   if (sourceStatus === 'failed') {
@@ -1167,7 +1189,14 @@ function assertClassicInvalidHandoffPersistsPartialRecovery(temporaryRoot, contr
   const runDir = path.join(workdir, '.runs', runId);
   const specProvider = path.join(temporaryRoot, 'fake-invalid-handoff-spec.js');
   const implementationProvider = path.join(temporaryRoot, 'fake-invalid-handoff-codex.js');
-  fs.writeFileSync(specProvider, acceptedSecretProviderScript('valid spec before invalid handoff'));
+  fs.writeFileSync(specProvider, acceptedSecretProviderScript(
+    'valid spec before invalid handoff',
+    {
+      type: 'artifact',
+      procedure: 'artifact:invalid-handoff-marker.txt',
+      expected: 'artifact exists, is fresh, and matches its sealed digest',
+    }
+  ));
   fs.writeFileSync(implementationProvider, invalidImplementationProviderScript());
   const specCommand = `${process.execPath} ${specProvider}`;
   const implementationCommand = `${process.execPath} ${implementationProvider}`;
@@ -1253,7 +1282,14 @@ function runLockfileImplementationFixture(
   const specProvider = path.join(temporaryRoot, `fake-lockfile-spec-${fixtureId}.js`);
   const implementationProvider = path.join(temporaryRoot, `fake-lockfile-impl-${fixtureId}.js`);
   const reviewProvider = path.join(temporaryRoot, `fake-lockfile-review-${fixtureId}.js`);
-  fs.writeFileSync(specProvider, acceptedSecretProviderScript(`lockfile diff fixture ${fixtureId}`));
+  fs.writeFileSync(specProvider, acceptedSecretProviderScript(
+    `lockfile diff fixture ${fixtureId}`,
+    {
+      type: 'command',
+      procedure: 'git diff --check',
+      expected: 'exit code is zero',
+    }
+  ));
   fs.writeFileSync(
     implementationProvider,
     lockfileImplementationProviderScript(lockfileContent, fixtureId)

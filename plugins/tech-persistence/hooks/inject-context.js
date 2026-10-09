@@ -13,6 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { readSprintProgress } = require('./lib/sprint-progress');
 const {
   resolveBaseDir,
   resolveCompatReadDirs,
@@ -546,12 +547,25 @@ function detectPendingHandoff(options = {}) {
       }
 
       // 检查关联的 sprint 文档是否还是 in-progress/checkpoint 状态。
-      const sprintDocMatch = content.match(/sprint_doc:\s*"?([^"\n]+)"?/);
-      if (sprintDocMatch) {
-        const sprintDocPath = path.join(repoRoot, sprintDocMatch[1]);
+      const { meta: handoffMeta } = parseFrontmatter(content.replace(/\r\n/g, '\n'));
+      if (handoffMeta.sprint_doc) {
+        const sprintDocPath = path.join(repoRoot, handoffMeta.sprint_doc);
         if (fs.existsSync(sprintDocPath)) {
           const sprintContent = fs.readFileSync(sprintDocPath, 'utf-8');
-          if (sprintContent.match(/status:\s*completed/)) continue;
+          let progress;
+          try {
+            progress = readSprintProgress(sprintContent);
+          } catch (error) {
+            // An invalid canonical plan cannot authorize recovery from an older snapshot.
+            runtimeDiagnostic('invalid-sprint-task-metadata', error);
+            continue;
+          }
+          if (progress.status === 'completed') continue;
+          return {
+            file: candidate.displayPath,
+            progress,
+            content: `当前计划状态: ${progress.status || 'unknown'}\n当前计划实现任务: ${progress.tasksDone}/${progress.tasksTotal}（不代表 Sprint 已验收关闭）\n以下为历史交接快照，恢复前须核对当前计划与运行时:\n\n${content}`,
+          };
         }
       }
 
@@ -726,7 +740,7 @@ function main(options = {}) {
   if (handoff) {
     addSection(
       sections,
-      '未完成的 Sprint (从 checkpoint 恢复)',
+      '历史 Sprint 交接候选（恢复前核对当前状态）',
       `文件: ${handoff.file}\n\n${handoff.content}`,
       1500
     );

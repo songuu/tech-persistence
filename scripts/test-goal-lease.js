@@ -9,6 +9,18 @@ const goalLease = require('./agent-orchestrator/goal-lease');
 const controlStore = require('./agent-orchestrator/control-store');
 const runLock = require('./agent-orchestrator/run-lock');
 
+function isWithinCanonicalPath(parent, candidate) {
+  const relative = path.relative(
+    controlStore.canonicalPotentialPath(parent),
+    controlStore.canonicalPotentialPath(candidate)
+  );
+  return relative === '' || (
+    relative !== '..'
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative)
+  );
+}
+
 const first = goalLease.acquireGoalLease(null, {
   runId: 'run-1',
   ownerRuntime: 'codex',
@@ -90,9 +102,9 @@ const controlRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-goal-control-'));
 goalLease.writeGoalLease(tempRoot, second, { controlRoot });
 assert.deepStrictEqual(goalLease.readGoalLease(tempRoot, { controlRoot }), second);
 const authorityPath = goalLease.goalLeasePath(tempRoot, { controlRoot });
-assert.strictEqual(authorityPath.startsWith(path.resolve(tempRoot)), false);
+assert.strictEqual(isWithinCanonicalPath(tempRoot, authorityPath), false);
 assert.strictEqual(
-  authorityPath.toLowerCase().startsWith(path.resolve(controlRoot).toLowerCase()),
+  isWithinCanonicalPath(controlRoot, authorityPath),
   true,
   'authoritative lease must live under the external control root'
 );

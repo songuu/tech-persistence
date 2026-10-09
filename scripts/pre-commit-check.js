@@ -24,9 +24,23 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 
-const ORCHESTRATOR_PATH_RE = /^(?:scripts|plugins\/tech-persistence\/scripts)\/agent-orchestrator(?:\.js|\/[^/]+\.js)$/;
+const ORCHESTRATOR_MAIN_PATHS = new Set([
+  'scripts/agent-orchestrator.js',
+  'plugins/tech-persistence/scripts/agent-orchestrator.js',
+]);
+const ORCHESTRATOR_MANAGED_ROOTS = [
+  'scripts/agent-orchestrator',
+  'plugins/tech-persistence/scripts/agent-orchestrator',
+  'plugins/tech-persistence/codex-hooks/agent-orchestrator',
+];
+
+function isManagedOrchestratorPath(file) {
+  return ORCHESTRATOR_MAIN_PATHS.has(file) || ORCHESTRATOR_MANAGED_ROOTS.some(
+    (root) => file === root || file.startsWith(`${root}/`)
+  );
+}
 
 // Plans whose filename date is strictly < this string skip lint.
 // Adopted 2026-05-11 in ADR-012; 1-day buffer so the commit landing the rule
@@ -57,16 +71,21 @@ function readIfExists(filePath) {
 }
 
 function getStagedFiles(repoRoot) {
-  // -c core.quotePath=false: emit non-ASCII filenames verbatim, not octal-escaped.
-  // Otherwise files like docs/plans/2026-05-12-中文.md become "\"...\"" quoted strings
-  // and our regex/path operations silently miss them.
-  // Include deletions (D): deleting a source file should still trigger orphan detection
-  // of the now-stale plugin copy.
-  const output = execSync('git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMRD', {
+  // NUL-delimited output preserves every valid Git path byte except NUL itself.
+  // Newline-delimited output can C-quote control characters even with
+  // core.quotePath=false, causing guards to inspect a representation rather than
+  // the staged path and silently miss a managed entry.
+  // Include deletions (D), type changes (T), and unmerged paths (U): source
+  // deletion must trigger orphan detection, while symlink/gitlink changes and
+  // conflict stages must be inspected from the index instead of bypassing it.
+  const output = execFileSync('git', [
+    '-c', 'core.quotePath=false',
+    'diff', '--cached', '--name-only', '-z', '--diff-filter=ACMRTDU',
+  ], {
     cwd: repoRoot,
-    encoding: 'utf-8',
+    encoding: 'buffer',
   });
-  return output.split('\n').map((line) => line.trim()).filter(Boolean);
+  return output.toString('utf8').split('\0').filter(Boolean).map((file) => file.replace(/\\/g, '/'));
 }
 
 function loadTransformers(repoRoot) {
@@ -185,88 +204,207 @@ function checkPropagateSync(stagedFiles, repoRoot) {
   return mismatches;
 }
 
-function sha256OfFile(filePath) {
-  // build-codex-plugin.js writes plugin copies via normalizeLf (CRLF → LF). To stay
-  // consistent with that build semantics, hash the LF-normalized bytes. Otherwise a
-  // user who saves the source with CRLF (Windows editors) gets stuck in a loop —
-  // build can't help because it always writes LF, and raw-byte sha mismatches forever.
-  try {
-    const text = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
-    return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
-  } catch {
-    return null;
+const REGULAR_INDEX_MODES = new Set(['100644', '100755']);
+
+function readIndexEntries(repoRoot, pathspecs) {
+  const args = ['ls-files', '--stage', '-z', '--', ...pathspecs];
+  const raw = execFileSync('git', args, { cwd: repoRoot, encoding: 'buffer' });
+  const seen = new Set();
+  const entries = [];
+  for (const record of raw.toString('utf8').split('\0').filter(Boolean)) {
+    const separator = record.indexOf('\t');
+    if (separator < 0) throw new Error(`invalid git index record: ${record}`);
+    const metadata = record.slice(0, separator).match(/^(\d{6}) ([0-9a-f]{40,64}) (\d+)$/);
+    if (!metadata) throw new Error(`invalid git index metadata: ${record.slice(0, separator)}`);
+    const entry = {
+      mode: metadata[1],
+      oid: metadata[2],
+      stage: Number(metadata[3]),
+      path: record.slice(separator + 1).replace(/\\/g, '/'),
+    };
+    const identity = `${entry.mode}\0${entry.oid}\0${entry.stage}\0${entry.path}`;
+    if (!seen.has(identity)) {
+      seen.add(identity);
+      entries.push(entry);
+    }
+  }
+  return entries;
+}
+
+function groupIndexEntries(entries) {
+  const grouped = new Map();
+  for (const entry of entries) {
+    const existing = grouped.get(entry.path) || [];
+    existing.push(entry);
+    grouped.set(entry.path, existing);
+  }
+  return grouped;
+}
+
+function validateIndexEntry(grouped, relative, source, derived, mismatches) {
+  const entries = grouped.get(relative) || [];
+  if (entries.length === 0) return null;
+  if (entries.length !== 1 || entries[0].stage !== 0) {
+    mismatches.push({
+      source,
+      derived,
+      kind: 'orchestrator',
+      reason: 'projection index entry is conflicted or has a non-zero stage',
+    });
+    return false;
+  }
+  if (!REGULAR_INDEX_MODES.has(entries[0].mode)) {
+    mismatches.push({
+      source,
+      derived,
+      kind: 'orchestrator',
+      reason: `projection index entry must be a regular file (mode ${entries[0].mode})`,
+    });
+    return false;
+  }
+  return entries[0];
+}
+
+function readIndexBlob(repoRoot, entry, cache) {
+  if (!cache.has(entry.oid)) {
+    cache.set(entry.oid, execFileSync('git', ['cat-file', 'blob', entry.oid], {
+      cwd: repoRoot,
+      encoding: 'buffer',
+    }));
+  }
+  return cache.get(entry.oid);
+}
+
+function sha256(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function expectedProjectionHash(bytes) {
+  return sha256(Buffer.from(bytes.toString('utf8').replace(/\r\n/g, '\n'), 'utf8'));
+}
+
+function compareIndexProjection(repoRoot, sourceEntry, targetEntry, source, derived, blobCache, mismatches) {
+  const expected = expectedProjectionHash(readIndexBlob(repoRoot, sourceEntry, blobCache));
+  const actual = sha256(readIndexBlob(repoRoot, targetEntry, blobCache));
+  if (expected !== actual) {
+    mismatches.push({
+      source,
+      derived,
+      kind: 'orchestrator',
+      reason: 'sha256 mismatch — staged projection copy out of sync',
+    });
   }
 }
 
 function checkOrchestratorSync(stagedFiles, repoRoot) {
-  // Triggered when either source or plugin copy of agent-orchestrator is staged.
-  // Source = scripts/agent-orchestrator{.js,/*.js}; plugin copy under plugins/tech-persistence/scripts/...
-  // build-codex-plugin.js does byte-copy (no transform) for .js, so direct sha256 compare is correct.
-  const trigger = stagedFiles.some((f) => ORCHESTRATOR_PATH_RE.test(f));
+  // Triggered when the source or either generated projection is staged.
+  // The builder LF-normalizes JavaScript text while projecting it, so the hashes
+  // below use the same canonical bytes rather than raw checkout line endings.
+  const trigger = stagedFiles.some(isManagedOrchestratorPath);
   if (!trigger) return [];
 
   const mismatches = [];
-
-  // Main file pair
+  const blobCache = new Map();
   const mainPair = ['scripts/agent-orchestrator.js', 'plugins/tech-persistence/scripts/agent-orchestrator.js'];
-  // Dynamic submodule pairs from source side. build-codex-plugin.js's
-  // copyAgentOrchestratorSubmodules() is non-recursive (flat .js files only);
-  // assert that invariant here so adding a subdirectory doesn't silently produce
-  // an incomplete plugin bundle that still passes both build and pre-commit.
-  const submoduleSourceDir = path.join(repoRoot, 'scripts', 'agent-orchestrator');
-  let submoduleNames = [];
-  if (fs.existsSync(submoduleSourceDir)) {
-    for (const entry of fs.readdirSync(submoduleSourceDir, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
+  const sourceDir = 'scripts/agent-orchestrator';
+  const projectionDirs = [
+    'plugins/tech-persistence/scripts/agent-orchestrator',
+    'plugins/tech-persistence/codex-hooks/agent-orchestrator',
+  ];
+  const indexEntries = readIndexEntries(repoRoot, [mainPair[0], mainPair[1], sourceDir, ...projectionDirs]);
+  const grouped = groupIndexEntries(indexEntries);
+
+  for (const managedRoot of [sourceDir, ...projectionDirs]) {
+    const rootEntries = grouped.get(managedRoot) || [];
+    if (rootEntries.length === 0) continue;
+    mismatches.push({
+      source: sourceDir,
+      derived: managedRoot === sourceDir ? '(unsupported by build-codex-plugin)' : managedRoot,
+      kind: 'orchestrator',
+      reason: `managed orchestrator root must remain an implicit directory; bare index entry mode(s): ${rootEntries.map((entry) => entry.mode).join(', ')}`,
+    });
+  }
+
+  const mainSource = validateIndexEntry(grouped, mainPair[0], mainPair[0], mainPair[1], mismatches);
+  const mainTarget = validateIndexEntry(grouped, mainPair[1], mainPair[0], mainPair[1], mismatches);
+  if (mainSource === null) {
+    mismatches.push({ source: mainPair[0], derived: mainPair[1], kind: 'orchestrator', reason: 'source file missing from index' });
+  }
+  if (mainTarget === null) {
+    mismatches.push({ source: mainPair[0], derived: mainPair[1], kind: 'orchestrator', reason: 'projection copy missing from index — run build-codex-plugin and git add it' });
+  }
+  if (mainSource && mainTarget) {
+    compareIndexProjection(repoRoot, mainSource, mainTarget, mainPair[0], mainPair[1], blobCache, mismatches);
+  }
+
+  const sourcePrefix = `${sourceDir}/`;
+  const sourceInventory = new Map();
+  for (const relativePath of [...grouped.keys()].filter((name) => name.startsWith(sourcePrefix)).sort()) {
+    const name = relativePath.slice(sourcePrefix.length);
+    const derived = '(unsupported by build-codex-plugin)';
+    const entry = validateIndexEntry(grouped, relativePath, relativePath, derived, mismatches);
+    sourceInventory.set(name, entry || false);
+    if (name.includes('/')) {
+      mismatches.push({
+        source: relativePath,
+        derived,
+        kind: 'orchestrator',
+        reason: 'nested path under scripts/agent-orchestrator/ — build is non-recursive; flatten or update build-codex-plugin.copyAgentOrchestratorSubmodules',
+      });
+    } else if (!name.endsWith('.js')) {
+      mismatches.push({
+        source: relativePath,
+        derived,
+        kind: 'orchestrator',
+        reason: 'unsupported non-JavaScript index entry under scripts/agent-orchestrator/ — the builder only projects flat .js files',
+      });
+    }
+  }
+
+  for (const projectionDir of projectionDirs) {
+    const targetPrefix = `${projectionDir}/`;
+    const targetInventory = new Map();
+    for (const relativePath of [...grouped.keys()].filter((name) => name.startsWith(targetPrefix)).sort()) {
+      const name = relativePath.slice(targetPrefix.length);
+      const source = `${sourceDir}/${name}`;
+      const entry = validateIndexEntry(grouped, relativePath, source, relativePath, mismatches);
+      targetInventory.set(name, entry || false);
+      if (name.includes('/')) {
         mismatches.push({
-          source: `scripts/agent-orchestrator/${entry.name}/`,
-          derived: '(unsupported by build-codex-plugin)',
+          source,
+          derived: relativePath,
           kind: 'orchestrator',
-          reason: 'nested directory under scripts/agent-orchestrator/ — build is non-recursive; flatten or update build-codex-plugin.copyAgentOrchestratorSubmodules',
+          reason: 'unsupported nested projection index entry — expected a flat source-backed file',
         });
-      } else if (entry.isFile() && entry.name.endsWith('.js')) {
-        submoduleNames.push(entry.name);
       }
     }
-    submoduleNames.sort();
-  }
-  const pairs = [mainPair].concat(
-    submoduleNames.map((n) => [
-      `scripts/agent-orchestrator/${n}`,
-      `plugins/tech-persistence/scripts/agent-orchestrator/${n}`,
-    ])
-  );
 
-  for (const [srcRel, dstRel] of pairs) {
-    const srcAbs = path.join(repoRoot, srcRel);
-    const dstAbs = path.join(repoRoot, dstRel);
-    const a = sha256OfFile(srcAbs);
-    const b = sha256OfFile(dstAbs);
-    if (a == null) {
-      mismatches.push({ source: srcRel, derived: dstRel, kind: 'orchestrator', reason: 'source file missing' });
-      continue;
-    }
-    if (b == null) {
-      mismatches.push({ source: srcRel, derived: dstRel, kind: 'orchestrator', reason: 'plugin copy missing — run build-codex-plugin' });
-      continue;
-    }
-    if (a !== b) {
-      mismatches.push({ source: srcRel, derived: dstRel, kind: 'orchestrator', reason: 'sha256 mismatch — plugin copy out of sync' });
-    }
-  }
-
-  // Orphan detection: plugin has .js submodules not in source
-  const pluginSubmoduleDir = path.join(repoRoot, 'plugins', 'tech-persistence', 'scripts', 'agent-orchestrator');
-  if (fs.existsSync(pluginSubmoduleDir)) {
-    const sourceSet = new Set(submoduleNames);
-    const pluginNames = fs.readdirSync(pluginSubmoduleDir).filter((n) => n.endsWith('.js'));
-    for (const name of pluginNames) {
-      if (!sourceSet.has(name)) {
+    for (const [name, sourceEntry] of sourceInventory) {
+      if (!sourceEntry || name.includes('/') || !name.endsWith('.js')) continue;
+      const source = `${sourceDir}/${name}`;
+      const derived = `${projectionDir}/${name}`;
+      if (!targetInventory.has(name)) {
         mismatches.push({
-          source: `scripts/agent-orchestrator/${name}`,
-          derived: `plugins/tech-persistence/scripts/agent-orchestrator/${name}`,
+          source,
+          derived,
           kind: 'orchestrator',
-          reason: 'orphan plugin submodule — source file does not exist',
+          reason: 'projection copy missing from index — run build-codex-plugin and git add it',
+        });
+        continue;
+      }
+      const targetEntry = targetInventory.get(name);
+      if (targetEntry) {
+        compareIndexProjection(repoRoot, sourceEntry, targetEntry, source, derived, blobCache, mismatches);
+      }
+    }
+
+    for (const name of targetInventory.keys()) {
+      if (!sourceInventory.has(name)) {
+        mismatches.push({
+          source: `${sourceDir}/${name}`,
+          derived: `${projectionDir}/${name}`,
+          kind: 'orchestrator',
+          reason: 'orphan plugin submodule in index — source file does not exist',
         });
       }
     }
@@ -765,5 +903,5 @@ module.exports = {
   GRANDFATHER_BEFORE,
   PLAN_PATH_RE,
   TOP_LEVEL_HANDOFF_PATH_RE,
-  ORCHESTRATOR_PATH_RE,
+  isManagedOrchestratorPath,
 };

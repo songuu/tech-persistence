@@ -17,6 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { readSprintProgress } = require('./lib/sprint-progress');
 const {
   resolveBaseDir,
   resolveProjectInstructionFile,
@@ -936,16 +937,16 @@ function detectActiveSprint() {
     .filter(f => f.endsWith('.md') && !f.includes('-handoff-') && f !== 'TEMPLATE.md')
     .map(f => {
       const content = fs.readFileSync(path.join(plansDir, f), 'utf-8');
-      const statusMatch = content.match(/status:\s*["']?([\w-]+)["']?/);
-      const status = statusMatch ? statusMatch[1] : null;
-      const tasksDone = (content.match(/- \[x\]/gi) || []).length;
-      const tasksTotal = (content.match(/- \[[ x]\]/gi) || []).length;
-      return { file: f, status, content, tasksDone, tasksTotal };
+      try {
+        return { file: f, content, ...readSprintProgress(content) };
+      } catch (error) {
+        writeRuntimeDiagnostic('evaluate-session', 'invalid-sprint-task-metadata', error);
+        return null;
+      }
     })
     .filter(d =>
-      d.status &&
-      ['in-progress', 'planning', 'reviewing', 'draft'].includes(d.status) &&
-      !(d.tasksTotal > 0 && d.tasksDone >= d.tasksTotal)
+      d && d.status &&
+      ['in-progress', 'planning', 'reviewing', 'draft'].includes(d.status)
     );
 
   return sprintDocs.length > 0 ? sprintDocs[0] : null;
@@ -962,6 +963,7 @@ function shouldAutoCheckpoint(observations) {
 
 function autoCheckpoint(sprint, observations) {
   if (!sprint) return null;
+  const { tasksDone, tasksTotal } = readSprintProgress(sprint.content);
 
   const plansDir = path.join(process.cwd(), 'docs', 'plans');
   const handoffDir = path.join(plansDir, '.handoff');
@@ -982,10 +984,6 @@ function autoCheckpoint(sprint, observations) {
     })
     .length;
   const handoffNum = existingHandoffs + 1;
-
-  // 从 sprint 文档中提取任务状态
-  const tasksDone = (sprint.content.match(/- \[x\]/gi) || []).length;
-  const tasksTotal = (sprint.content.match(/- \[[ x]\]/gi) || []).length;
 
   // 从观察中提取修改的文件
   const editedFiles = new Set();
@@ -1389,6 +1387,7 @@ if (require.main === module) {
 module.exports = {
   applyStopLearningPolicy,
   autoCheckpoint,
+  detectActiveSprint,
   closeSelfLearningEpisode,
   loadSelfLearningConfig,
   parseStopInvocation,

@@ -5,6 +5,10 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const {
+  ARCHITECTURE_TEST_TIMEOUT_MS,
+  ARCHITECTURE_VALIDATOR_TIMEOUT_MS,
+} = require('./model-compat-validator');
 
 const CASES = Object.freeze([
   'L1-single-file', 'L2-multi-file', 'L3-security-review', 'failure-recovery',
@@ -211,7 +215,7 @@ function architectureInvocation(repoRoot, expectedFile) {
   return { ...descriptor, commandHash: sha256(JSON.stringify(descriptor)) };
 }
 
-function runArchitectureScript(invocation, env) {
+function runArchitectureScript(invocation, env, timeoutMs = ARCHITECTURE_TEST_TIMEOUT_MS) {
   return spawnSync(invocation.executable, invocation.args, {
     cwd: invocation.cwd,
     env,
@@ -219,7 +223,7 @@ function runArchitectureScript(invocation, env) {
     shell: false,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 120000,
+    timeout: timeoutMs,
     maxBuffer: 16 * 1024 * 1024,
   });
 }
@@ -331,7 +335,9 @@ function collectExternalArchitectureEvidence(root) {
   const validatorFile = filesBefore[0];
   const validatorPath = validatorFile.path;
   const validatorInvocation = architectureInvocation(repoRoot, validatorFile);
-  const validatorResult = runArchitectureScript(validatorInvocation, env);
+  const validatorResult = runArchitectureScript(
+    validatorInvocation, env, ARCHITECTURE_VALIDATOR_TIMEOUT_MS
+  );
   if (validatorResult.error) {
     throw new Error(`architecture validator failed: ${validatorResult.error.message}`);
   }

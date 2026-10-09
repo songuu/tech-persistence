@@ -17,7 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync, spawnSync } = require('child_process');
+const { execFileSync, execSync, spawnSync } = require('child_process');
 
 const REAL_REPO = path.resolve(__dirname, '..');
 const KEEP = process.argv.includes('--keep');
@@ -74,6 +74,55 @@ function gitAdd(dir, ...files) {
   for (const f of files) {
     execSync(`git add -- "${f}"`, { cwd: dir });
   }
+}
+
+function stageIndexSymlink(dir, rel, target) {
+  const oid = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: dir,
+    encoding: 'utf8',
+    input: target,
+  }).trim();
+  execFileSync('git', ['update-index', '--add', '--cacheinfo', `120000,${oid},${rel}`], {
+    cwd: dir,
+  });
+}
+
+function stageIndexFile(dir, rel, content) {
+  const oid = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: dir,
+    encoding: 'utf8',
+    input: content,
+  }).trim();
+  execFileSync('git', ['update-index', '--add', '-z', '--index-info'], {
+    cwd: dir,
+    input: Buffer.from(`100644 ${oid} 0\t${rel}\0`, 'utf8'),
+  });
+}
+
+function stageIndexConflict(dir, rel) {
+  const blobs = ['base\n', 'ours\n', 'theirs\n'].map((content) => (
+    execFileSync('git', ['hash-object', '-w', '--stdin'], {
+      cwd: dir,
+      encoding: 'utf8',
+      input: content,
+    }).trim()
+  ));
+  execFileSync('git', ['update-index', '--force-remove', '--', rel], { cwd: dir });
+  execFileSync('git', ['update-index', '--index-info'], {
+    cwd: dir,
+    input: blobs.map((oid, index) => `100644 ${oid} ${index + 1}\t${rel}\n`).join(''),
+  });
+}
+
+function stageIndexTreeSymlink(dir, rel, target) {
+  const tracked = execFileSync('git', ['ls-files', '-z', '--', rel], {
+    cwd: dir,
+    encoding: 'utf8',
+  }).split('\0').filter(Boolean);
+  for (const entry of tracked) {
+    execFileSync('git', ['update-index', '--force-remove', '--', entry], { cwd: dir });
+  }
+  stageIndexSymlink(dir, rel, target);
 }
 
 function runCheck(dir) {
@@ -328,6 +377,23 @@ function scenarioFailOpenOnMissingTransformer() {
   );
 }
 
+function scenarioPreCommitModuleImports() {
+  const dir = makeRepo('module-import');
+  clearRequireCache(dir);
+
+  const preCommit = require(path.join(dir, 'scripts/pre-commit-check.js'));
+  assert(
+    typeof preCommit.isManagedOrchestratorPath === 'function',
+    'expected isManagedOrchestratorPath export'
+  );
+  assert(
+    preCommit.isManagedOrchestratorPath(
+      'plugins/tech-persistence/codex-hooks/agent-orchestrator/orphan\n.js'
+    ),
+    'managed-path predicate must preserve control characters in descendants'
+  );
+}
+
 function scenarioPlanMissingAssumptionSection() {
   const dir = makeRepo('s3');
   clearRequireCache(dir);
@@ -399,6 +465,7 @@ const ORCH_MAIN_SRC = 'scripts/agent-orchestrator.js';
 const ORCH_MAIN_DST = 'plugins/tech-persistence/scripts/agent-orchestrator.js';
 const ORCH_SUB_SRC_DIR = 'scripts/agent-orchestrator';
 const ORCH_SUB_DST_DIR = 'plugins/tech-persistence/scripts/agent-orchestrator';
+const ORCH_CODEX_HOOK_DST_DIR = 'plugins/tech-persistence/codex-hooks/agent-orchestrator';
 
 function setupOrchestratorFixture(dir, mainContent, submodules = {}) {
   writeFile(dir, ORCH_MAIN_SRC, mainContent);
@@ -406,6 +473,7 @@ function setupOrchestratorFixture(dir, mainContent, submodules = {}) {
   for (const [name, content] of Object.entries(submodules)) {
     writeFile(dir, `${ORCH_SUB_SRC_DIR}/${name}`, content);
     writeFile(dir, `${ORCH_SUB_DST_DIR}/${name}`, content);
+    writeFile(dir, `${ORCH_CODEX_HOOK_DST_DIR}/${name}`, content);
   }
 }
 
@@ -416,7 +484,9 @@ function scenarioOrchestratorSynced() {
   setupOrchestratorFixture(dir, '// orchestrator v1\nmodule.exports = {};\n', {
     'queue.js': '// queue\n',
   });
-  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST, `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`);
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`);
 
   const res = runCheck(dir);
   assert(res.code === 0, `expected exit 0, got ${res.code}. stderr=${res.stderr}`);
@@ -426,12 +496,117 @@ function scenarioOrchestratorSynced() {
   );
 }
 
+function scenarioCodexHookWorktreeOnlySync() {
+  const dir = makeRepo('s8-index');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator v1\n', { 'queue.js': '// queue v1\n' });
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`);
+  execSync('git commit -q -m "synced v1"', { cwd: dir });
+
+  writeFile(dir, `${ORCH_SUB_SRC_DIR}/queue.js`, '// queue v2\n');
+  writeFile(dir, `${ORCH_SUB_DST_DIR}/queue.js`, '// queue v2\n');
+  writeFile(dir, `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`, '// queue v2\n');
+  gitAdd(dir, `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`);
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/codex-hooks\/agent-orchestrator\/queue\.js/.test(res.stderr), `stderr missing unstaged Codex hook path: ${res.stderr}`);
+  assert(/sha256 mismatch|not staged|index/.test(res.stderr), `stderr missing index mismatch reason: ${res.stderr}`);
+}
+
+function scenarioCodexHookIndexSymlinkRejected() {
+  const dir = makeRepo('s8-index-symlink');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator v1\n', { 'queue.js': '// queue v1\n' });
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`);
+  execSync('git commit -q -m "synced"', { cwd: dir });
+  stageIndexSymlink(dir, `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`, '../../../scripts/agent-orchestrator/queue.js');
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/codex-hooks\/agent-orchestrator\/queue\.js/.test(res.stderr), `stderr missing symlink path: ${res.stderr}`);
+  assert(/regular|mode|symlink|entry/.test(res.stderr), `stderr missing non-regular entry reason: ${res.stderr}`);
+}
+
+function scenarioCodexHookIndexConflictRejected() {
+  const dir = makeRepo('s8-index-conflict');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator v1\n', { 'queue.js': '// queue v1\n' });
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`);
+  execSync('git commit -q -m "synced"', { cwd: dir });
+  stageIndexConflict(dir, `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`);
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/codex-hooks\/agent-orchestrator\/queue\.js/.test(res.stderr), `stderr missing conflicted path: ${res.stderr}`);
+  assert(/conflict|non-zero stage/.test(res.stderr), `stderr missing conflict reason: ${res.stderr}`);
+}
+
+function scenarioCodexHookRootSymlinkRejected() {
+  const dir = makeRepo('s8-root-symlink');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator v1\n', { 'queue.js': '// queue v1\n' });
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`);
+  execSync('git commit -q -m "synced"', { cwd: dir });
+  stageIndexTreeSymlink(dir, ORCH_CODEX_HOOK_DST_DIR, '../../../scripts/agent-orchestrator');
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/codex-hooks\/agent-orchestrator(?:\s|$)/m.test(res.stderr), `stderr missing bare managed root: ${res.stderr}`);
+  assert(/mode 120000|bare.*root|implicit directory/.test(res.stderr), `stderr missing root entry type reason: ${res.stderr}`);
+}
+
+function scenarioUnrelatedIndexConflictIgnored() {
+  const dir = makeRepo('s8-unrelated-conflict');
+  clearRequireCache(dir);
+
+  writeFile(dir, 'notes.txt', 'clean\n');
+  gitAdd(dir, 'notes.txt');
+  execSync('git commit -q -m "notes"', { cwd: dir });
+  stageIndexConflict(dir, 'notes.txt');
+
+  const res = runCheck(dir);
+  assert(res.code === 0, `unrelated conflict should not trigger orchestrator guard. stderr=${res.stderr}`);
+}
+
+function scenarioCodexHookControlCharacterOrphanRejected() {
+  const dir = makeRepo('s8-control-char');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator v1\n', { 'queue.js': '// queue v1\n' });
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`);
+  execSync('git commit -q -m "synced"', { cwd: dir });
+  // DEL is a control character that Git C-quotes in newline-delimited output,
+  // but unlike LF it can still be represented in a Windows Git index fixture.
+  stageIndexFile(dir, `${ORCH_CODEX_HOOK_DST_DIR}/orphan\x7f.js`, '// orphan\n');
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/orphan plugin submodule in index/.test(res.stderr), `stderr missing control-character orphan reason: ${res.stderr}`);
+}
+
 function scenarioOrchestratorTampered() {
   const dir = makeRepo('s9');
   clearRequireCache(dir);
 
   setupOrchestratorFixture(dir, '// orchestrator v1\n', { 'queue.js': '// queue v1\n' });
-  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST, `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`);
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`);
   execSync('git commit -q -m "synced"', { cwd: dir });
 
   // Tamper plugin copy of a submodule
@@ -443,6 +618,25 @@ function scenarioOrchestratorTampered() {
   assert(/agent-orchestrator\/queue\.js/.test(res.stderr), `stderr missing file name: ${res.stderr}`);
   assert(/sha256 mismatch/.test(res.stderr), `stderr missing reason: ${res.stderr}`);
   assert(/build-codex-plugin/.test(res.stderr), `stderr missing repair command: ${res.stderr}`);
+}
+
+function scenarioCodexHookOrchestratorTampered() {
+  const dir = makeRepo('s9-codex-hook');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator v1\n', { 'queue.js': '// queue v1\n' });
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`);
+  execSync('git commit -q -m "synced"', { cwd: dir });
+
+  writeFile(dir, `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`, '// queue v1\n// TAMPERED\n');
+  gitAdd(dir, `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`);
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/codex-hooks\/agent-orchestrator\/queue\.js/.test(res.stderr), `stderr missing Codex hook file name: ${res.stderr}`);
+  assert(/sha256 mismatch/.test(res.stderr), `stderr missing reason: ${res.stderr}`);
 }
 
 function scenarioOrchestratorCRLFSource() {
@@ -471,7 +665,9 @@ function scenarioOrchestratorSourceDeletedOrphan() {
   setupOrchestratorFixture(dir, '// orchestrator\n', { 'queue.js': '// queue\n', 'locks.js': '// locks\n' });
   gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
     `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
-    `${ORCH_SUB_SRC_DIR}/locks.js`, `${ORCH_SUB_DST_DIR}/locks.js`);
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`,
+    `${ORCH_SUB_SRC_DIR}/locks.js`, `${ORCH_SUB_DST_DIR}/locks.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/locks.js`);
   execSync('git commit -q -m "synced with submodules"', { cwd: dir });
 
   // Delete source submodule but leave plugin copy → orphan
@@ -480,6 +676,22 @@ function scenarioOrchestratorSourceDeletedOrphan() {
   const res = runCheck(dir);
   assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
   assert(/orphan plugin submodule|source file missing/.test(res.stderr), `stderr missing orphan/missing msg: ${res.stderr}`);
+}
+
+function scenarioCodexHookOrchestratorOrphan() {
+  const dir = makeRepo('s11-codex-hook');
+  clearRequireCache(dir);
+
+  setupOrchestratorFixture(dir, '// orchestrator\n', { 'queue.js': '// queue\n' });
+  writeFile(dir, `${ORCH_CODEX_HOOK_DST_DIR}/orphan.js`, '// orphan\n');
+  gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
+    `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`, `${ORCH_CODEX_HOOK_DST_DIR}/orphan.js`);
+
+  const res = runCheck(dir);
+  assert(res.code === 1, `expected exit 1, got ${res.code}. stderr=${res.stderr}`);
+  assert(/codex-hooks\/agent-orchestrator\/orphan\.js/.test(res.stderr), `stderr missing Codex hook orphan: ${res.stderr}`);
+  assert(/orphan plugin submodule|source file does not exist/.test(res.stderr), `stderr missing orphan reason: ${res.stderr}`);
 }
 
 function scenarioOrchestratorNestedSubdir() {
@@ -492,6 +704,7 @@ function scenarioOrchestratorNestedSubdir() {
   writeFile(dir, `${ORCH_SUB_SRC_DIR}/providers/claude.js`, '// nested provider\n');
   gitAdd(dir, ORCH_MAIN_SRC, ORCH_MAIN_DST,
     `${ORCH_SUB_SRC_DIR}/queue.js`, `${ORCH_SUB_DST_DIR}/queue.js`,
+    `${ORCH_CODEX_HOOK_DST_DIR}/queue.js`,
     `${ORCH_SUB_SRC_DIR}/providers/claude.js`);
 
   const res = runCheck(dir);
@@ -884,10 +1097,19 @@ function main() {
   runScenario('S6: user-level/rules/ source out of sync → exit 1 with --rules in repair cmd', scenarioRulesPathOutOfSync);
   runScenario('S7: top-level docs/plans/*-handoff-*.md staged → exit 1', scenarioTopLevelHandoffBlocked);
   runScenario('S8: missing transformer module → exit 0 with fail-open diagnostic', scenarioFailOpenOnMissingTransformer);
+  runScenario('S8b: pre-commit module imports with managed-path predicate export', scenarioPreCommitModuleImports);
   runScenario('S9: orchestrator src+plugin synced → exit 0 (not fail-open)', scenarioOrchestratorSynced);
+  runScenario('S9b: Codex hook only synced in worktree, stale in index → exit 1', scenarioCodexHookWorktreeOnlySync);
+  runScenario('S9c: Codex hook symlink entry in index → exit 1', scenarioCodexHookIndexSymlinkRejected);
+  runScenario('S9d: Codex hook conflicted index stages → exit 1', scenarioCodexHookIndexConflictRejected);
+  runScenario('S9e: bare Codex hook root symlink in index → exit 1 with root mode', scenarioCodexHookRootSymlinkRejected);
+  runScenario('S9f: unrelated conflicted index path does not trigger orchestrator guard', scenarioUnrelatedIndexConflictIgnored);
+  runScenario('S9g: control-character Codex hook orphan in index → exit 1', scenarioCodexHookControlCharacterOrphanRejected);
   runScenario('S10: orchestrator plugin tampered → exit 1 with file name + sha mismatch', scenarioOrchestratorTampered);
+  runScenario('S10b: Codex hook orchestrator tampered → exit 1 with file name + sha mismatch', scenarioCodexHookOrchestratorTampered);
   runScenario('S11: orchestrator source CRLF + plugin LF → exit 0 (LF-normalized)', scenarioOrchestratorCRLFSource);
   runScenario('S12: orchestrator source submodule deleted, plugin remains → exit 1 (orphan)', scenarioOrchestratorSourceDeletedOrphan);
+  runScenario('S12b: Codex hook orchestrator orphan → exit 1 (orphan)', scenarioCodexHookOrchestratorOrphan);
   runScenario('S13: nested subdir under scripts/agent-orchestrator/ → exit 1 (non-recursive build)', scenarioOrchestratorNestedSubdir);
   runScenario('S14a: sprint completed + checked task path in diff → exit 0 (not fail-open)', scenarioPlanCompletionPathInDiff);
   runScenario('S14b: sprint completed + checked task path missing → exit 1 with C7 marker + path', scenarioPlanCompletionPathMissing);

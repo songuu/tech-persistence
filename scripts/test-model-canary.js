@@ -528,6 +528,23 @@ test('architecture producer sanitizes execution and emits no marker when a child
   assert(!/visionSupported|collaborationAvailable/.test(successOutput));
 });
 
+test('architecture producer allows the measured durability suite duration while retaining a finite timeout', () => {
+  const producer = require('./model-compat-validator');
+  let output = '';
+  const code = producer.main([], {
+    env: {},
+    spawnSyncImpl: (executable, args, options) => options.timeout >= 135000
+      ? { status: 0, signal: null }
+      : { status: null, error: Object.assign(new Error('durability suite exceeded budget'), { code: 'ETIMEDOUT' }) },
+    stdout: { write: (value) => { output += value; } },
+    stderr: { write: () => {} },
+  });
+  assert.strictEqual(code, 0);
+  assert(output.startsWith(COMPATIBILITY_EVIDENCE_PREFIX));
+  assert(Number.isSafeInteger(producer.ARCHITECTURE_TEST_TIMEOUT_MS));
+  assert(producer.ARCHITECTURE_VALIDATOR_TIMEOUT_MS > producer.ARCHITECTURE_TEST_TIMEOUT_MS * producer.ARCHITECTURE_TESTS.length);
+});
+
 test('architecture producer emits one strict marker only after both real tests pass', () => {
   const repoRoot = path.resolve(__dirname, '..');
   const validatorPath = path.join(__dirname, 'model-compat-validator.js');
@@ -1032,11 +1049,11 @@ test('versioned Claude surface baseline matches the real frozen repository surfa
   const verification = verifyClaudeSurfaceBaseline(repoRoot, baselinePath);
   assert.strictEqual(verification.equal, true);
   assert.deepStrictEqual(verification.mismatches, []);
-  assert.strictEqual(verification.candidate.fileCount, 114);
-  assert.strictEqual(verification.candidate.totalBytes, 1135196);
+  assert.strictEqual(verification.candidate.fileCount, 131);
+  assert.strictEqual(verification.candidate.totalBytes, 1240020);
   assert.strictEqual(
     verification.candidate.surfaceHash,
-    '09df6a74d8ac89a850f9de8d1b423cc67e9e4c0c6c8e0a7daa6a69c1b64036ef'
+    '43104540c496ec40508b53478a548129a72d38b6466624525984e182b0f1e5c0'
   );
   assert.deepStrictEqual(verification.candidate.warnings, []);
 

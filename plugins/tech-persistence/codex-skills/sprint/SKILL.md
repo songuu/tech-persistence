@@ -5,7 +5,7 @@ description: Codex-native sprint state machine with phase-local loading and tran
 
 # Sprint
 
-按 `think -> plan -> work -> review -> compound` 推进；本文件只管状态机，Phase 细节由同名 skill 提供。
+按 `think -> plan -> work -> review -> compound` 推进；仅管状态机，Phase 细节由同名 skill 提供。
 
 ## 渐进加载
 
@@ -25,22 +25,25 @@ description: Codex-native sprint state machine with phase-local loading and tran
 
 ```text
 node <cli> init --plan <plan> [--restore-phase <phase>] --next <action>
+node <cli> prepare-supersede-proposal <see resume.md>
+node <cli> supersede <see resume.md>
+node <cli> inspect-v4-supersede-recovery
 node <cli> bind-acceptance --run-dir <v1-run-dir> --control-root <authority-root>
 node <cli> advance --expected <current> --to <adjacent> --next <action> [--control-root <authority-root>]
 node <cli> block --expected <current> --reason <reason> --next <action>
 node <cli> complete --expected compound
 ```
 
-CLI 以持久 transaction、move-verify claim、exclusive-link 和 token/inode 锁实现 CAS；裸写（含预开 FD）属外部破坏。只允许 `think->plan->work->review->compound` 与 `review->work`；冲突停下重读。`SPRINT_STATE_LOCKED` 不按年龄删除，核验 owner 后仅用户/运维清 orphan。
+CLI 用持久 transaction、move-verify claim、exclusive-link 与 token/inode 锁实现 CAS；裸写（含预开 FD）属外部破坏。只允许 `think->plan->work->review->compound` 与 `review->work`。任务终态、supersede proposal/receipt 和旧 WAL 修复契约见 `resume.md`。冲突停下重读；`SPRINT_STATE_LOCKED` 仅由用户/运维核验 owner 后清理。
 
-新 pointer 使用 `acceptance_protocol=v1`；Harness 是显式可选增强，未绑定时由当前宿主推进。只有用户显式 `bind-acceptance` 后才启用 Contract/Receipt 外部门，绑定存在则失败闭合。详见 `runtime-portability.md`。旧 pointer 按 `legacy` 打开。
+新 pointer 使用 `acceptance_protocol=v1`。Harness 是显式可选增强，仅在用户显式 `bind-acceptance` 后启用；绑定存在则失败闭合，否则由当前宿主推进。旧 pointer 按 `legacy` 打开。详见 `runtime-portability.md`。
 
 ## 启动与恢复
 
-- `reason === "sprint-recovery-required"`：停止 Phase，重试原 mutation；completion 只用 `complete --expected compound`。
+- `reason === "sprint-recovery-required"`：停止 Phase，重试原 mutation；completion 只用 `complete --expected compound`，supersession 只重试原参数的 `supersede`。
 - `active === true`：普通 `/sprint` 与 `resume` 都恢复 pointer 当前 Phase，不扫描 handoff 或重跑已完成 Phase。
 - `reason === "missing-pointer"`（非 resume）：不是诊断终点；按 `references/bootstrap.md` 建新 sprint。
-- `reason === "completed-sprint"`：新 sprint 可 `init`；CLI 发布新 pointer 后消费旧 record。
+- `reason === "completed-sprint"`：新 sprint 可 `init`；发布前验证并 claim 旧 record，发布后退休旧证据；失败可恢复。
 - `reason === "completed-plan"`：仅 phase=`compound` 且证据核对后运行 `complete`。
 - pointer/recovery 损坏、版本或路径非法均阻塞；仅显式 resume 的已验证 handoff 可 `init --restore-phase`。
 

@@ -8,8 +8,11 @@ const {
   blockActiveSprint,
   completeActiveSprint,
   initActiveSprint,
+  inspectPendingV4Supersession,
+  prepareSupersessionProposal,
   readActiveSprint,
   sprintStateError,
+  supersedeActiveSprint,
 } = require('./lib/codex-active-sprint');
 
 function loadSprintAcceptanceAdapter() {
@@ -29,7 +32,18 @@ function loadSprintAcceptanceAdapter() {
 
 const COMMAND_OPTIONS = Object.freeze({
   status: new Set(),
+  'inspect-v4-supersede-recovery': new Set(),
+  'prepare-supersede-proposal': new Set([
+    'expected', 'expected-pointer-sha256', 'old-plan-sha256', 'plan',
+    'new-plan-sha256', 'task-map', 'task-map-sha256', 'approval-receipt',
+    'approval-sha256', 'next',
+  ]),
   init: new Set(['plan', 'restore-phase', 'next', 'now', 'acceptance-protocol']),
+  supersede: new Set([
+    'expected', 'expected-pointer-sha256', 'old-plan-sha256', 'plan',
+    'new-plan-sha256', 'task-map', 'task-map-sha256', 'approval-receipt',
+    'approval-sha256', 'migration-receipt', 'migration-receipt-sha256', 'next',
+  ]),
   advance: new Set(['expected', 'to', 'next', 'now', 'control-root']),
   block: new Set(['expected', 'reason', 'next', 'now']),
   complete: new Set(['expected']),
@@ -40,7 +54,10 @@ function usage() {
   return [
     'usage:',
     '  codex-active-sprint-state.js status',
+    '  codex-active-sprint-state.js inspect-v4-supersede-recovery',
+    '  codex-active-sprint-state.js prepare-supersede-proposal --expected compound --expected-pointer-sha256 <sha256> --old-plan-sha256 <sha256> --plan <docs/plans/*.md> --new-plan-sha256 <sha256> --task-map <docs/plans/.handoff/*.json> --task-map-sha256 <sha256> --approval-receipt <docs/plans/.handoff/*.json> --approval-sha256 <sha256> --next <action>',
     '  codex-active-sprint-state.js init --plan <docs/plans/*.md> [--restore-phase <phase>] --next <action>',
+    '  codex-active-sprint-state.js supersede --expected compound --expected-pointer-sha256 <sha256> --old-plan-sha256 <sha256> --plan <docs/plans/*.md> --new-plan-sha256 <sha256> --task-map <docs/plans/.handoff/*.json> --task-map-sha256 <sha256> --approval-receipt <docs/plans/.handoff/*.json> --approval-sha256 <sha256> --migration-receipt <docs/plans/.handoff/active-sprint.migration-receipt-<sha256>.json> --migration-receipt-sha256 <sha256> --next <action>',
     '  codex-active-sprint-state.js advance --expected <phase> --to <phase> --next <action>',
     '  codex-active-sprint-state.js bind-acceptance --run-dir <v1-run-dir> --control-root <authority-root>',
     '  codex-active-sprint-state.js block --expected <phase> --reason <reason> --next <action>',
@@ -81,6 +98,29 @@ function requireOptions(command, options, names) {
 function main(argv = process.argv.slice(2), cwd = process.cwd()) {
   const { command, options } = parseArgs(argv);
   if (command === 'status') return readActiveSprint(cwd);
+  if (command === 'inspect-v4-supersede-recovery') {
+    return inspectPendingV4Supersession(cwd);
+  }
+  if (command === 'prepare-supersede-proposal') {
+    requireOptions(command, options, [
+      'expected', 'expected-pointer-sha256', 'old-plan-sha256', 'plan',
+      'new-plan-sha256', 'task-map', 'task-map-sha256', 'approval-receipt',
+      'approval-sha256', 'next',
+    ]);
+    return prepareSupersessionProposal({
+      cwd,
+      expectedPhase: options.expected,
+      expectedPointerSha256: options['expected-pointer-sha256'],
+      oldPlanSha256: options['old-plan-sha256'],
+      plan: options.plan,
+      newPlanSha256: options['new-plan-sha256'],
+      taskMap: options['task-map'],
+      taskMapSha256: options['task-map-sha256'],
+      approvalReceipt: options['approval-receipt'],
+      approvalSha256: options['approval-sha256'],
+      next: options.next,
+    });
+  }
   if (command === 'init') {
     requireOptions(command, options, ['plan', 'next']);
     return initActiveSprint({
@@ -101,6 +141,28 @@ function main(argv = process.argv.slice(2), cwd = process.cwd()) {
       next: options.next,
       now: options.now,
       controlRoot: options['control-root'],
+    });
+  }
+  if (command === 'supersede') {
+    requireOptions(command, options, [
+      'expected', 'expected-pointer-sha256', 'old-plan-sha256', 'plan',
+      'new-plan-sha256', 'task-map', 'task-map-sha256', 'approval-receipt',
+      'approval-sha256', 'migration-receipt', 'migration-receipt-sha256', 'next',
+    ]);
+    return supersedeActiveSprint({
+      cwd,
+      expectedPhase: options.expected,
+      expectedPointerSha256: options['expected-pointer-sha256'],
+      oldPlanSha256: options['old-plan-sha256'],
+      plan: options.plan,
+      newPlanSha256: options['new-plan-sha256'],
+      taskMap: options['task-map'],
+      taskMapSha256: options['task-map-sha256'],
+      approvalReceipt: options['approval-receipt'],
+      approvalSha256: options['approval-sha256'],
+      migrationReceipt: options['migration-receipt'],
+      migrationReceiptSha256: options['migration-receipt-sha256'],
+      next: options.next,
     });
   }
   if (command === 'block') {

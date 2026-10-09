@@ -12,6 +12,11 @@ const ARCHITECTURE_TESTS = Object.freeze([
   path.join(__dirname, 'test-codex-active-sprint-state.js'),
   path.join(__dirname, 'test-codex-native-skill-projection.js'),
 ]);
+// Durability tests exercise real filesystem recovery; the parent must allow
+// all serial children to exhaust their budgets before timing out itself.
+const ARCHITECTURE_TEST_TIMEOUT_MS = 180000;
+const ARCHITECTURE_VALIDATOR_TIMEOUT_MS =
+  ARCHITECTURE_TEST_TIMEOUT_MS * ARCHITECTURE_TESTS.length + 15000;
 
 function sanitizedChildEnvironment(source) {
   const clean = {};
@@ -57,7 +62,7 @@ function main(argv = process.argv.slice(2), dependencies = {}) {
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      timeout: 120000,
+      timeout: ARCHITECTURE_TEST_TIMEOUT_MS,
       maxBuffer: 16 * 1024 * 1024,
     });
     if (!result || result.error || result.status !== 0) {
@@ -81,6 +86,8 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = {
   ARCHITECTURE_TESTS,
+  ARCHITECTURE_TEST_TIMEOUT_MS,
+  ARCHITECTURE_VALIDATOR_TIMEOUT_MS,
   EVIDENCE_PREFIX,
   EVIDENCE_SCHEMA_VERSION,
   REPO_ROOT,

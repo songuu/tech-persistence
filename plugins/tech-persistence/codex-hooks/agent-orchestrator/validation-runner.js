@@ -45,8 +45,11 @@ function resolveDirectories(workdirValue, runDirValue, authorityRunsRootValue) {
   fs.mkdirSync(runDir, { recursive: true });
   const realWorkdir = fs.realpathSync(workdir);
   const realRunDir = fs.realpathSync(runDir);
-  const realAuthorityRunsRoot = authorityRunsRoot ? fs.realpathSync(authorityRunsRoot) : null;
-  if (!pathInside(realWorkdir, realRunDir)
+  const runDirInsideWorkdir = pathInside(realWorkdir, realRunDir);
+  const realAuthorityRunsRoot = !runDirInsideWorkdir && authorityRunsRoot
+    ? fs.realpathSync(authorityRunsRoot)
+    : null;
+  if (!runDirInsideWorkdir
       && (!realAuthorityRunsRoot || !pathInside(realAuthorityRunsRoot, realRunDir))) {
     throw new Error(`validation runDir must stay inside workdir or the authority runs root: ${runDir}`);
   }
