@@ -19,6 +19,8 @@ description: Codex-native risk-scaled architecture and implementation planning w
 
 涉及多 runtime projection、schema、生成器或 tracked 派生文件时，增加 before/after 契约表，并列出所有消费者和一致性测试。
 
+常规开发或涉及跨任务接口/失败输入时，读取 [任务契约](references/task-contracts.md)；L0/L1 小任务可省略。
+
 ## Architectural shadow pilot
 
 Think 明确路由为 `architectural-like`，或 Plan 研究发现同等 architectural 信号时，才启用 shadow design-authority；probe/bounded 路径不得为此增加文档税。在当前计划文件中写入一次：

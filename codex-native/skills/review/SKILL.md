@@ -17,6 +17,13 @@ description: Codex-native findings-first review with evidence, risk-based testin
 4. findings 按严重度排序，给出文件、紧凑行号、触发条件、影响和修复方向。
 5. 没有 finding 时明确说“未发现可操作问题”，同时列出剩余风险或未运行验证。
 
+## 风险输入与未判断项
+
+- L2+ 或涉及输入/错误边界时，读相关计划的 Review Focus；无该段就基于当前需求/diff 检查高价值失败输入，不重建计划。沿 owning task / 测试查实际结果；planned/checkbox 不算通过证据，未验证保留 unknown 和影响。
+- 需求未明说的行为按用户影响报告 defect/risk；已有 criterion 只引用 ID，不静默扩大 scope、改冻结 criterion 或授权只读审查修复。
+- Findings 之后列「未判断项（Declined to judge）」：考虑过但因范围/证据不足未判断的行为及理由，无则写 none。未运行测试另列验证限制。派发 reviewer 时要求同样输出。
+- 主代理逐项给出处置：补证据/范围内修复建议、明确后续任务或说明不属于本次需求。影响完成定义的未决问题保留为 finding/缺证，不默认通过；已确认缺陷不得放进未判断项。L0/L1 可简述结果，不强制风险表。
+
 ## Codex collaboration
 
 - 先划分审查面，不要为探测而调用工具。**只有至少 2 个相互独立的审查面，且 collaboration 工具可用时**，才调用 `collaboration.list_agents` 计算可用 slot；并行数不超过独立审查面、slot 和 3，**最多 3 个 child**。

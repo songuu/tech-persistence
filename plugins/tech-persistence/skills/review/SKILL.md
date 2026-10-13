@@ -85,7 +85,8 @@ STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
 2. Findings table:
    | # | 文件:行 | severity | 问题 | 修复建议 |
    |---|---------|---------|------|---------|
-3. 末尾必须一行: STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
+3. 未判断项（Declined to judge）：仅列考虑过但因范围/证据不足而未判断的行为及理由；无则写 none。未运行测试另列验证限制。
+4. 末尾必须一行: STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
 
 约束：
 - 仅关注 <视角> 维度；其他视角的问题不报
@@ -199,6 +200,13 @@ L0-L2 且非 `--auto`：跳过 revise loop，单遍 review（轻量 + token 成�
 | L3 / L4 | 强制检查跨 runtime、projection、hook、state artifact、安全边界、回滚路径 |
 
 若发现 "existing tests pass but workflow still broken" 风险，按 P1+ finding 处理。若发现跨 sprint invariant 破坏，按第 6 视角规则升级为 P0/P1。
+
+### Review Focus 与未判断项
+
+- L2+ 或涉及输入/错误边界的改动，读取相关计划的 Review Focus；没有该段时，基于当前需求/diff 检查高价值失败输入，不重建完整计划。沿 owning task / 测试核对实际结果，计划中的 planned 或 checkbox 不能当通过证据；未验证的输入保留 unknown 和影响。
+- 对需求未明说的行为，按用户可观察影响报告 defect/risk，不能仅因“规格没写”降低严重度。已有 criterion 只引用 ID；发现风险不授权扩大 scope、改写冻结 criterion 或自动修复只读审查。
+- 在 Findings 之后列出「未判断项（Declined to judge）」：只记录考虑过、但因范围或证据不足而未判断的行为及理由，无则写 none。未运行测试是验证限制，单独报告，不混入该表。
+- 主代理逐项给出处置：补证据/范围内修复建议、明确后续任务或说明不属于本次需求。影响完成定义的未决问题保留为 finding/缺证，不能默认为通过；已确认缺陷不得放进未判断项规避分级。L0/L1 可简述检查结果，不强制生成风险表。
 
 ### Doc↔Code 一致性 Walkthrough（条件触发）
 
@@ -397,7 +405,8 @@ N+1 查询、不必要全量加载、缺少索引、内存泄漏、可缓存未�
 输出：
 1. 派遣记录复述 (视角: design 🎨, 模型: sonnet)
 2. Findings table 按 P0/P1/P2 分级（参考 skill 的 high/medium/polish 映射：high→P0 if 影响用户首次印象 / 否则 P1, medium→P1, polish→P2）
-3. 末尾必须一行: STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
+3. 未判断项（Declined to judge）：考虑过但因范围/证据不足未判断的行为及理由，无则写 none；未运行验证另列限制。
+4. 末尾必须一行: STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
 
 约束：
 - 仅关注设计 / 视觉 / UX；安全/性能/架构由其他 reviewer 负责
@@ -461,7 +470,8 @@ G. Content & Microcopy
 1. 派遣记录复述 (视角: design 🎨, 模型: sonnet, 端: codex inline)
 2. Findings table:
    | # | 文件:行 或 截图位置 | severity | 问题 | 修复建议 |
-3. 末尾必须一行: STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
+3. 未判断项（Declined to judge）：考虑过但因范围/证据不足未判断的行为及理由，无则写 none；未运行验证另列限制。
+4. 末尾必须一行: STATUS: <DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED>
 
 约束：
 - inline-fallback runtime 无浏览器 binary，仅基于源代码静态分析（不能跑 visual diff / screenshot），不强求 A-F 全覆盖
@@ -496,6 +506,14 @@ G. Content & Microcopy
 ### 🟢 P2 — 可选优化
 | # | 视角 | 文件:行 | 问题 |
 |---|------|---------|------|
+
+### 未判断项（Declined to judge）
+| 行为 | 未判断理由 | 主代理处置 / 证据需求 |
+|------|------------|-----------------------|
+[无则写 none；已确认缺陷仍列 Findings]
+
+### 验证限制
+[未运行的验证、unknown 证据与影响]
 
 ### ✅ 亮点
 
