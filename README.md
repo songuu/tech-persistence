@@ -242,6 +242,96 @@ node scripts/preflight.js --codex
 bash install-codex.sh --all
 ```
 
+### DeepSeek Harness 桌面应用：技能投影与调用
+
+这里的 DeepSeek Harness 指桌面应用中输入 `/` 后出现的“技能”目录，不是 Harness 服务端 task worker 的
+provider 调度。桌面应用通过 `@deepseek-ai/dsh-skill-filesystem` 扫描本地技能目录；Tech Persistence 使用
+`scripts/deepseek-harness-skill-projection.js` 把当前架构的 23 个 command wrapper 与 10 个基础 skill
+作为 33 个 DeepSeek Harness 原生 skill 投影到 `~/.dsh/skills`。
+
+完整链路如下：
+
+```mermaid
+flowchart LR
+    AUTH["Canonical sources<br/>user-level/commands<br/>user-level/skills"]
+    INVENTORY["Managed inventory<br/>scripts/lib/managed-plugin-inventory.js<br/>23 commands + 10 skills"]
+    BUILD["Codex plugin builder<br/>build-codex-plugin.js"]
+    BUNDLE["DSH-compatible bundles<br/>plugins/tech-persistence/codex-skills<br/>33 × name/SKILL.md + resources"]
+    INSPECT["Projection inspect<br/>frontmatter + inventory + collision/drift checks"]
+    INSTALL["Transactional install<br/>lock → stage → backup → rename → rollback"]
+    DSH_HOME["DeepSeek user skill root<br/>~/.dsh/skills<br/>receipt + 33 bundles"]
+    PROVIDER["dsh-skill-filesystem<br/>discover + watch + catalog invalidation"]
+    CATALOG["dsh-skill / dsh-tool-skill<br/>name + description catalog"]
+    PICKER["Harness input `/`<br/>技能 picker or model selection"]
+    LOAD["Load selected SKILL.md<br/>re-read body + resource base"]
+    EXEC["Harness agent executes instructions<br/>with current workspace, tools and permissions"]
+
+    AUTH --> BUILD
+    INVENTORY --> BUILD
+    BUILD --> BUNDLE
+    BUNDLE --> INSPECT --> INSTALL --> DSH_HOME
+    DSH_HOME --> PROVIDER --> CATALOG --> PICKER --> LOAD --> EXEC
+```
+
+在仓库根目录执行：
+
+```powershell
+# 1. 只读预检：验证 33 个源 bundle、frontmatter、inventory，并报告 collision/drift
+node scripts\deepseek-harness-skill-projection.js inspect
+
+# 2. 安装或升级：事务性写入当前用户的 DeepSeek Harness 技能目录
+node scripts\deepseek-harness-skill-projection.js install
+
+# 3. 独立读回：重算每个 bundle 的整树 SHA-256，并核对受管 receipt
+node scripts\deepseek-harness-skill-projection.js verify
+```
+
+默认源目录是 `plugins/tech-persistence/codex-skills`，默认目标固定为 `~/.dsh/skills`。如果 DeepSeek
+Harness 通过 `DSH_HOME` 或配置项使用了其他 `dshHome`，必须把实际的 `<dshHome>/skills` 显式传给
+`--target-root`；需要验证隔离目录时也可以显式传入 `--source-root`、`--plugin-manifest` 或
+`--target-root`，例如：
+
+```powershell
+node scripts\deepseek-harness-skill-projection.js verify --target-root C:\sandbox\.dsh\skills
+```
+
+投影脚本只管理 receipt 中声明的 Tech Persistence bundle，并保留目标目录里的其他 skill：
+
+- `inspect` 不写文件；状态可能是 `install-required`、`update-required`、`unchanged`、`collision` 或 `drift`。
+- `install` 先获取独占锁，再复制到 staging、校验 hash、备份旧受管 bundle，最后以 rename 提交；失败会回滚，
+  回滚不完整时保留 recovery 目录并返回 `DEEPSEEK_SKILL_RECOVERY_REQUIRED`。
+- 同名但不在 receipt 中的目录属于用户资产，返回 `DEEPSEEK_SKILL_COLLISION`，不会覆盖。
+- receipt 已声明的 bundle 若被外部修改，返回 `DEEPSEEK_SKILL_DRIFT`，不会用新版本静默覆盖。
+- `verify` 只有在版本、inventory、名称集合和所有 bundle hash 都与仓库源一致时才返回 `verified`。
+
+安装成功后，在 DeepSeek Harness 新建或打开会话，输入 `/`，在“技能”分组选择 `sprint`、`work`、
+`review`、`memory` 等条目并继续输入参数。原来的 `/sprint`、`/plan`、`/work` 等 command 在此运行时
+不是另一套命令实现，而是同名的用户可调用 skill wrapper；DeepSeek Harness 先把名称与描述放入目录，
+选中后才按需读取完整 `SKILL.md` 和 bundle 资源，再由当前 agent 按会话工作区、工具和权限执行。
+
+DeepSeek Harness 默认按以下顺序扫描本地根目录：项目 `.dsh/skills`、项目 `.agents/skills`、自定义目录、
+用户 `~/.dsh/skills`、用户 `~/.agents/skills`，最后才是可选 bundled 目录。因此使用 `~/.dsh/skills`
+既不改写共享的 `~/.agents/skills`，又能让项目级 skill 保留更高优先级。provider 默认监视这些目录；新增、
+删除、重命名或修改 `SKILL.md` frontmatter 会使下一次目录读取刷新，通常不需要重启桌面应用。正文会在每次
+加载时重新读取；仅修改 `references/`、`scripts/`、`assets/` 等资源不会主动刷新目录，但后续调用会读取
+投影时已经安装的资源。
+
+仓库权威 command/skill 变更后的维护顺序固定为：
+
+```powershell
+node plugins\tech-persistence\scripts\build-codex-plugin.js
+node --test scripts\test-deepseek-harness-skill-projection.js
+node scripts\deepseek-harness-skill-projection.js inspect
+node scripts\deepseek-harness-skill-projection.js install
+node scripts\deepseek-harness-skill-projection.js verify
+```
+
+“出现在技能目录并能加载指令”不等于外部能力已自动安装。某个 skill 依赖的 MCP、浏览器、账号、网络、
+模型通道或宿主专属 hook 不可用时，必须按具体 capability 缺口失败；投影脚本不会伪造这些能力。模型负载
+上限、认证或 API 500 也属于独立运行时故障，不应归因于 skill 发现。Harness 服务端 task worker 的受管
+`/command`、`$skill` 规范化、不可变插件 bootstrap 与回滚边界见
+[DeepSeek Harness 受管命令与 Skill](docs/harness-deepseek-managed-invocations.md)。
+
 ### 架构感知项目规范
 
 Claude 与 Codex 的项目安装器会调用同一个 resolver，从真实依赖、源码入口、workspace 和部署资产中组合

@@ -167,11 +167,11 @@
 > Generated from `docs/solutions/*.md`; do not edit this block manually.
 > Refresh with `node scripts/sync-solution-index.js --all`.
 
+- [2026-10-12] [harness/deepseek/codex] DeepSeek Harness 的不可变 Codex 插件引导边界 — DeepSeek 作为 Harness 的模型后端时，真正持有文件和命令能力的仍是 Codex CLI tool host。隔离的 task-local provider home 默认没有 Tech Persistence plugin，因此 /command 与 $skill 即使能被模型理解，也不能被可靠发现和执行。若在模型所在的 sandbox 内临时安装 plugin，模型又能改写 hooks、MCP、skills、配置或验… → `docs/solutions/2026-10-12-deepseek-harness-immutable-plugin-bootstrap.md`
 - [2026-09-09] [sibling-eval/superpowers/spec] Superpowers Spec/Brainstorming 复评：架构任务需要稳定、可追踪的 design authority — Superpowers Spec/Brainstorming 聚焦复评 → `docs/solutions/2026-09-09-superpowers-spec-brainstorming-eval.md`
 - [2026-09-04] [sibling-eval/superpowers/testing] Superpowers v6.1.1-v6.3 增量评估：借一项，验证六项，不融合整套方法论 — Superpowers v6.1.1-v6.3 增量评估 → `docs/solutions/2026-09-04-superpowers-v63-eval.md`
 - [2026-09-03] [windows/codex/claude] Windows 插件安装器的 CLI 能力对齐与事务恢复 — Windows 执行 powershell -ExecutionPolicy Bypass -File .\install-all.ps1 -All 时，Claude 插件安装报 unknown option '--yes'，Codex 安装则因 PATH 中的旧 CLI 缺少 plugin add/list 命令而失败。失败后的安装事务还会停在 rollback-failed。 → `docs/solutions/2026-09-03-windows-plugin-installer-cli-parity.md`
 - [2026-09-03] [sprint/runtime/provider] Sprint 运行时不能绑定固定 Provider — /sprint 在当前宿主本可继续执行时，因为另一个可选 provider（例如 Claude Code）的安装、登录或 OAuth 状态异常而停在 Plan，并要求用户登录该固定品牌。实际环境可能只有 Codex、只有 Claude Code、两者都没有但存在其他可执行框架，或根本没有可用执行宿主。 → `docs/solutions/2026-09-03-sprint-runtime-portability.md`
-- [2026-09-03] [sprint/harness/transcript] Sprint 中 Harness 与 Transcript 的使用必须分层核证 — 用户无法从普通 /sprint 输出判断某次执行是否真实经过 Harness，也无法区分 Transcript 只是存在于宿主本地、已进入 outbox、获得 ack、已写入 PostgreSQL，还是确实与该 Sprint 绑定。 → `docs/solutions/2026-09-03-sprint-runtime-evidence.md`
 
 <!-- END TECH_PERSISTENCE_SOLUTIONS_INDEX -->
 <!-- tech-persistence:project-standards:start -->

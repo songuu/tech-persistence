@@ -8,6 +8,11 @@ const path = require('path');
 const canonicalPluginRoot = path.resolve(__dirname, '..');
 let pluginRoot = canonicalPluginRoot;
 const repoRoot = path.resolve(canonicalPluginRoot, '..', '..');
+const {
+  BASE_SKILL_NAMES: expectedSkills,
+  COMMAND_FILES: expectedCommands,
+  CODEX_SKILL_NAMES: expectedClaudeSkills,
+} = require(path.join(repoRoot, 'scripts', 'lib', 'managed-plugin-inventory'));
 const RECOVERY_DIRECTORY_NAME = '.tech-persistence-publish-recovery';
 const RECOVERY_ANCHOR_NAME = '.tech-persistence-publish-recovery-state.json';
 const SOURCE_PROJECTION_CONTRACT = Object.freeze({
@@ -21,50 +26,7 @@ const {
   getCodexHookScriptNames,
 } = require(path.join(repoRoot, 'scripts', 'lib', 'codex-hook-registry'));
 
-const expectedCommands = [
-  'agent-loop.md',
-  'checkpoint.md',
-  'compound.md',
-  'evolve.md',
-  'instinct-export.md',
-  'instinct-import.md',
-  'instinct-status.md',
-  'learn.md',
-  'plan.md',
-  'prototype.md',
-  'review.md',
-  'review-learnings.md',
-  'self-learning.md',
-  'session-summary.md',
-  'skill.md',
-  'skill-diagnose.md',
-  'skill-eval.md',
-  'skill-improve.md',
-  'skill-publish.md',
-  'sprint.md',
-  'test.md',
-  'think.md',
-  'work.md',
-];
-
-const expectedSkills = [
-  'caveman',
-  'caveman-commit',
-  'caveman-compress',
-  'caveman-help',
-  'caveman-review',
-  'memory',
-  'continuous-learning',
-  'prototype-workflow',
-  'test-strategy',
-  'context-handoff',
-];
-
 const expectedCommandSkillNames = expectedCommands.map((name) => path.basename(name, '.md'));
-const expectedClaudeSkills = Array.from(new Set([
-  ...expectedSkills,
-  ...expectedCommandSkillNames,
-])).sort();
 
 if (expectedClaudeSkills.length !== expectedSkills.length + expectedCommandSkillNames.length) {
   throw new Error('Claude skill and command names must not overlap');
@@ -73,6 +35,7 @@ if (expectedClaudeSkills.length !== expectedSkills.length + expectedCommandSkill
 const utilityScripts = [
   'configure-shared-homunculus.js',
   'agent-orchestrator.js',
+  'harness-managed-invocation.js',
   'acceptance-postgres-authority.js',
   'acceptance-authority-os-boundary.js',
   'native-runtime-canary.js',

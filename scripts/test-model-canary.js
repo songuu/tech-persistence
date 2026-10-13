@@ -1049,11 +1049,11 @@ test('versioned Claude surface baseline matches the real frozen repository surfa
   const verification = verifyClaudeSurfaceBaseline(repoRoot, baselinePath);
   assert.strictEqual(verification.equal, true);
   assert.deepStrictEqual(verification.mismatches, []);
-  assert.strictEqual(verification.candidate.fileCount, 131);
-  assert.strictEqual(verification.candidate.totalBytes, 1240020);
+  assert.strictEqual(verification.candidate.fileCount, 132);
+  assert.strictEqual(verification.candidate.totalBytes, 1242717);
   assert.strictEqual(
     verification.candidate.surfaceHash,
-    '43104540c496ec40508b53478a548129a72d38b6466624525984e182b0f1e5c0'
+    '4314dc44b77fcec13b0b734659fba2e4b893a42863e77690e00b3fdd8b5bd3dc'
   );
   assert.deepStrictEqual(verification.candidate.warnings, []);
 

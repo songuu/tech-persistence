@@ -28,6 +28,7 @@ const operatorReviewPacket = require('./agent-orchestrator/operator-review-packe
 const turnTransaction = require('./agent-orchestrator/turn-transaction');
 const schedulerControl = require('./agent-orchestrator/scheduler-control');
 const turnBudget = require('./agent-orchestrator/turn-budget');
+const managedInvocation = require('./agent-orchestrator/managed-invocation');
 const { resolveBaseDir } = require('./lib/runtime-paths');
 const { detectStableProjectIdentity } = require('./lib/project-identity');
 const {
@@ -1469,9 +1470,13 @@ function buildSpecPrompt(requirement, options) {
     '',
     `Repository root: ${options.workdir}`,
     '',
+    options.managedInvocation
+      ? managedInvocation.managedInvocationPromptBlock(options.managedInvocation)
+      : null,
+    options.managedInvocation ? '' : null,
     'Original requirement:',
     requirement,
-  ].join('\n');
+  ].filter((line) => line !== null).join('\n');
 }
 
 function buildImplementationPrompt(state, runDir) {
@@ -1480,6 +1485,9 @@ function buildImplementationPrompt(state, runDir) {
   const tasks = safeRead(path.join(runDir, 'task-breakdown.json'));
   const reviewNotes = safeRead(path.join(runDir, 'review.json'));
   const priorRulings = readPriorRulingsBlock(runDir);
+  const invocation = state.files && state.files.managedInvocation
+    ? readJson(path.join(runDir, state.files.managedInvocation))
+    : null;
   return [
     'You are the implementation provider in Tech Persistence agent-loop v7.',
     'Implement only the frozen spec. Do not reinterpret or expand requirements.',
@@ -1495,6 +1503,8 @@ function buildImplementationPrompt(state, runDir) {
     `Run id: ${state.runId}`,
     `Repository root: ${state.workdir}`,
     '',
+    invocation ? managedInvocation.managedInvocationPromptBlock(invocation) : null,
+    invocation ? '' : null,
     'Frozen spec JSON:',
     spec,
     '',
@@ -1505,7 +1515,7 @@ function buildImplementationPrompt(state, runDir) {
     tasks,
     priorRulings ? `\nPrior clarification rulings (honor these):\n${priorRulings}` : '',
     reviewNotes ? `\nPrior review notes JSON:\n${reviewNotes}` : '',
-  ].filter(Boolean).join('\n');
+  ].filter((line) => line !== null).join('\n');
 }
 
 function readPriorRulingsBlock(runDir) {
@@ -3974,6 +3984,10 @@ function runStart(options, positionals) {
   const workdir = resolveWorkdir(options);
   const runsDir = resolveRunsDir(workdir, options);
   const requirement = readRequirement(options, positionals);
+  const invocation = managedInvocation.resolveManagedInvocation(
+    requirement,
+    optionValue(options, 'managed-invocation-file')
+  );
   const runId = optionValue(options, 'run-id') || `${dateStamp()}-${slugify(requirement)}`;
   const runDir = path.join(runsDir, runId);
   const statePath = path.join(runDir, 'state.json');
@@ -3992,6 +4006,16 @@ function runStart(options, positionals) {
   }
   const executionPolicy = nativeExecutionControl.executionPolicy(options);
   const state = newState(workdir, runDir, runId, requirement);
+  if (invocation) {
+    state.files.managedInvocation = 'managed-invocation.json';
+    state.managedInvocation = {
+      schemaVersion: invocation.schemaVersion,
+      syntax: invocation.syntax,
+      name: invocation.name,
+      inventorySha256: invocation.inventorySha256,
+      requirementSha256: invocation.requirementSha256,
+    };
+  }
   state.providers = Object.fromEntries(['spec', 'implementation', 'review'].map(key => [key, providerProfiles.profile(options, key).runtime]));
   state.orchestrationOwner = executionPolicy.orchestrationOwner;
   state.executionPolicy = executionPolicy;
@@ -4003,7 +4027,12 @@ function runStart(options, positionals) {
     goalLeaseStoreOptions(options, workdir)
   );
   writeText(path.join(runDir, 'requirement.md'), `${requirement}\n`);
-  writeText(path.join(runDir, 'prompts', 'spec.md'), buildSpecPrompt(requirement, { workdir }));
+  if (invocation) writeJson(path.join(runDir, 'managed-invocation.json'), invocation);
+  writeText(path.join(runDir, 'prompts', 'spec.md'), buildSpecPrompt(requirement, {
+    ...options,
+    workdir,
+    managedInvocation: invocation,
+  }));
   writeJson(path.join(runDir, 'commands.json'), commandPlan(options));
   saveState(statePath, state);
 
@@ -6108,4 +6137,6 @@ module.exports = {
   runProcess,
   writeValidation,
   worktreeFileFingerprint,
+  buildImplementationPrompt,
+  buildSpecPrompt,
 };

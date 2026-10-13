@@ -29,6 +29,22 @@ set +e
 status=$?
 set -e
 [ "$status" -eq 0 ] || { echo "native writer canary failed" >&2; exit 1; }
+[ -f "$provider_output/plugin-bootstrap.json" ] || { echo "provider plugin bootstrap receipt is missing" >&2; exit 1; }
+/usr/bin/node "$runtime/scripts/harness-provider-plugin-bootstrap.js" verify \
+  --provider-home "$provider_home" \
+  --runtime-root "$runtime" \
+  --receipt "$provider_output/plugin-bootstrap.json" \
+  >/dev/null
+/usr/bin/node -e '
+  const fs=require("node:fs");
+  const receipt=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+  const expected=require(process.argv[2]).INVENTORY_SHA256;
+  if(receipt.schemaVersion!=="harness-provider-plugin-bootstrap-v1"
+      ||receipt.pluginName!=="tech-persistence"
+      ||receipt.marketplace!=="tech-persistence-local"
+      ||receipt.inventorySha256!==expected
+      ||!/^[a-f0-9]{64}$/.test(receipt.pluginSha256)) process.exit(1);
+' "$provider_output/plugin-bootstrap.json" "$runtime/scripts/lib/managed-plugin-inventory.js"
 [ -f "$workspace/qualification.txt" ] || { echo "native writer did not create qualification.txt" >&2; exit 1; }
 [ "$(stat -c %u "$workspace/qualification.txt")" -eq 986 ]
 expected_hash="$(printf '%s\n' 'HARNESS_NATIVE_WRITER_OK' | sha256sum | awk '{print $1}')"

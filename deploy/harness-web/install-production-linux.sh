@@ -10,8 +10,21 @@ config_root=/etc/tech-persistence/harness-web
 worker_config_root=/etc/tech-persistence/harness-worker
 postgres_container=tech-persistence-postgres
 transcript_env=/var/lib/tech-persistence/authority/runtime-current/deploy/postgres/.env.transcripts
+codex_root=/var/lib/tech-persistence/runtime-candidates/codex-0.152.1
+codex_cli="$codex_root/node_modules/@openai/codex/bin/codex.js"
 
-[ -d "$candidate" ] && [ -f "$candidate/scripts/harness-web-server.js" ] && [ -f "$candidate/deploy/harness-web/004-confirm-resume.sql" ]
+[ -d "$candidate" ] && [ -f "$candidate/scripts/harness-web-server.js" ] && [ -f "$candidate/deploy/harness-web/004-confirm-resume.sql" ] \
+  && [ -f "$candidate/.agents/plugins/marketplace.json" ] \
+  && [ -f "$candidate/plugins/tech-persistence/.codex-plugin/plugin.json" ] \
+  && [ -f "$candidate/scripts/harness-provider-plugin-bootstrap.js" ] \
+  && [ -f "$candidate/scripts/codex-task-plugin-bootstrap-entrypoint.sh" ] \
+  && [ -f "$candidate/scripts/lib/managed-plugin-inventory.js" ]
+[ -f "$codex_cli" ]
+/usr/bin/node "$codex_cli" plugin --help >/dev/null
+/usr/bin/node "$codex_cli" plugin marketplace add --help >/dev/null
+/usr/bin/node "$codex_cli" plugin add --help >/dev/null
+/usr/bin/node "$codex_cli" plugin list --help >/dev/null
+/usr/bin/node "$codex_cli" exec --help | /usr/bin/grep -F -- '--dangerously-bypass-hook-trust' >/dev/null
 [ -f "$transcript_env" ] && [ ! -e "$release" ]
 collision=$(docker exec "$postgres_container" psql -U postgres -d tech_persistence -Atc "SELECT count(*) FROM pg_namespace WHERE nspname IN ('harness_web','harness_tasks')")
 [ "$collision" = 0 ] || { echo 'production Harness schema collision' >&2; exit 4; }

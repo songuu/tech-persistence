@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { parseManagedInvocation } = require('./harness-managed-invocation');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PROJECT = /^[a-z0-9][a-z0-9_-]{2,63}$/;
@@ -112,6 +113,9 @@ function launcherArgs(config, command, args) {
 }
 function buildSandboxInvocation(rawConfig, rawClaim) {
   const config = validateWorkerConfig(rawConfig); const claim = validateClaim(rawClaim);
+  // agent-orchestrator historically trims requirement-file input at its read boundary.
+  // Normalize here as well so the authority metadata binds the exact effective bytes.
+  const managedInvocation = parseManagedInvocation(claim.requirement.trim());
   const project = config.projects[claim.projectId];
   if (!project) throw new Error('project is not qualified by the authority registry');
   const attemptToken = claim.resumeClaimToken || claim.claimToken;
@@ -128,8 +132,12 @@ function buildSandboxInvocation(rawConfig, rawClaim) {
     '--control-root', path.join(evidenceRoot, 'control'), '--provider-output-root', providerOutputRoot,
     '--provider-uid', String(config.providerUid), '--provider-gid', String(config.providerGid),
     '--provider-home', providerHome, '--provider-setpriv-path', config.launcherPath, '--require-provider-os-isolation'];
+  if (managedInvocation) {
+    args.push('--managed-invocation-file', path.join(inputRoot, 'managed-invocation.json'));
+  }
   for (const command of project.validationCommands) args.push('--validation-command', command);
   return { command: config.nodePath, args, taskRoot, inputRoot, outputRoot, evidenceRoot, authorityHome, workspaceRoot, providerHome, providerOutputRoot,
+    managedInvocation,
     gitConfigPath: config.gitConfigPath,
     sourceRoot: project.sourceRoot, timeoutMs: project.timeoutMs };
 }
@@ -138,6 +146,15 @@ function safeSandboxRoot(config) {
   if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(config.sandboxRoot) !== config.sandboxRoot) throw new Error('unsafe sandbox root');
   if (process.platform !== 'win32') {
     if (stat.uid !== process.getuid() || stat.gid !== config.providerGid || (stat.mode & 0o7777) !== 0o2710) throw new Error('unsafe sandbox root ownership or mode');
+  }
+}
+function writeReadOnlyTaskInput(file, content, label) {
+  const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o640);
+  try { fs.writeFileSync(fd, content, 'utf8'); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  if (process.platform !== 'win32') fs.chmodSync(file, 0o440);
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size !== Buffer.byteLength(content)) {
+    throw new Error(`unsafe ${label} file`);
   }
 }
 function prepareTaskFiles(rawConfig, rawClaim) {
@@ -180,11 +197,14 @@ function prepareTaskFiles(rawConfig, rawClaim) {
     }
   }
   const requirementPath = path.join(invocation.inputRoot, 'requirement.txt');
-  const fd = fs.openSync(requirementPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o640);
-  try { fs.writeFileSync(fd, claim.requirement, 'utf8'); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-  if (process.platform !== 'win32') fs.chmodSync(requirementPath, 0o440);
-  const stat = fs.lstatSync(requirementPath);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size !== Buffer.byteLength(claim.requirement)) throw new Error('unsafe requirement file');
+  writeReadOnlyTaskInput(requirementPath, claim.requirement, 'requirement');
+  if (invocation.managedInvocation) {
+    writeReadOnlyTaskInput(
+      path.join(invocation.inputRoot, 'managed-invocation.json'),
+      `${JSON.stringify(invocation.managedInvocation, null, 2)}\n`,
+      'managed invocation'
+    );
+  }
   return invocation;
 }
 function terminateTree(child, signal = 'SIGTERM') {
@@ -473,7 +493,15 @@ function safeWorkerErrorCode(error) {
   const databaseCodes = { '42501': 'worker_database_privilege', '23514': 'worker_database_constraint',
     '23503': 'worker_database_reference', 'P0400': 'worker_database_input', 'P0503': 'worker_database_isolation',
     '57P01': 'worker_database_unavailable', ECONNREFUSED: 'worker_database_unavailable' };
+  const managedInvocationCodes = {
+    HARNESS_UNKNOWN_COMMAND: 'worker_managed_invocation_unknown_command',
+    HARNESS_UNKNOWN_SKILL: 'worker_managed_invocation_unknown_skill',
+    HARNESS_INVALID_INVOCATION: 'worker_managed_invocation_invalid',
+    HARNESS_CONTROL_CHARACTER: 'worker_managed_invocation_invalid',
+    HARNESS_REQUIREMENT_TOO_LARGE: 'worker_managed_invocation_invalid',
+  };
   if (databaseCodes[sqlState]) return databaseCodes[sqlState];
+  if (managedInvocationCodes[sqlState]) return managedInvocationCodes[sqlState];
   if (Number.isInteger(error && error.workerMeasureExit)) return `worker_provider_measure_exit_${error.workerMeasureExit}`;
   const measurementCodes = [['workspace measurement process failed', 'worker_provider_measure_process'],
     ['workspace measurement command failed', 'worker_provider_measure_command'],

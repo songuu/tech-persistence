@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { validateWorkerConfig, validateClaim, buildSandboxInvocation, classifyRecovery, prepareTaskFiles,
   gitSystemConfigForProjects, runBoundedProcess, runClaim, resumeClaim, safeWorkerErrorCode } = require('./harness-task-worker');
+const { parseManagedInvocation } = require('./harness-managed-invocation');
 
 const root = path.resolve(path.sep, 'srv', 'tp');
 const config = () => ({ version: 'harness-task-worker-v1', workerId: 'authority-1', sandboxRoot: path.join(root, 'sandboxes'),
@@ -70,6 +71,18 @@ test('sandbox invocation keeps requirement out of argv and selects the registry 
   assert.ok(!invocation.args.join('\n').includes(claim().requirement));
   assert.ok(invocation.args.includes('--requirement-file')); assert.ok(invocation.args.includes(path.join(invocation.inputRoot, 'requirement.txt')));
 });
+test('managed command invocation is authority-normalized before dispatch', () => {
+  const managedClaim = { ...claim(), requirement: '/sprint --auto\nimplement exactly this' };
+  const invocation = buildSandboxInvocation(config(), managedClaim);
+  const metadataPath = path.join(invocation.inputRoot, 'managed-invocation.json');
+  assert.deepEqual(invocation.managedInvocation, parseManagedInvocation(managedClaim.requirement));
+  assert.ok(invocation.args.includes('--managed-invocation-file'));
+  assert.ok(invocation.args.includes(metadataPath));
+  assert.throws(
+    () => buildSandboxInvocation(config(), { ...claim(), requirement: '/does-not-exist' }),
+    error => error.code === 'HARNESS_UNKNOWN_COMMAND'
+  );
+});
 test('authority invocation exposes only task-scoped paths and registry-selected source stays out of argv', () => {
   const invocation = buildSandboxInvocation(config(), claim()); const joined = invocation.args.join('\n');
   assert.match(joined, /aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/); assert.ok(!joined.includes(claim().ownerId));
@@ -105,6 +118,10 @@ test('worker errors expose only fixed infrastructure categories', () => {
   assert.equal(safeWorkerErrorCode(new Error('unsafe task sandbox directory: /private/path')), 'worker_sandbox_layout');
   assert.equal(safeWorkerErrorCode(new Error('postgres://secret@host')), 'worker_internal_error');
   assert.equal(safeWorkerErrorCode(Object.assign(new Error('private query'), { code: '42501' })), 'worker_database_privilege');
+  assert.equal(
+    safeWorkerErrorCode(Object.assign(new Error('unknown managed command'), { code: 'HARNESS_UNKNOWN_COMMAND' })),
+    'worker_managed_invocation_unknown_command'
+  );
 });
 test('task preparation creates a fresh bounded input/output layout and exact requirement bytes', t => {
   const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-worker-')); t.after(() => fs.rmSync(sandboxRoot, { recursive: true, force: true }));
@@ -113,6 +130,16 @@ test('task preparation creates a fresh bounded input/output layout and exact req
   assert.equal(fs.readFileSync(path.join(prepared.inputRoot, 'requirement.txt'), 'utf8'), claim().requirement);
   assert.equal(fs.existsSync(prepared.workspaceRoot), false, 'workspace remains absent until fixed git clone');
   assert.throws(() => prepareTaskFiles({ ...config(), sandboxRoot, providerGid }, claim()), /already exists/);
+});
+test('task preparation freezes managed invocation metadata beside the requirement', t => {
+  const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-worker-managed-')); t.after(() => fs.rmSync(sandboxRoot, { recursive: true, force: true }));
+  const providerGid = prepareTestRoot(sandboxRoot);
+  const managedClaim = { ...claim(), requirement: '$memory find provider evidence' };
+  const prepared = prepareTaskFiles({ ...config(), sandboxRoot, providerGid }, managedClaim);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(path.join(prepared.inputRoot, 'managed-invocation.json'), 'utf8')),
+    parseManagedInvocation(managedClaim.requirement)
+  );
 });
 test('task preparation restores the fixed parent mode under a restrictive service umask', { skip: process.platform === 'win32' }, t => {
   const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-worker-umask-')); t.after(() => fs.rmSync(sandboxRoot, { recursive: true, force: true }));

@@ -15,7 +15,7 @@ if ! printf '%s' "$model" | /usr/bin/grep -Eq '^[A-Za-z0-9._/-]{1,200}$'; then
   echo "invalid task model identifier" >&2
   exit 3
 fi
-install -d -m 0700 "$HOME/.codex"
+[ -r /provider-output/plugin-bootstrap.json ] || { echo "provider plugin bootstrap receipt is unavailable" >&2; exit 8; }
 /usr/bin/socat TCP-LISTEN:8080,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/broker/responses.sock &
 bridge_pid=$!
 cleanup() { kill "$bridge_pid" 2>/dev/null || true; wait "$bridge_pid" 2>/dev/null || true; }
@@ -28,13 +28,16 @@ umask 0002
 shift
 set +e
 /usr/bin/node /codex/node_modules/@openai/codex/bin/codex.js exec \
-  --ignore-user-config --ignore-rules --strict-config --ephemeral \
-  --dangerously-bypass-approvals-and-sandbox --color never \
+  --ignore-rules --strict-config --ephemeral \
+  --dangerously-bypass-hook-trust --dangerously-bypass-approvals-and-sandbox --color never \
   -m "$model" \
   -c 'model_provider="task_broker"' \
   -c 'model_providers.task_broker={ name = "Task Broker", base_url = "http://127.0.0.1:8080/v1", env_key = "TP_BROKER_DUMMY_KEY", wire_api = "responses", request_max_retries = 0, stream_max_retries = 0 }' \
   "$@"
 status=$?
 set -e
-for output in /provider-output/*.json; do [ -f "$output" ] && /usr/bin/chmod 0644 "$output"; done
+for output in /provider-output/*.json; do
+  [ -f "$output" ] || continue
+  [ "$(/usr/bin/basename "$output")" = plugin-bootstrap.json ] || /usr/bin/chmod 0644 "$output"
+done
 exit "$status"

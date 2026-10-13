@@ -1,4 +1,5 @@
 ---
+name: context-handoff
 description: "当 /sprint 执行中上下文压力过大，或任务拆分超过 5 个 Task 时加载。提供上下文重置和交接文件方法论。"
 ---
 

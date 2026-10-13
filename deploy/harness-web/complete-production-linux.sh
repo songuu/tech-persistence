@@ -7,7 +7,20 @@ config_root=/etc/tech-persistence/harness-web
 worker_root=/etc/tech-persistence/harness-worker
 credential_file=/root/tech-persistence-initial-login.txt
 transcript_env=/var/lib/tech-persistence/authority/runtime-current/deploy/postgres/.env.transcripts
-[ -d "$release" ] && [ -f "$release/scripts/harness-web-account.js" ] && [ -f "$release/scripts/harness-web-server.js" ]
+codex_root=/var/lib/tech-persistence/runtime-candidates/codex-0.152.1
+codex_cli="$codex_root/node_modules/@openai/codex/bin/codex.js"
+[ -d "$release" ] && [ -f "$release/scripts/harness-web-account.js" ] && [ -f "$release/scripts/harness-web-server.js" ] \
+  && [ -f "$release/.agents/plugins/marketplace.json" ] \
+  && [ -f "$release/plugins/tech-persistence/.codex-plugin/plugin.json" ] \
+  && [ -f "$release/scripts/harness-provider-plugin-bootstrap.js" ] \
+  && [ -f "$release/scripts/codex-task-plugin-bootstrap-entrypoint.sh" ] \
+  && [ -f "$release/scripts/lib/managed-plugin-inventory.js" ]
+[ -f "$codex_cli" ]
+/usr/bin/node "$codex_cli" plugin --help >/dev/null
+/usr/bin/node "$codex_cli" plugin marketplace add --help >/dev/null
+/usr/bin/node "$codex_cli" plugin add --help >/dev/null
+/usr/bin/node "$codex_cli" plugin list --help >/dev/null
+/usr/bin/node "$codex_cli" exec --help | /usr/bin/grep -F -- '--dangerously-bypass-hook-trust' >/dev/null
 [ -f "$config_root/auth.json" ] && [ -f "$config_root/tasks.json" ] && [ -f "$config_root/admin.json" ]
 [ -f "$worker_root/worker.json" ] && [ -f "$worker_root/worker.env" ] && [ -f "$worker_root/git-system.config" ]
 [ -f "$transcript_env" ]

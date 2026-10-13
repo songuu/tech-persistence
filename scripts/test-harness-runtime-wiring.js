@@ -39,12 +39,33 @@ async function main() {
   try {
     const providerWrapper = fs.readFileSync(path.join(__dirname, 'codex-task-provider.sh'), 'utf8');
     const providerEntrypoint = fs.readFileSync(path.join(__dirname, 'codex-task-bwrap-entrypoint.sh'), 'utf8');
+    const bootstrapEntrypoint = fs.readFileSync(path.join(__dirname, 'codex-task-plugin-bootstrap-entrypoint.sh'), 'utf8');
     assert.match(providerWrapper, /--unshare-all --unshare-user --uid 0 --gid 0/);
     assert.match(providerWrapper, /--cap-drop ALL --cap-add CAP_NET_ADMIN --cap-add CAP_SETPCAP/);
+    assert.match(providerWrapper, /stat -c %u "\$runtime_root"/);
+    assert.match(providerWrapper, /\[ ! -w "\$runtime_root" \]/);
     assert.doesNotMatch(providerWrapper, /--share-net/);
     assert.match(providerEntrypoint, /ip link set lo up/);
     assert.match(providerEntrypoint, /TCP-LISTEN:8080,bind=127\.0\.0\.1,reuseaddr,fork/);
     assert.match(providerEntrypoint, /CapEff:\[\[:space:\]\]\*0\+/);
+    assert.match(providerWrapper, /codex-task-plugin-bootstrap-entrypoint\.sh/);
+    assert.match(providerWrapper, /codex-task-plugin-bootstrap-entrypoint\.sh <\/dev\/null/);
+    assert.match(bootstrapEntrypoint, /harness-provider-plugin-bootstrap\.js/);
+    assert.match(bootstrapEntrypoint, /--require-immutable-runtime true/);
+    assert.match(bootstrapEntrypoint, /--output-receipt \/provider-output\/plugin-bootstrap\.json/);
+    assert.match(providerWrapper, /--ro-bind "\$HOME\/\.codex\/plugins" \/home\/\.codex\/plugins/);
+    assert.match(providerWrapper, /--ro-bind "\$HOME\/\.codex\/config\.toml" \/home\/\.codex\/config\.toml/);
+    assert.match(providerWrapper, /--ro-bind "\$HOME\/\.codex\/tech-persistence-bootstrap\.json" \/home\/\.codex\/tech-persistence-bootstrap\.json/);
+    assert.match(providerWrapper, /--ro-bind "\$bootstrap_receipt" \/provider-output\/plugin-bootstrap\.json/);
+    const bootstrapBlock = providerWrapper.slice(
+      providerWrapper.indexOf('bootstrap_receipt='),
+      providerWrapper.indexOf('\nset -- exec')
+    );
+    assert.doesNotMatch(bootstrapBlock, /\$workspace|\/broker|\/task-model/);
+    assert.doesNotMatch(providerEntrypoint, /harness-provider-plugin-bootstrap\.js/);
+    assert.doesNotMatch(providerEntrypoint, /--ignore-user-config/);
+    assert.match(providerEntrypoint, /--ignore-rules --strict-config --ephemeral/);
+    assert.match(providerEntrypoint, /--dangerously-bypass-hook-trust/);
     for (const deployScript of ['install-production-linux.sh', 'complete-production-linux.sh']) {
       const deployment = fs.readFileSync(path.join(__dirname, '..', 'deploy', 'harness-web', deployScript), 'utf8');
       assert.match(deployment, /tech-persistence-harness-transcripts\.service/);
@@ -52,6 +73,12 @@ async function main() {
       assert.match(deployment, /task-runtime\/transcript-spool/);
       assert.match(deployment, /sync-runtime-transcripts\.js --outbox/);
       assert.match(deployment, /systemctl enable --now[^\n]*tech-persistence-harness-transcripts\.timer/);
+      assert.match(deployment, /\.agents\/plugins\/marketplace\.json/);
+      assert.match(deployment, /harness-provider-plugin-bootstrap\.js/);
+      assert.match(deployment, /codex-task-plugin-bootstrap-entrypoint\.sh/);
+      assert.match(deployment, /codex_cli="\$codex_root\/node_modules\/@openai\/codex\/bin\/codex\.js"/);
+      assert.match(deployment, /\/usr\/bin\/node "\$codex_cli" plugin --help/);
+      assert.match(deployment, /exec --help \| \/usr\/bin\/grep -F -- '--dangerously-bypass-hook-trust'/);
     }
     const writerQualification = fs.readFileSync(path.join(__dirname, 'qualify-codex-writer-linux.sh'), 'utf8');
     const capabilityEvidenceGenerator = fs.readFileSync(path.join(__dirname, 'create-runtime-capability-evidence-linux.js'), 'utf8');
@@ -67,6 +94,9 @@ async function main() {
     assert.match(orchestratorSource, /artifact exists, is fresh, and matches its sealed digest/);
     assert.match(writerQualification, /assertStructuredOutput/);
     assert.match(writerQualification, /with no prose or Markdown/);
+    assert.match(writerQualification, /plugin-bootstrap\.json/);
+    assert.match(writerQualification, /harness-provider-plugin-bootstrap-v1/);
+    assert.match(writerQualification, /harness-provider-plugin-bootstrap\.js" verify/);
     assert.match(capabilityEvidenceGenerator, /handoffHash/);
     const requirementSchema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'schemas', 'agent-loop', 'requirement-spec.schema.json'), 'utf8'));
     const taskSchema = requirementSchema.properties.taskBreakdown.items;
