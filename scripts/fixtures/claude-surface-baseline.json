@@ -10,8 +10,8 @@
     "scripts/sync-solution-index.js",
     "plugins/tech-persistence/.claude-plugin/plugin.json"
   ],
-  "fileCount": 132,
-  "totalBytes": 1242717,
-  "surfaceHash": "4314dc44b77fcec13b0b734659fba2e4b893a42863e77690e00b3fdd8b5bd3dc",
+  "fileCount": 138,
+  "totalBytes": 1332723,
+  "surfaceHash": "02e0143ae18fd0c1eee7d1fb383c8ca6f89009a57ca0d027c78fb10ad1885565",
   "warnings": []
 }

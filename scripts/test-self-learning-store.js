@@ -10,6 +10,12 @@ const { spawnSync } = require('child_process');
 const canonical = require('./lib/self-learning-canonical');
 const store = require('./lib/self-learning-store');
 
+// Only these disposable test fixtures are declared device-local. Production
+// stores require their own explicit, per-device root declaration.
+process.env.TP_SELF_LEARNING_LOCAL_RECOVERY_ROOT = os.tmpdir();
+const localRecovery = require('./lib/self-learning-local-recovery-guard')
+  .isEnabledForStore(path.join(os.tmpdir(), 'test-recovery-capability'));
+
 const AT = '2026-08-20T01:02:03.000Z';
 const ACTOR = { kind: 'user', id: 'user-local', runtime: null, authority_ref: null };
 
@@ -117,19 +123,18 @@ function writeLock(storeDir, overrides = {}) {
 
 {
   const { baseDir, storeDir } = fixture();
-  const originalOpenSync = fs.openSync;
+  const originalLinkSync = fs.linkSync;
   let injected = false;
   try {
-    fs.openSync = (target, flags, ...args) => {
+    fs.linkSync = (source, target, ...args) => {
       if (!injected
-          && path.basename(String(target)) === store.LOCK_FILE_NAME
-          && flags === 'wx') {
+          && path.basename(String(target)) === store.LOCK_FILE_NAME) {
         injected = true;
         const error = new Error('simulated Windows lock create race');
         error.code = 'EPERM';
         throw error;
       }
-      return originalOpenSync(target, flags, ...args);
+      return originalLinkSync(source, target, ...args);
     };
     const written = store.appendRecord(storeDir, input({
       record_id: 'after-transient-open-race',
@@ -139,7 +144,7 @@ function writeLock(storeDir, overrides = {}) {
     assert.strictEqual(written.changed, true);
     assert.strictEqual(store.readJournal(storeDir).revision, 1);
   } finally {
-    fs.openSync = originalOpenSync;
+    fs.linkSync = originalLinkSync;
     fs.rmSync(baseDir, { recursive: true, force: true });
   }
 }
@@ -299,13 +304,19 @@ function writeLock(storeDir, overrides = {}) {
     assert.strictEqual(exited.status, 0, exited.error && exited.error.message);
     assert(Number.isSafeInteger(exited.pid) && exited.pid > 0);
     const stale = writeLock(storeDir, { pid: exited.pid });
-    const written = store.appendRecord(storeDir, input({
-      record_id: 'after-dead-lock',
-      entity_id: 'after-dead-lock',
-    }));
-    assert.strictEqual(written.changed, true);
-    assert.strictEqual(fs.existsSync(stale.lockFile), false);
-    assert.strictEqual(store.readJournal(storeDir).revision, 1);
+    if (localRecovery) {
+      const written = store.appendRecord(storeDir, input({
+        record_id: 'after-dead-lock',
+        entity_id: 'after-dead-lock',
+      }));
+      assert.strictEqual(written.changed, true);
+      assert.strictEqual(fs.existsSync(stale.lockFile), false);
+      assert.strictEqual(store.readJournal(storeDir).revision, 1);
+    } else {
+      assertErrorCode(() => store.acquireJournalLock(storeDir, { retry_timeout_ms: 50, stale_lock_age_ms: 0 }),
+        'SELF_LEARNING_RECOVERY_UNAVAILABLE');
+      assert.strictEqual(fs.readFileSync(stale.lockFile, 'utf8'), stale.bytes);
+    }
   } finally {
     fs.rmSync(baseDir, { recursive: true, force: true });
   }
@@ -347,9 +358,11 @@ function writeLock(storeDir, overrides = {}) {
   }
 }
 
-{
+if (localRecovery) {
   const { baseDir, storeDir } = fixture();
   const originalReadFileSync = fs.readFileSync;
+  const originalOpenSync = fs.openSync;
+  const originalCloseSync = fs.closeSync;
   try {
     const exited = spawnSync(process.execPath, ['-e', 'process.exit(0)'], {
       windowsHide: true,
@@ -364,8 +377,18 @@ function writeLock(storeDir, overrides = {}) {
     };
     const replacementBytes = `${JSON.stringify(liveReplacement, null, 2)}\n`;
     let lockReads = 0;
+    const lockDescriptors = new Set();
+    fs.openSync = (target, ...args) => {
+      const descriptor = originalOpenSync(target, ...args);
+      if (path.resolve(String(target)) === path.resolve(stale.lockFile)) lockDescriptors.add(descriptor);
+      return descriptor;
+    };
+    fs.closeSync = (descriptor) => {
+      lockDescriptors.delete(descriptor);
+      return originalCloseSync(descriptor);
+    };
     fs.readFileSync = (target, ...args) => {
-      if (path.resolve(String(target)) === path.resolve(stale.lockFile)) {
+      if (typeof target === 'number' && lockDescriptors.has(target)) {
         lockReads += 1;
         if (lockReads === 2) fs.writeFileSync(stale.lockFile, replacementBytes);
       }
@@ -379,15 +402,19 @@ function writeLock(storeDir, overrides = {}) {
       'SELF_LEARNING_LOCKED'
     );
     fs.readFileSync = originalReadFileSync;
+    fs.openSync = originalOpenSync;
+    fs.closeSync = originalCloseSync;
     assert(lockReads >= 2, `expected identity/bytes recheck, got ${lockReads} reads`);
     assert.strictEqual(fs.readFileSync(stale.lockFile, 'utf8'), replacementBytes);
   } finally {
     fs.readFileSync = originalReadFileSync;
+    fs.openSync = originalOpenSync;
+    fs.closeSync = originalCloseSync;
     fs.rmSync(baseDir, { recursive: true, force: true });
   }
 }
 
-{
+if (localRecovery) {
   const { baseDir, storeDir } = fixture();
   const originalRmSync = fs.rmSync;
   const originalRenameSync = fs.renameSync;
@@ -438,7 +465,7 @@ function writeLock(storeDir, overrides = {}) {
   }
 }
 
-{
+if (localRecovery) {
   const { baseDir, storeDir } = fixture();
   const originalRenameSync = fs.renameSync;
   try {

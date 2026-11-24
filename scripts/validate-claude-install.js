@@ -162,6 +162,11 @@ function inspectSettingsHookIssues(settings) {
       issues.push({ code: 'missing-hook', expected });
     } else if (matchingHooks.every((hook) => hook.timeout !== expected.timeout)) {
       issues.push({ code: 'wrong-timeout', expected });
+    } else if (expected.onFailure === 'block' && !matchingHooks.some((hook) =>
+      hook.timeout === expected.timeout
+      && hook.onFailure === 'block'
+      && !/\|\|\s*(?:true|:)(?:\s|$)/.test(hook.command))) {
+      issues.push({ code: 'wrong-failure-policy', expected });
     }
   }
   return issues;
@@ -177,6 +182,8 @@ function validateSettingsHooks(file, label) {
     const { expected } = issue;
     if (issue.code === 'missing-hook') {
       fail(`${label} missing ${expected.event} hook command matching ${expected.scriptPattern}`);
+    } else if (issue.code === 'wrong-failure-policy') {
+      fail(`${label} ${expected.event} hook must propagate failures and use onFailure: block`);
     } else {
       fail(`${label} ${expected.event} hook timeout must be ${expected.timeout} seconds`);
     }

@@ -6,11 +6,12 @@
  * 在用户每轮 prompt 提交时，按 prompt 内容召回相关 Memory v5 entries / sessions / instincts，
  * 通过 hookSpecificOutput.additionalContext 注入当前轮。
  *
- * 失败模式（按 plan §6.8 全部 silent exit 0）：
- *   - stdin 不是 JSON / payload 没有 prompt → 静默
- *   - 检索超时 / 抛异常 → 静默（debug 模式才写 stderr）
+ * 失败模式：
+ *   - 开启行为采集时，无法持久入队的 prompt 以结构化决策阻止并提示重试
+ *   - 显式关闭行为采集时，prompt 不因采集失败被阻止
+ *   - 已成功入队后的记忆检索失败只影响召回，不撤销 prompt
  *   - 匹配低于阈值 → 不输出
- *   - env TECH_PERSISTENCE_DISABLE_PROMPT_RECALL=1 → 直接 exit 0
+ *   - env TECH_PERSISTENCE_DISABLE_PROMPT_RECALL=1 → 跳过记忆召回
  *   - 自指防护：不输出已经在 prompt 中包含的 verbatim 内容
  *
  * Hook 不写 legacy observations，避免 prompt-recall 制造自指；但会把原始
@@ -20,11 +21,9 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
-const {
-  detectProjectIdentity,
-} = require('./lib/memory-v5');
-const { resolveBaseDir, resolveCompatReadDirs } = require('./lib/runtime-paths');
+const { resolveBaseDir } = require('./lib/runtime-paths');
 const { detectStableProjectIdentity } = require('./lib/project-identity');
 const {
   adaptClaudeHookEvent,
@@ -35,18 +34,17 @@ const {
 const { hashObject } = require('./lib/self-learning-canonical');
 const { loadSelfLearningPolicy } = require('./lib/self-learning-service');
 const { getOrAppendPromptReceipt, resolveStoreDir } = require('./lib/self-learning-store');
-const {
-  searchMemory,
-  formatRecallContext,
-  hasUsefulResults,
-} = require('./lib/memory-search');
-const { detectActiveSprintTags } = require('./inject-context');
+const { resolvePromptTranscriptBinding } = require('./lib/prompt-transcript-binding');
+const { enqueuePromptReceipt, hasPromptReceiptWorkerFailure } = require('./lib/prompt-receipt-outbox');
+const { startPromptReceiptWorker } = require('./lib/prompt-receipt-worker');
 
 const DEFAULT_TIMEOUT_MS = 1500;
-const DEFAULT_BUDGET_CHARS = 3000;
 const MIN_PROMPT_LENGTH = 8;
 const MAX_STDIN_BYTES = 64 * 1024;
 const MAX_TRANSCRIPT_TAIL_BYTES = 64 * 1024;
+const RECALL_TOTAL_BUDGET_MS = 2500;
+const RECALL_WORKER_MAX_MS = 1200;
+const MAX_RECALL_OUTPUT_BYTES = 16 * 1024;
 
 function resolveLearningBaseDir(explicit = null) {
   const managed = explicit || process.env.TP_SELF_LEARNING_BASE_DIR;
@@ -60,13 +58,15 @@ function resolveLearningBaseDir(explicit = null) {
 }
 
 function promptSourceEventId(payload) {
-  return payload && (
+  const value = payload && (
     payload.prompt_id
     || payload.promptId
     || payload.message_id
     || payload.messageId
     || payload.turn_id
   );
+  return typeof value === 'string' && value.length > 0 && value.length <= 256
+    && !/[\u0000-\u001f\u007f]/.test(value) ? value : null;
 }
 
 function projectMismatch() {
@@ -147,6 +147,16 @@ function snapshotTrustedTranscript(candidate) {
   let beforePath;
   let descriptor;
   try {
+    const parent = path.dirname(resolved);
+    const root = path.parse(parent).root;
+    let current = root;
+    for (const segment of parent.slice(root.length).split(path.sep).filter(Boolean)) {
+      current = path.join(current, segment);
+      const parentStat = fs.lstatSync(current);
+      if (parentStat.isSymbolicLink() || !parentStat.isDirectory()) {
+        throw receiptError('SELF_LEARNING_TRANSCRIPT_UNSAFE', 'trusted transcript parent must be a plain directory');
+      }
+    }
     beforePath = fs.lstatSync(resolved);
     if (!beforePath.isFile() || beforePath.isSymbolicLink() || beforePath.nlink !== 1) {
       throw receiptError('SELF_LEARNING_TRANSCRIPT_UNSAFE', 'trusted transcript must be an unlinked regular file');
@@ -201,6 +211,9 @@ function snapshotTrustedTranscript(candidate) {
     };
   } catch (error) {
     if (error && error.code === 'SELF_LEARNING_TRANSCRIPT_UNSAFE') throw error;
+    if (error && error.code === 'ENOENT' && !beforePath) {
+      throw receiptError('SELF_LEARNING_TRANSCRIPT_MISSING', 'trusted transcript does not yet exist');
+    }
     throw receiptError('SELF_LEARNING_TRANSCRIPT_UNSAFE', 'trusted transcript could not be read safely');
   } finally {
     if (descriptor !== undefined) {
@@ -209,12 +222,19 @@ function snapshotTrustedTranscript(candidate) {
   }
 }
 
-function promptReceiptSpec(payload, projectId, sessionId) {
+function promptReceiptSpec(payload, projectId, sessionId, storeDir) {
   const nativeSourceId = promptSourceEventId(payload);
   const transcriptPath = promptTranscriptPath(payload);
   let transcript;
   if (transcriptPath) {
-    transcript = snapshotTrustedTranscript(transcriptPath);
+    transcript = resolvePromptTranscriptBinding({
+      storeDir,
+      projectId,
+      sessionId,
+      transcriptPath,
+      nativePromptId: nativeSourceId,
+      inspectTranscript: () => snapshotTrustedTranscript(transcriptPath),
+    });
   } else if (nativeSourceId) {
     // Older/native test hosts may provide a stable prompt id without a
     // transcript path. This compatibility path remains idempotent but is not
@@ -267,6 +287,98 @@ function isLegacyReaderEnabled(baseDir) {
   }
 }
 
+/** Persist a sanitized native event before allowing the slow journal work to run. */
+function enqueuePromptBehavior(payload, options = {}) {
+  let baseDir;
+  try {
+    baseDir = resolveLearningBaseDir(options.baseDir);
+    const policy = loadSelfLearningPolicy(baseDir);
+    if (!policy.enabled || !policy.writer_enabled || policy.mode === 'off') {
+      return { status: 'skipped', reason: 'writer-disabled' };
+    }
+  } catch (error) {
+    learningDiagnostic('invalid-policy', error, options);
+    return { status: 'error', reason: 'invalid-policy' };
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { status: 'skipped', reason: 'invalid-payload' };
+  if (payload.hook_event_name && payload.hook_event_name !== 'UserPromptSubmit') return { status: 'skipped', reason: 'unsupported-hook-event' };
+  const prompt = extractPrompt(payload);
+  if (!prompt) return { status: 'skipped', reason: 'missing-prompt' };
+  const control = parseAcceptanceConfirmationControl(prompt);
+  if (control.status === 'invalid') return { status: 'skipped', reason: control.reason };
+  try {
+    const sessionId = promptSessionId(payload, options);
+    if (!sessionId) return { status: 'skipped', reason: 'missing-session-id' };
+    const { project } = resolveHookProject(payload, options);
+    const receiptSpec = promptReceiptSpec(payload, project.id, sessionId, resolveStoreDir(baseDir, project.id));
+    // Identity and time are assigned by the journal during replay, not by this
+    // temporary draft. Stable placeholders make duplicate queue comparison safe.
+    const eventDraft = adaptClaudeHookEvent({ ...payload, hook_event_name: 'UserPromptSubmit' }, {
+      project_id: project.id,
+      session_id: sessionId,
+      source_event_id: hashObject(receiptSpec),
+      task_ref: options.taskRef || (options.env || process.env).TP_SELF_LEARNING_TASK_REF || null,
+      occurred_at: '2000-01-01T00:00:00.000Z',
+    });
+    const outboxDir = path.join(resolveStoreDir(baseDir, project.id), 'prompt-outbox');
+    let result;
+    try {
+      result = enqueuePromptReceipt(outboxDir, { receipt_spec: receiptSpec, event_draft: eventDraft });
+    } catch (error) {
+      if (error && error.code === 'PROMPT_OUTBOX_FULL') {
+        try { (options.workerLauncher || startPromptReceiptWorker)(baseDir, project.id); } catch {}
+      }
+      throw error;
+    }
+    let notice = null;
+    try {
+      if (hasPromptReceiptWorkerFailure(outboxDir)) {
+        learningDiagnostic('previous-worker-failed', null, options);
+        notice = 'A previous prompt event could not be processed; queued events are retained for retry.';
+      }
+    } catch (error) {
+      learningDiagnostic('worker-status-unavailable', error, options);
+      notice = 'The prompt event queue status could not be checked.';
+    }
+    const launch = options.workerLauncher || startPromptReceiptWorker;
+    let launched;
+    try { launched = launch(baseDir, project.id); } catch { launched = { status: 'failed' }; }
+    if (!launched || launched.status === 'failed') {
+      learningDiagnostic('worker-start-failed', null, options);
+      notice = 'The prompt event worker could not start; queued events are retained for retry.';
+    }
+    return notice ? { ...result, notice } : result;
+  } catch (error) {
+    if (error && error.code === 'PROMPT_OUTBOX_FULL') {
+      learningDiagnostic('capture-queue-full', error, options);
+      return { status: 'error', reason: 'capture-queue-full' };
+    }
+    if (error && error.code === 'SELF_LEARNING_RECOVERY_UNAVAILABLE') {
+      learningDiagnostic('local-recovery-unavailable', error, options);
+      return { status: 'error', reason: 'local-recovery-unavailable' };
+    }
+    if (error && error.code === 'SELF_LEARNING_CONFIG_INVALID') return { status: 'skipped', reason: 'invalid-policy' };
+    if (error && error.code === 'SELF_LEARNING_PROJECT_MISMATCH') {
+      learningDiagnostic('project-identity-mismatch', error, options);
+      return { status: 'error', reason: 'project-identity-mismatch' };
+    }
+    if (error && error.code === 'SELF_LEARNING_SESSION_MISMATCH') {
+      learningDiagnostic('session-identity-mismatch', error, options);
+      return { status: 'error', reason: 'session-identity-mismatch' };
+    }
+    if (error && error.code === 'SELF_LEARNING_TRANSCRIPT_UNSAFE') {
+      learningDiagnostic('transcript-receipt-needs-review', error, options);
+      return {
+        status: 'skipped',
+        reason: 'untrusted-transcript',
+        notice: 'The prompt transcript could not be safely verified; this event was not queued.',
+      };
+    }
+    learningDiagnostic('capture-queue-failed', error, options);
+    return { status: 'error', reason: 'capture-queue-failed' };
+  }
+}
+
 /**
  * Append a Claude UserPromptSubmit event to the authoritative journal.
  *
@@ -304,7 +416,7 @@ function capturePromptBehavior(payload, options = {}) {
     if (!policy.enabled || !policy.writer_enabled || policy.mode === 'off') {
       return { status: 'skipped', reason: 'writer-disabled' };
     }
-    const receiptSpec = promptReceiptSpec(payload, project.id, sessionId);
+    const receiptSpec = promptReceiptSpec(payload, project.id, sessionId, resolveStoreDir(baseDir, project.id));
     const write = getOrAppendPromptReceipt(
       resolveStoreDir(baseDir, project.id),
       receiptSpec,
@@ -427,7 +539,77 @@ function safeStringify(value) {
   }
 }
 
+function emitHookOutput(notice, context) {
+  if (!notice && !context) return;
+  const output = {};
+  if (notice) output.systemMessage = notice;
+  if (context) output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: context };
+  const encoded = safeStringify(output);
+  if (encoded) process.stdout.write(encoded);
+}
+
+function emitPromptBlock(reason) {
+  const output = {
+    decision: 'block',
+    reason,
+    hookSpecificOutput: { hookEventName: 'UserPromptSubmit', suppressOriginalPrompt: true },
+  };
+  process.stdout.write(JSON.stringify(output));
+}
+
+function promptWriterRequired() {
+  try {
+    const policy = loadSelfLearningPolicy(resolveLearningBaseDir());
+    return Boolean(policy.enabled && policy.writer_enabled && policy.mode !== 'off');
+  } catch {
+    // Invalid or unavailable policy is not evidence that the user disabled capture.
+    return true;
+  }
+}
+
+function blockUncapturedPrompt(reason) {
+  if (promptWriterRequired()) emitPromptBlock(reason);
+}
+
+function wrapperElapsedBeforeHook() {
+  const raw = process.env.TP_PROMPT_HOOK_STARTED_AT_MS;
+  if (typeof raw !== 'string' || !/^\d{1,16}$/.test(raw)) return 0;
+  const wrapperStart = Number(raw);
+  const now = Date.now();
+  if (!Number.isSafeInteger(wrapperStart) || wrapperStart < 1 || wrapperStart > now) return 0;
+  const hookStart = now - process.uptime() * 1000;
+  // A caller-supplied value can only shorten the budget, never extend it.
+  return Math.max(0, hookStart - wrapperStart);
+}
+
+function boundedPromptRecall(payload, wrapperElapsedMs) {
+  const remaining = Math.floor(RECALL_TOTAL_BUDGET_MS - (process.uptime() * 1000 + wrapperElapsedMs));
+  if (remaining <= 0) return null;
+  try {
+    const child = spawnSync(process.execPath, [path.join(__dirname, 'lib', 'prompt-recall-worker.js')], {
+      input: JSON.stringify({ prompt: extractPrompt(payload), touchedFiles: extractTouchedFiles(payload) }),
+      encoding: 'utf8',
+      timeout: Math.min(remaining, RECALL_WORKER_MAX_MS),
+      maxBuffer: MAX_RECALL_OUTPUT_BYTES,
+      windowsHide: true,
+      shell: false,
+    });
+    if (child.error || child.signal || child.status !== 0) {
+      learningDiagnostic('legacy-recall-failed', child.error, { diagnostic: true });
+      return null;
+    }
+    if (!child.stdout) return null;
+    const output = JSON.parse(child.stdout);
+    if (!output || typeof output.context !== 'string' || output.context.length > 4096) return null;
+    return output.context;
+  } catch (error) {
+    learningDiagnostic('legacy-recall-failed', error, { diagnostic: true });
+    return null;
+  }
+}
+
 function main() {
+  const wrapperElapsedMs = wrapperElapsedBeforeHook();
   const input = readStdinSync(DEFAULT_TIMEOUT_MS);
   if (input.status === 'too-large') {
     learningDiagnostic(
@@ -435,34 +617,51 @@ function main() {
       { code: 'SELF_LEARNING_INPUT_TOO_LARGE' },
       { diagnostic: true }
     );
-    process.exit(0);
+    return blockUncapturedPrompt('The prompt event was too large to record safely. Please retry with a shorter message.');
   }
   const raw = input.raw;
   if (!raw.trim()) {
-    process.exit(0);
+    return blockUncapturedPrompt('The prompt event could not be read safely. Please retry.');
   }
 
   let payload;
   try {
     payload = JSON.parse(raw);
   } catch {
-    process.exit(0);
+    return blockUncapturedPrompt('The prompt event could not be parsed safely. Please retry.');
   }
 
   // Recall and capture have separate controls. Disabling recall must not erase
   // an otherwise valid native behavior event.
-  const capture = capturePromptBehavior(payload, {
+  const capture = enqueuePromptBehavior(payload, {
     diagnostic: true,
     taskRef: process.env.TP_SELF_LEARNING_TASK_REF || null,
   });
+  const captured = capture.status === 'queued' || capture.status === 'duplicate';
+  const intentionallyDisabled = capture.status === 'skipped' && capture.reason === 'writer-disabled';
+  if (!captured && !intentionallyDisabled) {
+    const reason = capture.reason === 'capture-queue-full'
+      ? 'The prompt event queue is full. Please wait for recovery and retry.'
+      : capture.reason === 'local-recovery-unavailable'
+        ? 'Confirm this is a device-local store on a Windows fixed volume with Node built-in node:sqlite available and enabled, set TP_SELF_LEARNING_LOCAL_RECOVERY_ROOT on this device, then retry.'
+      : capture.reason === 'untrusted-transcript'
+        ? 'The prompt transcript could not be safely verified. Please retry.'
+        : 'The prompt event could not be recorded safely. Please check the runtime and retry.';
+    return emitPromptBlock(reason);
+  }
+  const notice = capture.notice || (capture.reason === 'capture-queue-full'
+    ? 'The prompt event queue is full; this event was not queued and existing events are retained.'
+    : capture.reason === 'capture-queue-failed'
+      ? 'The prompt event could not be queued; check the self-learning runtime.'
+      : null);
   if (capture.reason === 'invalid-policy') {
     learningDiagnostic('invalid-policy', { code: 'SELF_LEARNING_CONFIG_INVALID' }, {
       diagnostic: true,
     });
-    process.exit(0);
+    return emitHookOutput(notice);
   }
   if (capture.reason === 'project-identity-mismatch') {
-    process.exit(0);
+    return emitHookOutput(notice);
   }
   let baseDir;
   let policy;
@@ -477,94 +676,19 @@ function main() {
       error,
       { diagnostic: true }
     );
-    process.exit(0);
+    return emitHookOutput(notice);
   }
   if (process.env.TECH_PERSISTENCE_DISABLE_PROMPT_RECALL === '1'
       || policy.legacy_reader_enabled !== true) {
-    process.exit(0);
+    return emitHookOutput(notice);
   }
 
   const prompt = extractPrompt(payload);
   if (!prompt || prompt.length < MIN_PROMPT_LENGTH) {
-    process.exit(0);
+    return emitHookOutput(notice);
   }
 
-  const touchedFiles = extractTouchedFiles(payload);
-
-  let project;
-  try {
-    project = detectProjectIdentity();
-  } catch (error) {
-    learningDiagnostic('runtime-project-identity-failed', error, { diagnostic: true });
-    process.exit(0);
-  }
-  if (!project || !project.id) {
-    process.exit(0);
-  }
-
-  let baseDirs;
-  try {
-    baseDirs = resolveCompatReadDirs();
-  } catch (error) {
-    learningDiagnostic('legacy-store-read-failed', error, { diagnostic: true });
-    process.exit(0);
-  }
-
-  let sprintTags = [];
-  try {
-    sprintTags = detectActiveSprintTags();
-  } catch {
-    sprintTags = [];
-  }
-
-  let result;
-  try {
-    result = searchMemory({
-      prompt,
-      projectId: project.id,
-      baseDirs,
-      cwd: process.cwd(),
-      touchedFiles,
-      sprintTags,
-      limits: { budgetChars: DEFAULT_BUDGET_CHARS },
-    });
-  } catch (error) {
-    learningDiagnostic('legacy-recall-failed', error, { diagnostic: true });
-    process.exit(0);
-  }
-
-  if (!hasUsefulResults(result)) {
-    process.exit(0);
-  }
-
-  let body;
-  try {
-    body = formatRecallContext(result, { budgetChars: DEFAULT_BUDGET_CHARS });
-  } catch (error) {
-    learningDiagnostic('legacy-recall-format-failed', error, { diagnostic: true });
-    process.exit(0);
-  }
-
-  if (!body || body.length < 40) {
-    process.exit(0);
-  }
-
-  const context = `<learned-context project="${project.name || 'unknown'}" source="prompt-recall">
-${body}
-</learned-context>`;
-
-  const output = safeStringify({
-    hookSpecificOutput: {
-      hookEventName: 'UserPromptSubmit',
-      additionalContext: context,
-    },
-  });
-
-  if (!output) {
-    process.exit(0);
-  }
-
-  process.stdout.write(output);
+  emitHookOutput(notice, boundedPromptRecall(payload, wrapperElapsedMs));
 }
 
 if (require.main === module) {
@@ -572,12 +696,14 @@ if (require.main === module) {
     main();
   } catch (error) {
     learningDiagnostic('runtime-failed', error, { diagnostic: true });
+    blockUncapturedPrompt('The prompt event could not be recorded safely. Please check the runtime and retry.');
   }
   process.exitCode = 0;
 }
 
 module.exports = {
   capturePromptBehavior,
+  enqueuePromptBehavior,
   extractPrompt,
   extractTouchedFiles,
   isLegacyReaderEnabled,

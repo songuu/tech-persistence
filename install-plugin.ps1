@@ -49,6 +49,16 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   exit 1
 }
 
+try {
+  $claudeVersionOutput = (& claude --version 2>$null | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0 -or $claudeVersionOutput -notmatch '^([0-9]{1,6})\.([0-9]{1,6})\.([0-9]{1,6})(\s+\(Claude\s+Code\))?$') { throw 'version unavailable' }
+  $claudeVersion = [version]::new([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+  if ($claudeVersion -lt [version]'2.1.295') { throw 'version too old' }
+} catch {
+  Write-Error 'Claude Code >= 2.1.295 is required for reliable prompt hooks; install or upgrade Claude Code.'
+  exit 1
+}
+
 if (-not (Test-Path (Join-Path $PluginDir '.claude-plugin\plugin.json'))) {
   Write-Error "✗ $PluginDir\.claude-plugin\plugin.json 不存在.`n  请确认你在 tech-persistence 仓库根目录运行此脚本."
   exit 1

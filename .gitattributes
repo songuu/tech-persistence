@@ -6,6 +6,7 @@
 /.github/**/*.yml text eol=lf
 /project-level/**/*.md text eol=lf
 /user-level/**/*.md text eol=lf
+/user-level/skills/caveman-compress/scripts/*.py text eol=lf
 /.claude/**/.gitkeep text eol=lf
 /.codex/**/.gitkeep text eol=lf
 *.sh text eol=lf
@@ -14,6 +15,8 @@ plugins/tech-persistence/**/*.js text eol=lf
 plugins/tech-persistence/**/*.json text eol=lf
 plugins/tech-persistence/**/*.svg text eol=lf
 plugins/tech-persistence/**/*.cmd text eol=crlf
+/plugins/tech-persistence/skills/caveman-compress/scripts/*.py text eol=lf
+/plugins/tech-persistence/codex-skills/caveman-compress/scripts/*.py text eol=lf
 
 # tech-persistence:project-standards:start
 /.claude/**/*.cjs text eol=lf

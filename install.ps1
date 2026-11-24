@@ -259,6 +259,24 @@ function Update-ObsidianIfExists {
     } catch { }
 }
 
+# Help is a read-only operation and does not require runtime tools.
+if ($Help) {
+    Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -Obsidian [-VaultPath <path>] [-SharedHomunculus <path>] | -HooksOnly`n"
+    exit 0
+}
+
+if ($All -or $User -or $Project -or $HooksOnly) {
+    try {
+        $claudeVersionOutput = (& claude --version 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or $claudeVersionOutput -notmatch '^([0-9]{1,6})\.([0-9]{1,6})\.([0-9]{1,6})(\s+\(Claude\s+Code\))?$') { throw 'version unavailable' }
+        $claudeVersion = [version]::new([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+        if ($claudeVersion -lt [version]'2.1.295') { throw 'version too old' }
+    } catch {
+        Write-Error 'Claude Code >= 2.1.295 is required for reliable prompt hooks; install or upgrade Claude Code.'
+        exit 1
+    }
+}
+
 # Check Node.js
 try { $nv = (& node --version 2>&1).ToString() -replace 'v',''; if ([int]($nv.Split('.')[0]) -lt 18) { throw "old" } } catch { Write-Host "[FAIL] Node.js >= 18 required" -ForegroundColor Red; exit 1 }
 
@@ -270,5 +288,20 @@ elseif ($All) { Install-User; Install-Project }
 elseif ($User) { Install-User }
 elseif ($Project) { Install-Project }
 elseif ($Obsidian) { Install-Obsidian }
-elseif ($HooksOnly) { $hd = Join-Path $ClaudeHome "skills/continuous-learning/hooks"; Ensure-Dir $hd; Ensure-Dir (Join-Path $hd "lib"); Get-ChildItem (Join-Path $ScriptDir "scripts") -Filter "*.js" | ForEach-Object { Copy-Item $_.FullName (Join-Path $hd $_.Name) -Force }; Get-ChildItem (Join-Path $ScriptDir "scripts\lib") -Filter "*.js" | ForEach-Object { Copy-Item $_.FullName (Join-Path $hd "lib\$($_.Name)") -Force }; Write-OK "hooks updated" }
+elseif ($HooksOnly) {
+    $hd = Join-Path $ClaudeHome "skills/continuous-learning/hooks"
+    # Update the failure policy before touching runtime files; do not create
+    # optional project settings or alter unrelated hook entries.
+    foreach ($settingsPath in @((Join-Path $ClaudeHome 'settings.json'), (Join-Path (Get-Location) '.claude/settings.json'))) {
+        if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+            & node (Join-Path $ScriptDir 'scripts/merge-claude-settings-hooks.js') $settingsPath '--prompt-only' '--hook-root' $hd '--shell' 'windows'
+            if ($LASTEXITCODE -ne 0) { throw "Claude prompt hook upgrade failed: $settingsPath" }
+        }
+    }
+    Ensure-Dir $hd; Ensure-Dir (Join-Path $hd "lib")
+    Get-ChildItem (Join-Path $ScriptDir "scripts\lib") -Filter "*.js" | ForEach-Object { Copy-Item $_.FullName (Join-Path $hd "lib\$($_.Name)") -Force }
+    Get-ChildItem (Join-Path $ScriptDir "scripts") -Filter "*.js" | Where-Object { $_.Name -ne 'prompt-submit.js' } | ForEach-Object { Copy-Item $_.FullName (Join-Path $hd $_.Name) -Force }
+    Copy-Item (Join-Path $ScriptDir 'scripts/prompt-submit.js') (Join-Path $hd 'prompt-submit.js') -Force
+    Write-OK "hooks updated"
+}
 else { Write-Host "`nUsage: .\install.ps1 -User | -Project | -All | -Obsidian [-VaultPath <path>] [-SharedHomunculus <path>] | -HooksOnly`n" }

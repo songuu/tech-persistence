@@ -55,6 +55,7 @@ const LOGICAL_HOOKS = Object.freeze([
         event: 'UserPromptSubmit',
         matcher: '*',
         timeout: 5,
+        onFailure: 'block',
         scriptPattern: /prompt-submit\.js/,
       },
       [HOOK_TARGETS.PLUGIN_RUNTIME]: {
@@ -62,6 +63,7 @@ const LOGICAL_HOOKS = Object.freeze([
         matcher: '*',
         timeout: 5,
         async: false,
+        onFailure: 'block',
         statusMessage: 'Recalling relevant memory',
       },
     },
@@ -180,6 +182,7 @@ function getHookSettingsExpectations(target) {
     matcher: targetSpec.matcher,
     script: hook.script,
     timeout: targetSpec.timeout,
+    ...(targetSpec.onFailure ? { onFailure: targetSpec.onFailure } : {}),
     scriptPattern: targetSpec.scriptPattern || patternForScriptAndArgs(hook.script, hook.args),
   }));
 }
@@ -195,14 +198,14 @@ function quoteForPosix(value) {
   return `"${value.replace(/\\/g, '/').replace(/"/g, '\\"')}"`;
 }
 
-function buildClaudeClassicCommand(hookRoot, script, args, shell) {
+function buildClaudeClassicCommand(hookRoot, script, args, shell, onFailure) {
   const scriptPath = `${hookRoot.replace(/\\/g, '/')}/${script}`;
   const commandPath = shell === 'windows' ? quoteForWindows(scriptPath) : quoteForPosix(scriptPath);
   const argSuffix = args && args.length > 0 ? ` ${args.join(' ')}` : '';
   // Claude Code on Windows executes hook commands via Git Bash (MSYS2).
-  // Keep the host fail-open, while preserving the hook's bounded, code-only
-  // stderr diagnostic so store/config failures remain observable.
-  return `node ${commandPath}${argSuffix} || true`;
+  // Prompt capture must propagate failures to Claude's onFailure policy;
+  // the other hooks retain their existing fail-open behavior.
+  return `node ${commandPath}${argSuffix}${onFailure === 'block' ? '' : ' || true'}`;
 }
 
 function patternForScriptAndArgs(script, args) {
@@ -226,8 +229,9 @@ function buildClaudeClassicHookSpecs(options = {}) {
       scriptPattern: target.scriptPattern || patternForScriptAndArgs(hook.script, hook.args),
       hook: {
         type: 'command',
-        command: buildClaudeClassicCommand(hookRoot, hook.script, hook.args, shell),
+        command: buildClaudeClassicCommand(hookRoot, hook.script, hook.args, shell, target.onFailure),
         timeout: target.timeout,
+        ...(target.onFailure ? { onFailure: target.onFailure } : {}),
       },
     };
   });
@@ -259,6 +263,7 @@ function buildPluginHookConfig(options = {}) {
       timeout: target.timeout,
     };
     if (target.statusMessage) commandHook.statusMessage = target.statusMessage;
+    if (target.onFailure) commandHook.onFailure = target.onFailure;
     entry.hooks.push(commandHook);
   });
 

@@ -118,12 +118,38 @@ test('W4 windows-shell hook commands use POSIX null-redirect if any null-redirec
   }
 });
 
-test('W5 classic hooks keep fail-open fallback while preserving bounded stderr diagnostics', () => {
+test('W5 only prompt submission propagates failure while other hooks remain fail-open', () => {
   const commands = getAllHookCommands('windows');
   for (const { hookName, command } of commands) {
-    assert.match(command, /\|\|\s*true\s*$/, `${hookName}: missing fail-open fallback`);
+    if (hookName === 'UserPromptSubmit') assert.doesNotMatch(command, /\|\|\s*true\s*$/);
+    else assert.match(command, /\|\|\s*true\s*$/, `${hookName}: missing fail-open fallback`);
     assert(!command.includes('2>/dev/null'), `${hookName}: stderr diagnostics are swallowed`);
   }
+});
+
+test('S1d prompt submission blocks host failure in both Claude projections', () => {
+  const classic = buildClaudeClassicHookSpecs({ hookRoot: '/x', shell: 'posix' });
+  assert.equal(classic.UserPromptSubmit.hook.onFailure, 'block');
+  for (const [event, spec] of Object.entries(classic)) {
+    if (event !== 'UserPromptSubmit') assert.equal(spec.hook.onFailure, undefined);
+  }
+  const plugin = buildPluginHookConfig();
+  const prompt = plugin.hooks.UserPromptSubmit.flatMap((entry) => entry.hooks);
+  assert.equal(prompt.length, 1);
+  assert.equal(prompt[0].onFailure, 'block');
+  for (const [event, entries] of Object.entries(plugin.hooks)) {
+    if (event !== 'UserPromptSubmit') {
+      for (const hook of entries.flatMap((entry) => entry.hooks)) assert.equal(hook.onFailure, undefined);
+    }
+  }
+  const hooks = Object.fromEntries(Object.entries(classic).map(([event, spec]) => [event, [{
+    matcher: spec.matcher, hooks: [{ ...spec.hook }],
+  }]]));
+  delete hooks.UserPromptSubmit[0].hooks[0].onFailure;
+  assert(inspectSettingsHookIssues({ hooks }).some((issue) => issue.code === 'wrong-failure-policy'));
+  hooks.UserPromptSubmit[0].hooks[0].onFailure = 'block';
+  hooks.UserPromptSubmit[0].hooks[0].command += ' || true';
+  assert(inspectSettingsHookIssues({ hooks }).some((issue) => issue.code === 'wrong-failure-policy'));
 });
 
 // ============================================================
@@ -240,6 +266,10 @@ test('S3 merge upgrades installed managed hooks that previously swallowed stderr
             timeout: 5000,
           }],
         }],
+        UserPromptSubmit: [{
+          matcher: '*',
+          hooks: [{ type: 'command', command: 'node "/installed/hooks/prompt-submit.js" || true', timeout: 5 }],
+        }],
       },
     }));
     const result = spawnSync(process.execPath, [
@@ -260,7 +290,11 @@ test('S3 merge upgrades installed managed hooks that previously swallowed stderr
       entries.flatMap((entry) => entry.hooks.map((hook) => hook.command))
     ));
     assert(commands.every((command) => !command.includes('2>/dev/null')));
-    assert(commands.every((command) => /\|\|\s*true\s*$/.test(command)));
+    const prompt = settings.hooks.UserPromptSubmit[0].hooks[0];
+    assert.doesNotMatch(prompt.command, /\|\|\s*true\s*$/);
+    assert.strictEqual(prompt.onFailure, 'block');
+    assert(commands.filter((command) => !command.includes('prompt-submit.js'))
+      .every((command) => /\|\|\s*true\s*$/.test(command)));
     const installedTimeouts = Object.fromEntries(Object.entries(settings.hooks).map(
       ([event, entries]) => [event, entries.flatMap((entry) => entry.hooks)[0].timeout]
     ));
@@ -274,6 +308,97 @@ test('S3 merge upgrades installed managed hooks that previously swallowed stderr
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('S4 prompt-only upgrade preserves unrelated settings and hooks', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-prompt-only-'));
+  const settingsPath = path.join(root, 'settings.json');
+  try {
+    const foreign = { type: 'command', command: 'node "/elsewhere/continuous-learning/hooks/prompt-submit.js" || true', timeout: 42 };
+    const compound = { type: 'command', command: 'node unrelated.js; echo /home/user/.claude/skills/continuous-learning/hooks/prompt-submit.js || true', timeout: 44 };
+    const other = { type: 'command', command: 'custom command', timeout: 17 };
+    const input = { env: { SECRET: 'sentinel' }, hooks: {
+      SessionStart: [{ hooks: [other] }],
+      UserPromptSubmit: [{ matcher: '*', hooks: [foreign, compound, {
+        type: 'command', command: 'node "/home/user/.claude/skills/continuous-learning/hooks/prompt-submit.js" || true',
+        timeout: 120, statusMessage: 'keep this', async: true, asyncRewake: true,
+      }] }],
+    } };
+    fs.writeFileSync(settingsPath, JSON.stringify(input));
+    const run = () => spawnSync(process.execPath, [path.join(__dirname, 'merge-claude-settings-hooks.js'),
+      settingsPath, '--prompt-only', '--hook-root', '/home/user/.claude/skills/continuous-learning/hooks', '--shell', 'posix'],
+    { encoding: 'utf8', windowsHide: true });
+    const result = run();
+    assert.strictEqual(result.status, 0, result.stderr);
+    const actual = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    assert.deepStrictEqual(actual.env, input.env);
+    assert.deepStrictEqual(actual.hooks.SessionStart, input.hooks.SessionStart);
+    assert.deepStrictEqual(actual.hooks.UserPromptSubmit[0].hooks[0], foreign);
+    assert.deepStrictEqual(actual.hooks.UserPromptSubmit[0].hooks[1], compound);
+    const updated = actual.hooks.UserPromptSubmit[0].hooks[2];
+    assert.equal(updated.timeout, 120);
+    assert.equal(updated.statusMessage, 'keep this');
+    assert.equal(updated.onFailure, 'block');
+    assert.equal(updated.async, false);
+    assert.equal(updated.asyncRewake, false);
+    assert.doesNotMatch(updated.command, /\|\|\s*true\s*$/);
+    assert.equal(actual.$schema, undefined);
+    assert.equal(actual.autoMemoryEnabled, undefined);
+    const bytes = fs.readFileSync(settingsPath, 'utf8');
+    assert.strictEqual(run().status, 0);
+    assert.strictEqual(fs.readFileSync(settingsPath, 'utf8'), bytes);
+    fs.writeFileSync(settingsPath, JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [foreign] }] } }));
+    const before = fs.readFileSync(settingsPath, 'utf8');
+    assert.strictEqual(run().status, 0);
+    assert.strictEqual(fs.readFileSync(settingsPath, 'utf8'), before);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('S5 prompt-only keeps original bytes on publish failure or concurrent modification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-prompt-atomic-'));
+  const settingsPath = path.join(root, 'settings.json');
+  const original = JSON.stringify({ env: { USER: 'original' }, hooks: { UserPromptSubmit: [{ hooks: [{
+    type: 'command', command: 'node "/managed/continuous-learning/hooks/prompt-submit.js" || true',
+  }] }] } });
+  try {
+    const preload = path.join(root, 'inject.js');
+    const run = (code) => {
+      fs.writeFileSync(preload, code);
+      return spawnSync(process.execPath, ['--require', preload, path.join(__dirname, 'merge-claude-settings-hooks.js'),
+        settingsPath, '--prompt-only', '--hook-root', '/managed/continuous-learning/hooks'],
+      { encoding: 'utf8', windowsHide: true, env: { ...process.env, TEST_SETTINGS_PATH: settingsPath } });
+    };
+    fs.writeFileSync(settingsPath, original);
+    const failed = run("const fs=require('fs'); fs.renameSync=()=>{const e=new Error('sentinel'); e.code='EIO'; throw e;};");
+    assert.notEqual(failed.status, 0);
+    assert.equal(fs.readFileSync(settingsPath, 'utf8'), original);
+    assert.deepStrictEqual(fs.readdirSync(root).filter((name) => name.endsWith('.tmp')), []);
+
+    const external = '{"external":"concurrent"}';
+    const changed = run(`const fs=require('fs'); const read=fs.readFileSync; let n=0; fs.readFileSync=function(p,...a){ if(String(p)===process.env.TEST_SETTINGS_PATH && ++n===2) fs.writeFileSync(p, ${JSON.stringify(external)}); return read.call(this,p,...a); };`);
+    assert.notEqual(changed.status, 0);
+    assert.equal(fs.readFileSync(settingsPath, 'utf8'), external);
+    assert.deepStrictEqual(fs.readdirSync(root).filter((name) => name.endsWith('.tmp')), []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('S6 prompt-only refuses linked parent directories', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-prompt-link-'));
+  try {
+    const target = path.join(root, 'target');
+    fs.mkdirSync(target);
+    const original = '{"env":{"USER":"sentinel"}}';
+    fs.writeFileSync(path.join(target, 'settings.json'), original);
+    const link = path.join(root, 'link');
+    try { fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir'); }
+    catch (error) { if (error.code === 'EPERM') return; throw error; }
+    const result = spawnSync(process.execPath, [path.join(__dirname, 'merge-claude-settings-hooks.js'),
+      path.join(link, 'settings.json'), '--prompt-only'], { encoding: 'utf8', windowsHide: true });
+    assert.notEqual(result.status, 0);
+    assert.equal(fs.readFileSync(path.join(target, 'settings.json'), 'utf8'), original);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 // ============================================================

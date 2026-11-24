@@ -26,6 +26,7 @@ const PROMPT_RECEIPT_SCHEMA_VERSION = 'self-learning-prompt-receipt-v1';
 const JOURNAL_DIR_NAME = 'journal';
 const LOCK_FILE_NAME = 'LOCK.json';
 const LOCK_RECOVERY_CLAIM_FILE_NAME = '.journal-lock-recovery.claim';
+const LOCAL_RECOVERY_CLAIM_SCHEMA = 'journal-local-recovery-claim-v2';
 const RECORD_TYPES = Object.freeze([
   'behavior_event',
   'evidence_ref',
@@ -81,6 +82,7 @@ const LIFECYCLE_RECEIPT_LOCK_RETRY_TIMEOUT_MS = 1500;
 const LOCK_RETRY_MIN_MS = 4;
 const LOCK_RETRY_MAX_MS = 32;
 const TRANSIENT_LOCK_OPEN_CODES = new Set(['EACCES', 'EBUSY', 'EPERM']);
+const UNSUPPORTED_LINK_CODES = new Set(['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
 const LOCK_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 
 function storeError(code, message, cause) {
@@ -409,21 +411,37 @@ function readLockFile(lockFile) {
 }
 
 function lockSnapshot(lockFile) {
-  const stat = fs.lstatSync(lockFile);
+  const stat = fs.lstatSync(lockFile, { bigint: true });
   if (!stat.isFile() || stat.isSymbolicLink()) {
     throw storeError('SELF_LEARNING_LOCK_CORRUPT', `self-learning journal lock is not a regular file: ${lockFile}`);
   }
-  const bytes = fs.readFileSync(lockFile);
+  const sameExact = (left, right) => ['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs', 'birthtimeNs', 'nlink']
+    .every((key) => left[key] === right[key]);
+  let descriptor;
+  let bytes;
+  try {
+    descriptor = fs.openSync(lockFile, 'r');
+    const opened = fs.fstatSync(descriptor, { bigint: true });
+    if (!opened.isFile() || !sameExact(stat, opened)) throw storeError('SELF_LEARNING_LOCKED', 'journal lock changed before reading');
+    bytes = fs.readFileSync(descriptor);
+    const afterFd = fs.fstatSync(descriptor, { bigint: true });
+    const afterPath = fs.lstatSync(lockFile, { bigint: true });
+    if (!afterPath.isFile() || afterPath.isSymbolicLink() || !sameExact(opened, afterFd)
+        || !sameExact(afterFd, afterPath) || BigInt(bytes.length) !== afterFd.size) {
+      throw storeError('SELF_LEARNING_LOCKED', 'journal lock changed while reading');
+    }
+  } finally { if (descriptor !== undefined) fs.closeSync(descriptor); }
   return {
     bytes,
     identity: {
-      dev: stat.dev,
-      ino: stat.ino,
-      size: stat.size,
-      mtimeMs: stat.mtimeMs,
-      ctimeMs: stat.ctimeMs,
-      birthtimeMs: stat.birthtimeMs,
-      nlink: stat.nlink,
+      // Windows file IDs can exceed Number's exact integer range.
+      dev: String(stat.dev),
+      ino: String(stat.ino),
+      size: String(stat.size),
+      mtimeMs: String(stat.mtimeNs),
+      ctimeMs: String(stat.ctimeNs),
+      birthtimeMs: String(stat.birthtimeNs),
+      nlink: Number(stat.nlink),
     },
   };
 }
@@ -486,74 +504,211 @@ function restoreQuarantinedLock(quarantineFile, lockFile, journalDir) {
   return true;
 }
 
-function recoverDeadLock(lockFile, journalDir, observed) {
+function removeDeadOwnerRecordStage(storeDir, token) {
+  const temporary = path.join(storeDir, `.journal-record-${token}.tmp`);
+  let before;
+  try {
+    before = fs.lstatSync(temporary, { bigint: true });
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return;
+    throw error;
+  }
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {
+    throw storeError('SELF_LEARNING_LOCK_CORRUPT', 'dead journal owner staging file is not a private regular file');
+  }
+  const after = fs.lstatSync(temporary, { bigint: true });
+  if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1n
+      || ['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs', 'birthtimeNs']
+        .some((key) => before[key] !== after[key])) {
+    throw storeError('SELF_LEARNING_LOCK_CORRUPT', 'dead journal owner staging file changed during recovery');
+  }
+  // The claimed dead lock binds the random token to its only writer. The
+  // store's existing trust boundary excludes hostile same-user replacement
+  // between the identity check and unlink.
+  fs.rmSync(temporary);
+  fsyncDirectoryBestEffort(storeDir);
+}
+
+function sameGuardIdentity(a, b) {
+  return a && b && a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+}
+
+function claimLockMatches(snapshot, claim) {
+  const identity = snapshot.identity;
+  const expected = claim.lock_identity;
+  return identity.dev === expected.dev && identity.ino === expected.ino
+    && identity.size === expected.size && identity.mtimeMs === expected.mtimeMs
+    && identity.birthtimeMs === expected.birthtimeMs
+    && crypto.createHash('sha256').update(snapshot.bytes).digest('hex') === claim.lock_hash;
+}
+
+function readLocalRecoveryClaim(file, guard) {
+  const snapshot = lockSnapshot(file);
+  let claim;
+  try {
+    claim = JSON.parse(snapshot.bytes.toString('utf8'));
+    if (!claim || claim.schema_version !== LOCAL_RECOVERY_CLAIM_SCHEMA) return null;
+    assertExactKeys(claim, ['schema_version', 'recovery_token', 'guard_identity', 'lock_identity', 'lock_hash', 'lock_pid', 'lock_token'], 'local recovery claim');
+    assertExactKeys(claim.guard_identity, ['dev', 'ino', 'birthtimeNs'], 'recovery guard identity');
+    assertExactKeys(claim.lock_identity, ['dev', 'ino', 'size', 'mtimeMs', 'birthtimeMs'], 'recovered lock identity');
+    if (!/^[a-f0-9]{32}$/.test(claim.recovery_token)
+        || !/^[a-f0-9]{32}$/.test(claim.lock_token)
+        || !/^[a-f0-9]{64}$/.test(claim.lock_hash)
+        || !Number.isSafeInteger(claim.lock_pid) || claim.lock_pid <= 0
+        || !sameGuardIdentity(claim.guard_identity, guard.identity)
+        || snapshot.identity.nlink < 1 || snapshot.identity.nlink > 2) throw new Error('invalid local recovery claim');
+    return { claim, snapshot };
+  } catch (error) {
+    throw storeError('SELF_LEARNING_LOCK_CORRUPT', 'local recovery claim is invalid or belongs to another guard', error);
+  }
+}
+
+function removeLocalClaimStage(storeDir, claimFile, state) {
+  const stage = path.join(storeDir, `.journal-local-claim-${state.claim.recovery_token}.tmp`);
+  let staged;
+  try { staged = fs.lstatSync(stage, { bigint: true }); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  const current = fs.lstatSync(claimFile, { bigint: true });
+  if (!staged.isFile() || staged.isSymbolicLink() || staged.nlink > 2n
+      || staged.dev !== current.dev || staged.ino !== current.ino) {
+    throw storeError('SELF_LEARNING_LOCK_CORRUPT', 'local recovery claim stage identity mismatch');
+  }
+  fs.unlinkSync(stage);
+  fsyncDirectoryBestEffort(storeDir);
+  state.snapshot = lockSnapshot(claimFile);
+}
+
+function removeLocalClaim(storeDir, claimFile, state, guard) {
+  guard.verify();
+  const current = readLocalRecoveryClaim(claimFile, guard);
+  if (!current || current.claim.recovery_token !== state.claim.recovery_token
+      || !samePinnedLock(state.snapshot, current.snapshot)) {
+    throw storeError('SELF_LEARNING_LOCKED', 'local recovery claim changed before removal');
+  }
+  fs.unlinkSync(claimFile);
+  fsyncDirectoryBestEffort(storeDir);
+}
+
+function finishLocalRecovery(lockFile, journalDir, state, guard) {
   const storeDir = path.dirname(journalDir);
   const claimFile = path.join(storeDir, LOCK_RECOVERY_CLAIM_FILE_NAME);
-  const quarantineFile = path.join(
-    storeDir,
-    `.journal-lock-stale-${crypto.randomBytes(16).toString('hex')}.json`
-  );
-  let claimCreated = false;
-  let moved = false;
-  try {
-    // `link` is the no-overwrite recovery claim. It pins the exact lock inode,
-    // so only one contender may perform the destructive rename and all other
-    // writers remain blocked by the fixed claim path.
-    fs.linkSync(lockFile, claimFile);
-    claimCreated = true;
-  } catch (error) {
-    if (error && ['EEXIST', 'ENOENT'].includes(error.code)) return false;
-    throw storeError(
-      'SELF_LEARNING_LOCK_FAILED',
-      `failed to claim stale journal lock at ${lockFile}`,
-      error
-    );
+  const quarantine = path.join(storeDir, `.journal-local-recovery-${state.claim.recovery_token}.json`);
+  guard.verify();
+  removeLocalClaimStage(storeDir, claimFile, state);
+  let locked;
+  try { locked = lockSnapshot(lockFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  let quarantined;
+  try { quarantined = lockSnapshot(quarantine); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (!isProcessDefinitelyDead(state.claim.lock_pid)) {
+    throw storeError('SELF_LEARNING_LOCKED', 'journal lock owner is not proven dead');
   }
-  try {
-    const claimed = inspectExistingLock(claimFile);
-    const confirmed = inspectExistingLock(lockFile);
-    if (!samePinnedLock(observed.snapshot, confirmed.snapshot)
-        || !sameLockSnapshot(claimed.snapshot, confirmed.snapshot)
-        || confirmed.lock.token !== observed.lock.token
-        || confirmed.lock.pid !== observed.lock.pid
-        || !isProcessDefinitelyDead(confirmed.lock.pid)) {
-      return false;
+  if (locked && quarantined) {
+    // Restoring via hard-link can be interrupted before the old name is
+    // removed. Only the exact same claim-bound inode is a valid dual name.
+    if (!samePinnedLock(locked, quarantined)
+        || locked.identity.dev !== quarantined.identity.dev
+        || locked.identity.ino !== quarantined.identity.ino
+        || !claimLockMatches(locked, state.claim)) {
+      throw storeError('SELF_LEARNING_LOCKED', 'journal recovery aliases do not identify the claimed lock');
     }
-
-    // Rename is the atomic destructive boundary. A new live LOCK may only be
-    // created after the recovery claim is removed, and cleanup targets only
-    // this unique quarantine path, never whatever may later occupy LOCK.json.
-    fs.renameSync(lockFile, quarantineFile);
-    moved = true;
+    const checkedLock = lockSnapshot(lockFile);
+    const checkedQuarantine = lockSnapshot(quarantine);
+    if (!samePinnedLock(locked, checkedLock) || !samePinnedLock(quarantined, checkedQuarantine)) {
+      throw storeError('SELF_LEARNING_LOCKED', 'journal recovery aliases changed');
+    }
+    guard.verify();
+    fs.unlinkSync(quarantine);
+    fsyncDirectoryBestEffort(storeDir);
+    locked = lockSnapshot(lockFile);
+    quarantined = undefined;
+  }
+  if (locked) {
+    if (!claimLockMatches(locked, state.claim)) throw storeError('SELF_LEARNING_LOCKED', 'journal lock does not match its recovery claim');
+    const confirmed = lockSnapshot(lockFile);
+    if (!sameLockSnapshot(locked, confirmed) || !claimLockMatches(confirmed, state.claim)) {
+      throw storeError('SELF_LEARNING_LOCKED', 'journal lock changed before recovery');
+    }
+    removeDeadOwnerRecordStage(storeDir, state.claim.lock_token);
+    guard.verify();
+    fs.renameSync(lockFile, quarantine);
     fsyncDirectoryBestEffort(journalDir);
     fsyncDirectoryBestEffort(storeDir);
-    const quarantined = inspectExistingLock(quarantineFile);
-    const claimedAfterMove = inspectExistingLock(claimFile);
-    if (!samePinnedLock(confirmed.snapshot, quarantined.snapshot)
-        || !sameLockSnapshot(quarantined.snapshot, claimedAfterMove.snapshot)
-        || quarantined.lock.token !== observed.lock.token
-        || quarantined.lock.pid !== observed.lock.pid
-        || !isProcessDefinitelyDead(quarantined.lock.pid)) {
-      if (restoreQuarantinedLock(quarantineFile, lockFile, journalDir)) moved = false;
-      return false;
-    }
-    fs.rmSync(quarantineFile);
-    moved = false;
-    fsyncDirectoryBestEffort(storeDir);
-    return true;
-  } finally {
-    if (moved && fs.existsSync(quarantineFile) && !fs.existsSync(lockFile)) {
-      try {
-        if (restoreQuarantinedLock(quarantineFile, lockFile, journalDir)) moved = false;
-      } catch (_) {}
-    }
-    if (claimCreated && fs.existsSync(claimFile)) {
-      try {
-        fs.rmSync(claimFile);
-        fsyncDirectoryBestEffort(storeDir);
-      } catch (_) {}
+    quarantined = lockSnapshot(quarantine);
+    if (!samePinnedLock(locked, quarantined) || !claimLockMatches(quarantined, state.claim)) {
+      try { restoreQuarantinedLock(quarantine, lockFile, journalDir); } catch (_) {}
+      throw storeError('SELF_LEARNING_LOCKED', 'journal lock changed during recovery');
     }
   }
+  if (quarantined) {
+    if (!claimLockMatches(quarantined, state.claim)) throw storeError('SELF_LEARNING_LOCKED', 'journal quarantine does not match its claim');
+    try { removeDeadOwnerRecordStage(storeDir, state.claim.lock_token); }
+    catch (error) {
+      if (!fs.existsSync(lockFile)) {
+        try { restoreQuarantinedLock(quarantine, lockFile, journalDir); } catch (_) {}
+      }
+      throw error;
+    }
+    const checked = lockSnapshot(quarantine);
+    if (!samePinnedLock(quarantined, checked)) throw storeError('SELF_LEARNING_LOCKED', 'journal quarantine changed before removal');
+    guard.verify();
+    fs.unlinkSync(quarantine);
+    fsyncDirectoryBestEffort(storeDir);
+  }
+  removeLocalClaim(storeDir, claimFile, state, guard);
+}
+
+function recoverLocalDeadLock(lockFile, journalDir, observed, timeoutMs) {
+  const storeDir = path.dirname(journalDir);
+  const claimFile = path.join(storeDir, LOCK_RECOVERY_CLAIM_FILE_NAME);
+  const { acquireGuard } = require('./self-learning-local-recovery-guard');
+  let guard;
+  try { guard = acquireGuard(storeDir, Math.max(0, timeoutMs)); }
+  catch (error) {
+    if (error && error.code === 'SELF_LEARNING_LOCKED') return false;
+    throw storeError('SELF_LEARNING_RECOVERY_UNAVAILABLE', 'local recovery guard could not be safely acquired', error);
+  }
+  try {
+    if (fs.existsSync(claimFile)) {
+      const existing = readLocalRecoveryClaim(claimFile, guard);
+      if (!existing) return false; // Legacy claim lacks the recoverer identity.
+      finishLocalRecovery(lockFile, journalDir, existing, guard);
+      return true;
+    }
+    if (!observed) return false;
+    const confirmed = inspectExistingLock(lockFile);
+    if (!sameLockSnapshot(observed.snapshot, confirmed.snapshot)
+        || !isProcessDefinitelyDead(confirmed.lock.pid)) return false;
+    const token = crypto.randomBytes(16).toString('hex');
+    const id = confirmed.snapshot.identity;
+    const claim = {
+      schema_version: LOCAL_RECOVERY_CLAIM_SCHEMA,
+      recovery_token: token,
+      guard_identity: guard.identity,
+      lock_identity: { dev: id.dev, ino: id.ino, size: id.size, mtimeMs: id.mtimeMs, birthtimeMs: id.birthtimeMs },
+      lock_hash: crypto.createHash('sha256').update(confirmed.snapshot.bytes).digest('hex'),
+      lock_pid: confirmed.lock.pid,
+      lock_token: confirmed.lock.token,
+    };
+    const stage = path.join(storeDir, `.journal-local-claim-${token}.tmp`);
+    let fd;
+    try {
+      fd = fs.openSync(stage, 'wx', 0o600);
+      fs.writeFileSync(fd, `${JSON.stringify(claim, null, 2)}\n`); fs.fsyncSync(fd); fs.closeSync(fd); fd = undefined;
+      guard.verify();
+      fs.linkSync(stage, claimFile);
+      fs.unlinkSync(stage);
+      fsyncDirectoryBestEffort(storeDir);
+    } catch (error) {
+      if (error && ['EEXIST', 'ENOENT'].includes(error.code)) return false;
+      throw error;
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
+      try { fs.unlinkSync(stage); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    const published = readLocalRecoveryClaim(claimFile, guard);
+    if (!published || published.claim.recovery_token !== token) throw storeError('SELF_LEARNING_LOCKED', 'local recovery claim publication changed');
+    finishLocalRecovery(lockFile, journalDir, published, guard);
+    return true;
+  } finally { guard.release(); }
 }
 
 function emptyJournalView() {
@@ -676,9 +831,47 @@ function acquireJournalLock(storeDir, options = {}) {
   const deadline = Date.now() + retryTimeoutMs;
   let attempt = 0;
   let lastExistingError = null;
+  const stagingFile = path.join(path.dirname(journalDir), `.journal-lock-${token}.tmp`);
+  let stagingDescriptor;
+  let stagingIdentity;
+  try {
+    // Publish only complete lock bytes: a process killed while preparing the
+    // file leaves an unreferenced staging file, not an ownerless LOCK.json.
+    stagingDescriptor = fs.openSync(stagingFile, 'wx', 0o600);
+    const stat = fs.fstatSync(stagingDescriptor, { bigint: true });
+    stagingIdentity = { dev: stat.dev, ino: stat.ino };
+    fs.writeFileSync(stagingDescriptor, `${JSON.stringify(lock, null, 2)}\n`, 'utf8');
+    fs.fsyncSync(stagingDescriptor);
+    fs.closeSync(stagingDescriptor);
+    stagingDescriptor = undefined;
+    fsyncDirectoryBestEffort(path.dirname(journalDir));
+  } catch (error) {
+    if (stagingDescriptor !== undefined) {
+      try { fs.closeSync(stagingDescriptor); } catch (_) {}
+    }
+    if (stagingIdentity) {
+      try {
+        const stat = fs.lstatSync(stagingFile, { bigint: true });
+        if (stat.dev === stagingIdentity.dev && stat.ino === stagingIdentity.ino) fs.rmSync(stagingFile);
+      } catch (_) {}
+    }
+    throw storeError('SELF_LEARNING_LOCK_FAILED', `failed to prepare journal lock at ${lockFile}`, error);
+  }
+  try {
   while (true) {
     if (fs.existsSync(recoveryClaimFile)) {
+      const localRecovery = require('./self-learning-local-recovery-guard');
+      if (localRecovery.isEnabledForStore(path.dirname(journalDir))) {
+        try {
+          if (recoverLocalDeadLock(lockFile, journalDir, null, Math.max(0, deadline - Date.now()))) continue;
+        } catch (error) {
+          if (error && ['SELF_LEARNING_LOCK_CORRUPT', 'SELF_LEARNING_RECOVERY_UNAVAILABLE'].includes(error.code)) {
+            lastExistingError = error;
+          }
+        }
+      }
       if (Date.now() >= deadline) {
+        if (lastExistingError) throw lastExistingError;
         throw storeError(
           'SELF_LEARNING_LOCKED',
           `self-learning journal lock recovery is already claimed: ${lockFile}`
@@ -688,30 +881,37 @@ function acquireJournalLock(storeDir, options = {}) {
       attempt += 1;
       continue;
     }
-    let descriptor;
-    let createdIdentity;
+    let published = false;
     try {
-      descriptor = fs.openSync(lockFile, 'wx', 0o600);
-      const stat = fs.fstatSync(descriptor);
-      createdIdentity = { dev: stat.dev, ino: stat.ino };
-      fs.writeFileSync(descriptor, `${JSON.stringify(lock, null, 2)}\n`, 'utf8');
-      fs.fsyncSync(descriptor);
-      fs.closeSync(descriptor);
-      descriptor = undefined;
+      fs.linkSync(stagingFile, lockFile);
+      published = true;
       fsyncDirectoryBestEffort(journalDir);
+      // Recovery may claim a previous owner after our pre-check. Do not enter
+      // while that claim is live; remove only the exact lock we just linked.
+      if (fs.existsSync(recoveryClaimFile)) {
+        const stat = fs.lstatSync(lockFile, { bigint: true });
+        if (stat.dev !== stagingIdentity.dev || stat.ino !== stagingIdentity.ino) {
+          throw storeError('SELF_LEARNING_LOCK_OWNERSHIP', 'journal lock changed during recovery');
+        }
+        fs.rmSync(lockFile);
+        fsyncDirectoryBestEffort(journalDir);
+        published = false;
+        continue;
+      }
       break;
     } catch (error) {
-      if (descriptor !== undefined) {
-        try { fs.closeSync(descriptor); } catch (_) {}
+      if (!published && error && UNSUPPORTED_LINK_CODES.has(error.code)) {
+        throw storeError('SELF_LEARNING_LOCK_UNSUPPORTED_FS',
+          `journal locking requires filesystem hard-link support at ${lockFile}`, error);
       }
-      const transientOpenRace = !createdIdentity
+      const transientOpenRace = !published
         && error
         && TRANSIENT_LOCK_OPEN_CODES.has(error.code);
       if (!error || (error.code !== 'EEXIST' && !transientOpenRace)) {
-        if (createdIdentity) {
+        if (published) {
           try {
-            const stat = fs.lstatSync(lockFile);
-            if (stat.dev === createdIdentity.dev && stat.ino === createdIdentity.ino) {
+            const stat = fs.lstatSync(lockFile, { bigint: true });
+            if (stat.dev === stagingIdentity.dev && stat.ino === stagingIdentity.ino) {
               fs.rmSync(lockFile);
               fsyncDirectoryBestEffort(journalDir);
             }
@@ -743,7 +943,11 @@ function acquireJournalLock(storeDir, options = {}) {
         const acquiredAt = Date.parse(observed.lock.acquired_at);
         const isOld = Number.isFinite(acquiredAt) && Date.now() - acquiredAt >= staleLockAgeMs;
         if (isOld && isProcessDefinitelyDead(observed.lock.pid)) {
-          if (recoverDeadLock(lockFile, journalDir, observed)) continue;
+          const localRecovery = require('./self-learning-local-recovery-guard');
+          if (!localRecovery.isEnabledForStore(path.dirname(journalDir))) {
+            lastExistingError = storeError('SELF_LEARNING_RECOVERY_UNAVAILABLE',
+              'journal recovery requires a verified device-local capability');
+          } else if (recoverLocalDeadLock(lockFile, journalDir, observed, Math.max(0, deadline - Date.now()))) continue;
         }
       } catch (inspectionError) {
         if (inspectionError && inspectionError.code === 'ENOENT') continue;
@@ -751,7 +955,7 @@ function acquireJournalLock(storeDir, options = {}) {
       }
 
       if (Date.now() >= deadline) {
-        if (lastExistingError && lastExistingError.code === 'SELF_LEARNING_LOCK_CORRUPT') {
+        if (lastExistingError && ['SELF_LEARNING_LOCK_CORRUPT', 'SELF_LEARNING_RECOVERY_UNAVAILABLE'].includes(lastExistingError.code)) {
           throw lastExistingError;
         }
         throw storeError(
@@ -763,6 +967,15 @@ function acquireJournalLock(storeDir, options = {}) {
       sleepForLockRetry(attempt, deadline);
       attempt += 1;
     }
+  }
+  } finally {
+    try {
+      const stat = fs.lstatSync(stagingFile, { bigint: true });
+      if (stat.dev === stagingIdentity.dev && stat.ino === stagingIdentity.ino) {
+        fs.rmSync(stagingFile);
+        fsyncDirectoryBestEffort(path.dirname(journalDir));
+      }
+    } catch (_) {}
   }
   const persisted = readLockFile(lockFile);
   if (persisted.token !== token) {
@@ -845,27 +1058,42 @@ function normalizeAppendOptions(options) {
 
 function writeRecordAtomically(journalDir, record, lockToken) {
   const finalFile = path.join(journalDir, recordFileName(record.sequence, record.record_hash));
-  const temporary = path.join(journalDir, `.record-${lockToken}.tmp`);
+  // A killed writer may leave an incomplete file. Keep staging outside the
+  // validated journal so an orphan cannot prevent a later verified replay.
+  const stagingDir = path.dirname(journalDir);
+  const temporary = path.join(stagingDir, `.journal-record-${lockToken}.tmp`);
   let descriptor;
+  let createdIdentity;
   try {
     if (fs.existsSync(finalFile)) {
       throw storeError('SELF_LEARNING_CONFLICT', `journal record file already exists: ${finalFile}`);
     }
     descriptor = fs.openSync(temporary, 'wx', 0o600);
+    const stat = fs.fstatSync(descriptor, { bigint: true });
+    createdIdentity = { dev: stat.dev, ino: stat.ino };
     fs.writeFileSync(descriptor, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
     fs.fsyncSync(descriptor);
     fs.closeSync(descriptor);
     descriptor = undefined;
+    fsyncDirectoryBestEffort(stagingDir);
+    assertNoLinks(stagingDir);
     assertNoLinks(journalDir);
     fs.renameSync(temporary, finalFile);
     fsyncDirectoryBestEffort(journalDir);
+    fsyncDirectoryBestEffort(stagingDir);
     return finalFile;
   } catch (error) {
     if (descriptor !== undefined) {
       try { fs.closeSync(descriptor); } catch (_) {}
     }
-    if (fs.existsSync(temporary)) {
-      try { fs.rmSync(temporary, { force: true }); } catch (_) {}
+    if (createdIdentity) {
+      try {
+        const stat = fs.lstatSync(temporary, { bigint: true });
+        if (stat.isFile() && !stat.isSymbolicLink()
+            && stat.dev === createdIdentity.dev && stat.ino === createdIdentity.ino) {
+          fs.rmSync(temporary);
+        }
+      } catch (_) {}
     }
     throw error;
   }
@@ -1164,6 +1392,42 @@ function assertBuiltPromptReceiptRecord(input, spec, receipt, sourceEventId, occ
   }
 }
 
+function preparePromptReceipt(journal, spec, buildRecordInput) {
+  const stream = promptReceiptsForStream(journal.records, spec);
+  const matches = stream.filter(({ receipt }) => receipt.replay_ref === spec.replay_ref);
+  if (matches.length > 1) {
+    throw storeError('SELF_LEARNING_CORRUPT', 'prompt replay reference has duplicate receipts');
+  }
+  const existing = matches[0] || null;
+  const receipt = existing ? existing.receipt : canonicalize({
+    schema_version: PROMPT_RECEIPT_SCHEMA_VERSION,
+    stream_ref: spec.stream_ref,
+    transcript_ref: spec.transcript_ref,
+    replay_ref: spec.replay_ref,
+    occurrence: stream.length + 1,
+  });
+  const sourceEventId = promptReceiptSourceEventId(receipt);
+  const occurredAt = existing ? existing.record.occurred_at : new Date().toISOString();
+  const built = buildRecordInput({
+    source_event_id: sourceEventId,
+    occurred_at: occurredAt,
+    occurrence: receipt.occurrence,
+    receipt,
+  });
+  assertBuiltPromptReceiptRecord(built, spec, receipt, sourceEventId, occurredAt);
+  const normalized = normalizeRecordInput(built);
+  if (existing) {
+    if (semanticIdentityHash(existing.record) !== semanticIdentityHash(normalized)) {
+      throw storeError(
+        'SELF_LEARNING_ID_CONFLICT',
+        `prompt receipt id conflict for ${sourceEventId}: normalized semantic content differs`
+      );
+    }
+    return { existing: existing.record, normalized, receipt };
+  }
+  return { existing: null, normalized, receipt };
+}
+
 /**
  * Allocate or replay a Claude prompt receipt under the journal's single lock.
  * The caller supplies only hashed transcript/replay references; the journal
@@ -1177,43 +1441,12 @@ function getOrAppendPromptReceipt(storeDir, input, buildRecordInput) {
   }
   return runJournalTransaction(storeDir, 'append:prompt-receipt', (lock) => {
     const journal = readJournalInternal(storeDir, { lockToken: lock.token });
-    const stream = promptReceiptsForStream(journal.records, spec);
-    const matches = stream.filter(({ receipt }) => receipt.replay_ref === spec.replay_ref);
-    if (matches.length > 1) {
-      throw storeError('SELF_LEARNING_CORRUPT', 'prompt replay reference has duplicate receipts');
-    }
-    const existing = matches[0] || null;
-    const receipt = existing ? existing.receipt : canonicalize({
-      schema_version: PROMPT_RECEIPT_SCHEMA_VERSION,
-      stream_ref: spec.stream_ref,
-      transcript_ref: spec.transcript_ref,
-      replay_ref: spec.replay_ref,
-      occurrence: stream.length + 1,
-    });
-    const sourceEventId = promptReceiptSourceEventId(receipt);
-    const occurredAt = existing ? existing.record.occurred_at : new Date().toISOString();
-    const built = buildRecordInput({
-      source_event_id: sourceEventId,
-      occurred_at: occurredAt,
-      occurrence: receipt.occurrence,
-      receipt,
-    });
-    assertBuiltPromptReceiptRecord(built, spec, receipt, sourceEventId, occurredAt);
-    const normalized = normalizeRecordInput(built);
+    const { existing, normalized, receipt } = preparePromptReceipt(journal, spec, buildRecordInput);
     if (existing) {
-      if (semanticIdentityHash(existing.record) !== semanticIdentityHash(normalized)) {
-        throw storeError(
-          'SELF_LEARNING_ID_CONFLICT',
-          `prompt receipt id conflict for ${sourceEventId}: normalized semantic content differs`
-        );
-      }
       return {
         changed: false,
-        record: existing.record,
-        file: path.join(
-          resolveJournalDir(storeDir),
-          recordFileName(existing.record.sequence, existing.record.record_hash)
-        ),
+        record: existing,
+        file: path.join(resolveJournalDir(storeDir), recordFileName(existing.sequence, existing.record_hash)),
         journal,
         receipt,
       };
@@ -1226,6 +1459,60 @@ function getOrAppendPromptReceipt(storeDir, input, buildRecordInput) {
     // general writer wait.
     retry_timeout_ms: PROMPT_RECEIPT_LOCK_RETRY_TIMEOUT_MS,
   });
+}
+
+/**
+ * Process ordered prompt receipts under one lock. Individual record publishes
+ * are durable commits, not an atomic batch: callers must retry the whole
+ * batch after an error and acknowledge it only after the final full readback.
+ * The builders must be trusted native event adapters, as with the single API.
+ */
+function getOrAppendPromptReceipts(storeDir, items) {
+  if (!Array.isArray(items) || items.length === 0 || items.length > 1000) {
+    throw storeError('SELF_LEARNING_INVALID_RECEIPT', 'prompt receipt batch must contain 1 to 1000 items');
+  }
+  const entries = items.map((item) => {
+    if (!isPlainObject(item) || typeof item.buildRecordInput !== 'function') {
+      throw storeError('SELF_LEARNING_INVALID_RECEIPT', 'prompt receipt batch builder is required');
+    }
+    return { spec: normalizePromptReceiptSpec(item.spec), buildRecordInput: item.buildRecordInput };
+  });
+  return runJournalTransaction(storeDir, 'append:prompt-receipts', (lock) => {
+    const original = readJournalInternal(storeDir, { lockToken: lock.token });
+    const journal = { ...original, records: [...original.records] };
+    const results = [];
+    for (const { spec, buildRecordInput } of entries) {
+      const { existing, normalized, receipt } = preparePromptReceipt(journal, spec, buildRecordInput);
+      if (existing) {
+        results.push({ changed: false, record: existing, receipt });
+        continue;
+      }
+      const semantics = validateRecordSemantics(journal.records);
+      if (semantics.tombstoned.has(normalized.entity_id)) {
+        throw storeError('SELF_LEARNING_TOMBSTONED', `cannot resurrect tombstoned entity: ${normalized.entity_id}`);
+      }
+      const record = createRecord(normalized, journal.revision + 1, journal.head_hash);
+      validateRecordSemantics([...journal.records, record]);
+      writeRecordAtomically(resolveJournalDir(storeDir), record, lock.token);
+      journal.records.push(record);
+      journal.revision = record.sequence;
+      journal.head_hash = record.record_hash;
+      results.push({ changed: true, record, receipt });
+    }
+    const readback = readJournalInternal(storeDir, { lockToken: lock.token });
+    if (readback.revision !== journal.revision || readback.head_hash !== journal.head_hash) {
+      throw storeError('SELF_LEARNING_READBACK_FAILED', 'prompt receipt batch readback does not match committed journal');
+    }
+    for (const result of results) {
+      const persisted = readback.records[result.record.sequence - 1];
+      if (!persisted || persisted.record_hash !== result.record.record_hash) {
+        throw storeError('SELF_LEARNING_READBACK_FAILED', 'prompt receipt batch record does not match committed record');
+      }
+      result.record = persisted;
+      result.file = path.join(resolveJournalDir(storeDir), recordFileName(persisted.sequence, persisted.record_hash));
+    }
+    return { results, journal: readback };
+  }, { retry_timeout_ms: PROMPT_RECEIPT_LOCK_RETRY_TIMEOUT_MS });
 }
 
 function projectJournal(storeDir) {
@@ -1306,6 +1593,7 @@ module.exports = {
   appendRecord,
   getOrAppendBehaviorEventReceipt,
   getOrAppendPromptReceipt,
+  getOrAppendPromptReceipts,
   projectJournal,
   readJournal,
   recordFileName,

@@ -63,8 +63,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"C:/Users/Administrator/.claude/skills/continuous-learning/hooks/prompt-submit.js\" || true",
-            "timeout": 5
+            "command": "node \"C:/Users/Administrator/.claude/skills/continuous-learning/hooks/prompt-submit.js\"",
+            "timeout": 5,
+            "onFailure": "block"
           }
         ]
       }

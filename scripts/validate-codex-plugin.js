@@ -164,7 +164,12 @@ function validateRunHookWrapper(file, label, options = {}) {
     if (!content.includes(`'${code}'`)) fail(`${label} missing fixed diagnostic code ${code}`);
   }
   if (!content.includes('process.exitCode = 0;') || content.includes('process.exit(')) {
-    fail(`${label} must fail open with exit code 0 for every wrapper failure`);
+    fail(`${label} must default to fail-open without immediate process exit`);
+  }
+  const expectedProjection = options.codex === true ? 'true' : 'false';
+  if (!content.includes(`const IS_CODEX_PROJECTION = ${expectedProjection};`)
+      || !content.includes("if (scriptName === 'prompt-submit.js' && !IS_CODEX_PROJECTION) process.exitCode = 1;")) {
+    fail(`${label} must propagate Claude prompt wrapper failures to the host`);
   }
   if (!content.includes('function inferRuntime()')) {
     fail(`${label} must infer Claude/Codex runtime`);

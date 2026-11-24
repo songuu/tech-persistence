@@ -29,7 +29,8 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.js\" prompt-submit.js",
             "async": false,
             "timeout": 5,
-            "statusMessage": "Recalling relevant memory"
+            "statusMessage": "Recalling relevant memory",
+            "onFailure": "block"
           }
         ]
       }

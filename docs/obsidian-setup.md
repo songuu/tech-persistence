@@ -44,6 +44,12 @@
 - **Obsidian Sync / iCloud / Dropbox 用户**：这些工具**不读** vault 内的 ignore 文件，必须在各自 App 设置里手动排除同样的 `.agent-runs/`、`*.jsonl`、`archive/`、`*.bak.*`、`.obsidian/workspace*.json`（iCloud/Dropbox 另需排除 `.git/`）。
 - 若必须跨设备聚合遥测：按设备分文件 `telemetry/<device-id>/*.jsonl` 再离线聚合，绝不双向同步同一文件。
 
+### 本机自学习日志的锁恢复
+
+自动恢复只适用于**仅由当前设备使用、不会同步或共享的 homunculus 根目录**。在 Windows 固定卷上，且当前 Node.js 能加载 `node:sqlite` 时，可在该设备的用户环境中将 `TP_SELF_LEARNING_LOCAL_RECOVERY_ROOT` 设为该根目录的绝对路径；重启启动 Claude 或 Codex 的进程后生效。这个声明不是跨设备锁，不要把它指向 Obsidian Sync、云盘同步副本或网络共享目录。
+
+恢复者意外退出后，后续进程可继续处理新版恢复标记。旧版不含恢复者身份的标记、仍存活或已复用的 PID、未声明目录以及能力不可验证的环境会保持安全阻塞；不要直接删除这些锁或标记。队列状态可通过 `node scripts/lib/prompt-receipt-recovery.js status` 检查。
+
 ### 铁律 3：portability 只在「克隆同一 git remote」时成立
 
 Memory v5 用 git remote URL 的 hash 作项目身份 key，所以只有当多台设备**克隆的是同一 origin URL** 时，知识才落在同一项目目录、跨机器可见。无 remote 的本地仓库会退化为 git-root / cwd 路径 hash，换设备即漂移，不要依赖其跨设备 portability。

@@ -12,6 +12,7 @@ const { detectProjectIdentity } = require('./lib/memory-v5');
 const { detectStableProjectIdentity } = require('./lib/project-identity');
 const { executeLearningAction } = require('./lib/self-learning-service');
 const { readJournal, resolveStoreDir } = require('./lib/self-learning-store');
+const { hasPromptReceiptWorkerFailure } = require('./lib/prompt-receipt-outbox');
 
 const SCRIPTS_DIR = __dirname;
 const SECRET = 'runtime-secret-sentinel-92387';
@@ -52,9 +53,30 @@ function runtimeEnv(baseDir, overrides = {}) {
 }
 
 function runHook(script, options = {}) {
+  const waitForPromptWorkers = script === 'prompt-submit.js' || script === 'inject-context.js';
+  // A hook returns as soon as its durable event is queued. Retain only this
+  // test process until the detached workers it launched have exited, so temp
+  // fixtures are never removed while a worker still owns their files.
+  const wrapper = `
+    const childProcess = require('node:child_process');
+    const originalSpawn = childProcess.spawn;
+    const workers = [];
+    childProcess.spawn = (...args) => {
+      const worker = originalSpawn(...args);
+      workers.push(worker);
+      return worker;
+    };
+    require(process.argv[1]).main();
+    for (const worker of workers) {
+      worker.ref();
+      worker.once('error', () => {});
+    }
+  `;
   return spawnSync(
     process.execPath,
-    [path.join(SCRIPTS_DIR, script), ...(options.args || [])],
+    waitForPromptWorkers
+      ? ['-e', wrapper, path.join(SCRIPTS_DIR, script), ...(options.args || [])]
+      : [path.join(SCRIPTS_DIR, script), ...(options.args || [])],
     {
       cwd: options.cwd,
       env: runtimeEnv(options.baseDir, options.env),
@@ -70,6 +92,15 @@ function assertFailOpenDiagnostic(result, secret = SECRET) {
   assert(result.stderr.length > 0, 'expected a bounded diagnostic');
   assert(result.stderr.length <= 512, `diagnostic exceeded bound: ${result.stderr.length}`);
   assert(!result.stderr.includes(secret), 'diagnostic leaked payload/config value');
+}
+
+function assertPromptBlocked(result, secret = SECRET) {
+  assert.strictEqual(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.strictEqual(output.decision, 'block');
+  assert.match(output.reason, /retry/i);
+  assert.strictEqual(output.hookSpecificOutput.suppressOriginalPrompt, true);
+  assert(!result.stdout.includes(secret));
 }
 
 function writeConfig(baseDir, selfLearning) {
@@ -116,7 +147,7 @@ function writeMalformedJournal(baseDir, projectId) {
   );
 }
 
-test('real hooks fail open on strict config errors without leaking values or writing stores', () => {
+test('prompt blocks on invalid config while other hooks fail open without leaks or writes', () => {
   const { root, baseDir, workspace } = fixture();
   try {
     fs.writeFileSync(path.join(baseDir, 'config.json'), JSON.stringify({
@@ -137,7 +168,8 @@ test('real hooks fail open on strict config errors without leaking values or wri
         input: payloads[script],
       });
       assertFailOpenDiagnostic(result);
-      assert.strictEqual(result.stdout, '');
+      if (script === 'prompt-submit.js') assertPromptBlocked(result);
+      else assert.strictEqual(result.stdout, '');
     }
     assert.strictEqual(fs.existsSync(path.join(baseDir, 'projects')), false);
   } finally {
@@ -171,7 +203,7 @@ test('Stop real entry rejects every malformed policy shape before mode side effe
   }
 });
 
-test('normal entrypoint skips remain quiet', () => {
+test('missing prompt input blocks while unrelated hook skips remain quiet', () => {
   const { root, baseDir, workspace } = fixture();
   try {
     writeConfig(baseDir, {
@@ -184,9 +216,10 @@ test('normal entrypoint skips remain quiet', () => {
       runHook('inject-context.js', { baseDir, cwd: workspace }),
       runHook('evaluate-session.js', { baseDir, cwd: workspace, input: '' }),
     ];
-    for (const result of cases) {
+    for (const [index, result] of cases.entries()) {
       assert.strictEqual(result.status, 0, result.error && result.error.message || result.stderr);
-      assert.strictEqual(result.stdout, '');
+      if (index === 0) assertPromptBlocked(result);
+      else assert.strictEqual(result.stdout, '');
       assert.strictEqual(result.stderr, '');
     }
   } finally {
@@ -244,7 +277,7 @@ test('real prompt stdin enforces 64 KiB total before parse, recall, or journal w
     });
     assertFailOpenDiagnostic(result);
     assert.match(result.stderr, /hook-payload-too-large/);
-    assert.strictEqual(result.stdout, '');
+    assertPromptBlocked(result);
     assert.strictEqual(fs.existsSync(path.join(baseDir, 'projects')), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -301,7 +334,8 @@ test('real Claude hooks reject payload cwd that conflicts with managed project a
       });
       assertFailOpenDiagnostic(result);
       assert.match(result.stderr, /project-identity-mismatch/);
-      assert.strictEqual(result.stdout, '');
+      if (script === 'prompt-submit.js') assertPromptBlocked(result);
+      else assert.strictEqual(result.stdout, '');
     }
     assert.strictEqual(fs.existsSync(path.join(baseDir, 'projects')), false);
   } finally {
@@ -332,8 +366,22 @@ test('capture and store failures are diagnostic but never block real hook proces
         cwd: workspace,
         input: payloads[script],
       });
-      assertFailOpenDiagnostic(result);
-      assert.strictEqual(result.stdout, '');
+      if (script === 'prompt-submit.js') {
+        assert.strictEqual(result.status, 0);
+        const outbox = path.join(resolveStoreDir(baseDir, project.id), 'prompt-outbox');
+        assert.strictEqual(hasPromptReceiptWorkerFailure(outbox), true);
+        assert.strictEqual(fs.readdirSync(path.join(outbox, 'jobs')).length, 1);
+      } else {
+        assertFailOpenDiagnostic(result);
+      }
+      if (script === 'inject-context.js') {
+        const output = JSON.parse(result.stdout);
+        assert.match(output.systemMessage, /Prompt event recovery is pending/);
+        assert(!result.stdout.includes(SECRET));
+        assert(!result.stdout.includes(baseDir));
+      } else {
+        assert.strictEqual(result.stdout, '');
+      }
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

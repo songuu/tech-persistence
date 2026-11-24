@@ -9,6 +9,9 @@ const { spawn } = require('child_process');
 
 const store = require('./lib/self-learning-store');
 const { detectStableProjectIdentity } = require('./lib/project-identity');
+process.env.TP_SELF_LEARNING_LOCAL_RECOVERY_ROOT = os.tmpdir();
+const localRecovery = require('./lib/self-learning-local-recovery-guard')
+  .isEnabledForStore(path.join(os.tmpdir(), 'test-recovery-capability'));
 
 if (process.argv[2] === '--worker') {
   const storeDir = process.argv[3];
@@ -98,7 +101,25 @@ function attempt(storeDir, value, startAt, mode = 'conflict') {
 
 function attemptPromptHook(baseDir, workspace, payload) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(__dirname, 'prompt-submit.js')], {
+    // The hook returns after enqueueing, so keep this test's wrapper alive
+    // until every worker it launched has exited before asserting and cleanup.
+    const wrapper = `
+      const childProcess = require('node:child_process');
+      const originalSpawn = childProcess.spawn;
+      const workers = [];
+      childProcess.spawn = (...args) => {
+        const worker = originalSpawn(...args);
+        workers.push(worker);
+        return worker;
+      };
+      require(process.argv[1]).main();
+      for (const worker of workers) {
+        worker.ref();
+        worker.once('error', () => { process.exitCode = 1; });
+        worker.once('exit', (code) => { if (code !== 0) process.exitCode = 1; });
+      }
+    `;
+    const child = spawn(process.execPath, ['-e', wrapper, path.join(__dirname, 'prompt-submit.js')], {
       cwd: workspace,
       env: {
         ...process.env,
@@ -257,17 +278,15 @@ async function main() {
       attemptRecovery(recoveryStoreDir, recoveryStart, 'left'),
       attemptRecovery(recoveryStoreDir, recoveryStart, 'right'),
     ]);
-    assert.strictEqual(
-      recoveryResults.filter((result) => result.code === 0).length,
-      2,
-      JSON.stringify(recoveryResults)
-    );
-    assert.strictEqual(fs.existsSync(path.join(recoveryJournalDir, store.LOCK_FILE_NAME)), false);
-    assert.strictEqual(
-      fs.existsSync(path.join(recoveryStoreDir, store.LOCK_RECOVERY_CLAIM_FILE_NAME)),
-      false
-    );
-    assert.strictEqual(store.readJournal(recoveryStoreDir).revision, 0);
+    if (localRecovery) {
+      assert.strictEqual(recoveryResults.filter((result) => result.code === 0).length, 2, JSON.stringify(recoveryResults));
+      assert.strictEqual(fs.existsSync(path.join(recoveryJournalDir, store.LOCK_FILE_NAME)), false);
+      assert.strictEqual(fs.existsSync(path.join(recoveryStoreDir, store.LOCK_RECOVERY_CLAIM_FILE_NAME)), false);
+      assert.strictEqual(store.readJournal(recoveryStoreDir).revision, 0);
+    } else {
+      assert(recoveryResults.every((result) => result.code === 2 && result.stderr.includes('SELF_LEARNING_RECOVERY_UNAVAILABLE')));
+      assert.strictEqual(fs.existsSync(path.join(recoveryJournalDir, store.LOCK_FILE_NAME)), true);
+    }
 
     const hookRoot = path.join(baseDir, 'real-hook-race');
     const hookBaseDir = path.join(hookRoot, 'homunculus');

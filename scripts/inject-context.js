@@ -66,6 +66,16 @@ function runtimeDiagnostic(reason, error = null) {
   } catch {}
 }
 
+function recoverPendingPromptReceipts(baseDir, projectId, launch) {
+  const { resolveStoreDir } = require('./lib/self-learning-store');
+  const outbox = path.join(resolveStoreDir(baseDir, projectId), 'prompt-outbox');
+  if (!fs.existsSync(outbox)) return { status: 'absent' };
+  const { hasPromptReceiptWorkerFailure } = require('./lib/prompt-receipt-outbox');
+  const pending = hasPromptReceiptWorkerFailure(outbox);
+  const start = launch || require('./lib/prompt-receipt-worker').startPromptReceiptWorker;
+  return { ...start(baseDir, projectId), pending };
+}
+
 function readSessionStartInputBounded(maximumBytes = MAX_SESSION_START_INPUT_BYTES) {
   const chunks = [];
   const buffer = Buffer.allocUnsafe(4096);
@@ -724,6 +734,19 @@ function main(options = {}) {
   const cwd = authority.trustedCwd;
   const project = detectProjectIdentity(cwd);
   const learningProjectId = authority.projectId;
+  let promptRecoveryNotice = false;
+  if (policy.enabled && policy.writer_enabled && policy.mode !== 'off') {
+    try {
+      const recovery = recoverPendingPromptReceipts(baseDir, learningProjectId);
+      promptRecoveryNotice = recovery.pending || recovery.status === 'failed';
+      if (recovery.status === 'failed') {
+        runtimeDiagnostic('prompt-recovery-launch-failed');
+      }
+    } catch (error) {
+      promptRecoveryNotice = true;
+      runtimeDiagnostic('prompt-recovery-launch-failed', error);
+    }
+  }
   const sessionId = options.sessionId || invocation.sessionId || null;
   const taskRef = options.taskRef || invocation.taskRef || null;
   const now = options.now || invocation.now;
@@ -889,6 +912,9 @@ function main(options = {}) {
   }
 
   if (sections.length === 0) {
+    if (promptRecoveryNotice) {
+      console.log(JSON.stringify({ systemMessage: 'Prompt event recovery is pending; inspect the self-learning queue.' }));
+    }
     return { status: 'skipped', reason: 'no-context' };
   }
 
@@ -919,6 +945,7 @@ function main(options = {}) {
   );
 
   const output = JSON.stringify({
+    ...(promptRecoveryNotice ? { systemMessage: 'Prompt event recovery is pending; inspect the self-learning queue.' } : {}),
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
       additionalContext: context
@@ -939,6 +966,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  recoverPendingPromptReceipts,
   detectPendingPrototype,
   detectPendingHandoff,
   detectActiveSprintTags,

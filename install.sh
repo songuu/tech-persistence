@@ -136,13 +136,14 @@ install_hooks() {
   local hooks_dir="${CLAUDE_HOME}/skills/continuous-learning/hooks"
   mkdir -p "$hooks_dir"
 
+  # Publish dependencies before entrypoints that may require them.
+  install_hook_libs "$hooks_dir"
+
   while IFS= read -r script_name; do
     [[ -n "$script_name" ]] || continue
     cp "${SCRIPT_DIR}/scripts/${script_name}" "$hooks_dir/${script_name}"
     log_ok "hook ${script_name}"
   done < <(classic_hook_scripts)
-
-  install_hook_libs "$hooks_dir"
 
   chmod +x "$hooks_dir"/*.js
   chmod +x "$hooks_dir"/lib/*.js
@@ -451,6 +452,21 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+if [[ "$COMMAND" == --user || "$COMMAND" == --project || "$COMMAND" == --all || "$COMMAND" == --hooks-only ]]; then
+  version_output="$(claude --version 2>/dev/null)" || {
+    echo "[FAIL] Claude Code >= 2.1.295 is required for reliable prompt hooks; install or upgrade Claude Code." >&2
+    exit 1
+  }
+  if [[ ! "$version_output" =~ ^([0-9]{1,6})\.([0-9]{1,6})\.([0-9]{1,6})([[:space:]]+\(Claude[[:space:]]Code\))?$ ]]; then
+    echo "[FAIL] Cannot verify Claude Code version; Claude Code >= 2.1.295 is required for reliable prompt hooks." >&2
+    exit 1
+  fi
+  major=$((10#${BASH_REMATCH[1]})); minor=$((10#${BASH_REMATCH[2]})); patch=$((10#${BASH_REMATCH[3]}))
+  if (( major < 2 || (major == 2 && minor < 1) || (major == 2 && minor == 1 && patch < 295) )); then
+    echo "[FAIL] Claude Code >= 2.1.295 is required for reliable prompt hooks; upgrade Claude Code." >&2
+    exit 1
+  fi
+fi
 require_node
 configure_shared_homunculus
 
@@ -467,6 +483,14 @@ case "$COMMAND" in
     install_project
     ;;
   --hooks-only)
+    # Upgrade only already-registered classic prompt hooks. Project settings
+    # are optional and must not be created by a hook-only update. Set the
+    # failure policy before touching runtime files to avoid a fail-open gap.
+    for settings_path in "${CLAUDE_HOME}/settings.json" "${PWD}/.claude/settings.json"; do
+      if [[ -f "$settings_path" ]]; then
+        node "${SCRIPT_DIR}/scripts/merge-claude-settings-hooks.js" "$settings_path" --prompt-only
+      fi
+    done
     install_hooks
     install_homunculus
     log_ok "Hook 脚本已更新"

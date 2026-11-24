@@ -179,18 +179,23 @@ test('scoreEntry rewards sprint-tag match on topic', () => {
 });
 
 test('scoreEntry recency component decays', () => {
+  const now = Date.now();
+  const utcDateDaysAgo = (days) => new Date(now - days * 24 * 60 * 60 * 1000)
+    .toISOString().slice(0, 10);
+  const recentDate = utcDateDaysAgo(3);
   const recent = {
     id: 'r',
     topic: 'workflow',
-    date: '2026-05-13',
+    date: recentDate,
     confidence: 0.5,
-    line: '- 2026-05-13 [0.5] foo',
+    line: `- ${recentDate} [0.5] foo`,
   };
-  const old = { ...recent, date: '2025-01-01' };
+  const old = { ...recent, date: utcDateDaysAgo(400) };
   const q = tokenizeQuery('foo workflow');
   const recentScore = scoreEntry(recent, q, {});
   const oldScore = scoreEntry(old, q, {});
-  assert.ok(recentScore.components.recency > oldScore.components.recency);
+  assert.strictEqual(recentScore.components.recency, 1);
+  assert.strictEqual(oldScore.components.recency, 0.05);
 });
 
 // ---------- End-to-end searchMemory ----------

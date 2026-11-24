@@ -61,6 +61,15 @@ try {
     safeValidation.error && safeValidation.error.message || safeValidation.stderr
   );
 
+  const swallowedPromptWrapper = path.join(root, 'run-hook-swallowed-prompt.js');
+  fs.writeFileSync(swallowedPromptWrapper, safeWrapperSource.replace(
+    "if (scriptName === 'prompt-submit.js' && !IS_CODEX_PROJECTION) process.exitCode = 1;",
+    '// broken: failure was swallowed'
+  ));
+  const swallowedPromptValidation = validateWrapper(swallowedPromptWrapper);
+  assert.strictEqual(swallowedPromptValidation.status, 1);
+  assert.match(swallowedPromptValidation.stderr, /Claude prompt.*failure/);
+
   const extraAllowlistWrapper = path.join(root, 'run-hook-extra-allowlist.js');
   fs.writeFileSync(
     extraAllowlistWrapper,
@@ -108,7 +117,8 @@ try {
     "'use strict';",
     `process.stderr.write(${JSON.stringify(rawSecret)} + '\\n');`,
     "if (process.argv[2] === 'fail') { process.stdout.write('discard-me'); process.exit(9); }",
-    "process.stdout.write('hook-ok');",
+    "if (process.argv[2] === 'started') process.stdout.write(process.env.TP_PROMPT_HOOK_STARTED_AT_MS || 'missing');",
+    "else process.stdout.write(process.argv[2] === 'runtime' ? process.env.TECH_PERSISTENCE_RUNTIME : 'hook-ok');",
   ].join('\n'));
 
   const success = run(wrapper, ['prompt-submit.js', 'success']);
@@ -116,18 +126,70 @@ try {
   assert.strictEqual(success.stdout, 'hook-ok');
   assert.strictEqual(success.stderr, '', 'successful child raw stderr must be discarded');
 
+  const beforeStarted = Date.now();
+  const started = spawnSync(process.execPath, [wrapper, 'prompt-submit.js', 'started'], {
+    encoding: 'utf8', windowsHide: true,
+    env: { ...process.env, TECH_PERSISTENCE_RUNTIME: 'claude', TP_PROMPT_HOOK_STARTED_AT_MS: '1' },
+  });
+  const afterStarted = Date.now();
+  assert.strictEqual(started.status, 0);
+  const childStart = Number(started.stdout);
+  assert(Number.isSafeInteger(childStart) && childStart >= beforeStarted - 1000 && childStart <= afterStarted,
+    'wrapper must overwrite inherited start time with its own startup time');
+
   const failed = run(wrapper, ['prompt-submit.js', 'fail']);
-  assertFailOpen(failed);
+  assert.strictEqual(failed.status, 1, 'Claude prompt failure must reach host onFailure policy');
   assert.strictEqual(failed.stdout, '', 'failed child stdout must not escape the wrapper');
   assert.match(failed.stderr, /^\[run-hook\] CHILD_FAILED\n$/);
   assert(!failed.stderr.includes(rawSecret));
   assert(Buffer.byteLength(failed.stderr, 'utf8') <= 128);
+
+  const mixedEnvironment = { ...process.env, CLAUDE_PLUGIN_ROOT: root, CODEX_HOME: path.join(root, 'codex') };
+  delete mixedEnvironment.TECH_PERSISTENCE_RUNTIME;
+  const mixedSuccess = spawnSync(process.execPath, [wrapper, 'prompt-submit.js', 'runtime'], {
+    encoding: 'utf8', windowsHide: true, env: mixedEnvironment,
+  });
+  assert.strictEqual(mixedSuccess.stdout, 'claude', 'Claude plugin must win over inherited CODEX_HOME');
+  const mixedFailure = spawnSync(process.execPath, [wrapper, 'prompt-submit.js', 'fail'], {
+    encoding: 'utf8', windowsHide: true, env: mixedEnvironment,
+  });
+  assert.strictEqual(mixedFailure.status, 1, 'Claude plugin prompt failures must reach onFailure');
+
+  const codexWrapper = path.join(hookDir, 'codex-run-hook.js');
+  fs.writeFileSync(codexWrapper, safeWrapperSource.replace(
+    'const IS_CODEX_PROJECTION = false;', 'const IS_CODEX_PROJECTION = true;'
+  ));
+  const codexTiming = spawnSync(process.execPath, [codexWrapper, 'prompt-submit.js', 'started'], {
+    encoding: 'utf8', windowsHide: true,
+    env: { ...mixedEnvironment, TP_PROMPT_HOOK_STARTED_AT_MS: '1' },
+  });
+  assert.strictEqual(codexTiming.stdout, 'missing', 'Codex must not inherit the Claude timing hint');
+
+  fs.unlinkSync(path.join(hookDir, 'prompt-submit.js'));
+  const missingPrompt = run(wrapper, ['prompt-submit.js']);
+  assert.strictEqual(missingPrompt.status, 1);
+  assert.match(missingPrompt.stderr, /^\[run-hook\] CHILD_FAILED\n$/);
+  assert(!missingPrompt.stderr.includes(hookDir));
+
+  const codexPrompt = spawnSync(process.execPath, [codexWrapper, 'prompt-submit.js'], {
+    encoding: 'utf8', windowsHide: true,
+    env: { ...mixedEnvironment, TECH_PERSISTENCE_RUNTIME: 'claude' },
+  });
+  assertFailOpen(codexPrompt);
 
   const missingAllowed = run(wrapper, ['codex-lifecycle-evidence.js']);
   assertFailOpen(missingAllowed);
   assert.strictEqual(missingAllowed.stdout, '');
   assert.match(missingAllowed.stderr, /^\[run-hook\] CHILD_FAILED\n$/);
   assert(!missingAllowed.stderr.includes(hookDir));
+
+  fs.writeFileSync(path.join(hookDir, 'observe.js'),
+    "process.stdout.write(process.env.TP_PROMPT_HOOK_STARTED_AT_MS || 'missing');");
+  const nonPromptTiming = spawnSync(process.execPath, [wrapper, 'observe.js'], {
+    encoding: 'utf8', windowsHide: true,
+    env: { ...mixedEnvironment, TP_PROMPT_HOOK_STARTED_AT_MS: '1' },
+  });
+  assert.strictEqual(nonPromptTiming.stdout, 'missing', 'non-prompt hooks must not inherit the timing hint');
 
   fs.writeFileSync(path.join(hookDir, 'observe.js'), [
     "'use strict';",
